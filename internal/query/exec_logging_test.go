@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/queryrows"
@@ -48,6 +49,12 @@ type callerCancelledEngine struct {
 
 func (e *callerCancelledEngine) QueryContext(ctx context.Context, _ string, _ ...any) (queryrows.Rows, error) {
 	e.cancel()
+	// Like DuckDB, report the interrupt once the cancellation reaches the
+	// query: a shared panel run ends when its last caller leaves.
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+	}
 	if e.err != nil {
 		return nil, e.err
 	}

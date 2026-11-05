@@ -100,8 +100,8 @@ test("SQL editor satisfies WCAG AA while editing, previewing and reporting valid
     await editor.fill("SELECT missing_column FROM spans WHERE $__window(start_time)");
     await dialog.getByRole("button", { name: "Run", exact: true }).click();
     await expect(editor).toHaveAttribute("aria-invalid", "true");
-    await expect(dialog.getByRole("alert")).toBeVisible();
-    await expect(dialog.locator("li.panel-sql-problem")).toContainText('Referenced column "missing_column"');
+    await expect(dialog.getByRole("alert").first()).toBeVisible();
+    await expect(dialog.locator("li.sql-problem")).toContainText('Referenced column "missing_column"');
     await scan(page, info, "sql-editor-invalid", '[role="dialog"]');
   } finally { await cleanup(); }
 });

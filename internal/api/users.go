@@ -61,7 +61,10 @@ func (h *UserHandler) ListUsers(c *echo.Context) error {
 		slog.Error("list users failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list users")
 	}
-	return c.JSON(200, users)
+	if users == nil {
+		users = []auth.User{}
+	}
+	return c.JSON(200, map[string][]auth.User{"users": users})
 }
 
 // CreateUser adds a new user (admin only).

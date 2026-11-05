@@ -48,6 +48,16 @@ startup discovers directly from the filesystem. The atomic directory publish
 is both the durable commit and the unit startup discovers; acknowledgement
 occurs only after publication and parent-directory fsync complete.
 
+A request whose sender stops waiting (it cancels or its deadline passes) before
+the commit of its batch starts is dropped unwritten and counted in
+`fanout_ingest_abandoned_total`, which also counts requests the server cuts off
+while shutting down. Its memory reservation is released at once, so the
+sender's retry is admitted and is the only copy. Other
+requests sharing that group commit are unaffected. Once a commit has started it
+completes, so a sender that gives up during it and retries stores those rows
+twice. Delivery is therefore at least once only within that commit window: OTLP
+has no idempotency key that lets Fanout recognize a resent request.
+
 ## One authoritative copy for logs and metrics
 
 Every signal is written once, to typed Zstandard-compressed Parquet. DuckDB
@@ -66,14 +76,28 @@ unreadable control database rejects OTLP requests.
 Attribute and resource values support up to 128 nested arrays or objects.
 An export that exceeds this limit is rejected in full with OTLP
 `INVALID_ARGUMENT` (HTTP 400); accepted values retain their original types.
+Malformed metric points reject the export the same way, including a gauge or
+sum point with no value. A point flagged as having no recorded value
+(`DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK`) is accepted with its `value` stored
+as NULL, so aggregates skip it; it keeps that bit in `flags`.
 
 Span, log, and metric attributes and resource attributes use Parquet VARIANT
-columns. Frequently queried resource and messaging fields also have typed
-Parquet columns inside the VARIANT encoding. The span read view exposes
-`messaging_system` and `messaging_destination` directly from those shredded
-fields, so messaging rollups can avoid decoding the whole attributes object.
+columns, and the maps keep every key. Standard OpenTelemetry keys also get a
+typed copy: 18 span attributes, such as `http.route` and
+`http.response.status_code`, and 29 resource attributes, such as
+`service.version` and `k8s.namespace.name`, on every signal. A copy holds a
+value only when its OTLP type matches the semantic conventions; a value of
+another type stays in the map alone. Messaging attributes are shredded inside
+the VARIANT encoding instead, and the span read view exposes
+`messaging_system` and `messaging_destination` directly from those fields, so
+messaging rollups can avoid decoding the whole attributes object.
 Values with different types remain in the residual encoding;
 an integer does not become a string just because another row uses one.
+
+Span events and links, metric exemplars, histogram buckets, and summary
+quantiles are typed parallel lists, one element per item: for example
+`event_times`, `event_names`, and `event_attributes`, whose attribute maps are
+VARIANT values. No stored column holds JSON.
 
 Integers, booleans, binary values, nulls, arrays, and nested objects survive
 ingestion, indexed reads, and compaction. Event timestamps retain nanosecond
@@ -86,8 +110,8 @@ Attribute names such as
 and an explicit cast when a scalar type is needed, for example
 `TRY_CAST(attr(attributes, 'retry.count') AS BIGINT)`. General attribute extracts
 through views retain their types; extraction across view projections does not
-reach the Parquet scan. Prefer the scalar service,
-namespace, version, environment, and messaging columns for those hot queries.
+reach the Parquet scan. Prefer the scalar service, namespace, and messaging
+columns for those hot queries.
 
 The JSON SQL response converts nested values only when returning results.
 Integer tokens retain their full precision; clients that parse JSON numbers as
@@ -114,14 +138,18 @@ a checksum.
 Verification failures such as memory exhaustion or cancellation never authorize
 quarantine.
 
-Telemetry batches use format 4. An unsupported batch format makes startup
+Telemetry batches use format 5. An unsupported batch format makes startup
 fail before cleanup or schema rewriting, leaving the files intact.
 
 ## Small files are bounded by compaction
 
 Atomic ingestion creates immutable batch directories. Maintenance drains every
-eligible compaction group, choosing inputs by both count and a 25-million-row
-ceiling. It combines same-day, same-generation files, builds a replacement trace
+eligible compaction group, choosing inputs by count, bytes, and a
+25-million-row ceiling. It combines files from the same ingestion hour and
+generation. Once an hour is more than a day old, its small files may also merge
+with neighbouring hours of the same UTC day, up to 250,000 rows per file, so a
+quiet install does not keep one small file per hour for its whole retention.
+Each merge builds a replacement trace
 index, and atomically swaps the replacement for its inputs. A durable compaction
 marker makes an interrupted swap resumable. Active DuckDB readers pin immutable
 files while retention or compaction removes them, so reads never lose an open
@@ -133,6 +161,13 @@ that work is prepared.
 
 Retention is based on ingestion time rather than event time. A service with a
 bad clock therefore cannot pin a batch on disk by emitting a far-future event.
+
+Retention removes whole files, never single rows, as Prometheus, Tempo, and
+Loki remove whole blocks or chunks. A file expires when its newest row passes
+the cutoff, so rows in a day-merged file can stay up to one day past
+`FANOUT_RETENTION_DAYS`, plus one maintenance interval. Service and edge
+rollups expire exactly at the cutoff, so for that last day raw telemetry can
+outlive its rollups.
 
 ## Dashboard reads pin completed batches
 
@@ -166,7 +201,7 @@ preserve candidate bounds without recomputation. Retention and incomplete
 replacements recompute only affected trace IDs from active contributions.
 A semantic version covers the cache schema and aggregation rules; a version
 change atomically discards all private
-read tables and rebuilds from authoritative format-4 Parquet. The background
+read tables and rebuilds from authoritative format-5 Parquet. The background
 worker processes bounded groups; `fanout_read_cache_pending_batches` reports its
 trace backlog independently of the service and edge rollups' publication horizon.
 Service-version observations populate their analytical rollup on a separate
@@ -200,18 +235,41 @@ the last completed minute before the service watermark. The baseline has the
 same length as the current period. Latency uses the span-weighted mean of the
 rollup's served-span minute p95 values; log-pattern detection still reads logs.
 
-The ingest writer waits when reclaimable generation-0 compaction debt reaches
-1,024 batches. Already admitted commits finish and requests wait in the bounded
-submission queue, honoring their own deadlines. Debt excludes batches above half
-the merge row ceiling and reserves 127 smaller inputs per ingestion day: those
-inputs can otherwise be stranded by the compaction eligibility rules.
-At 512 batches of reclaimable debt, compaction prioritizes eligible generation-0
-groups across all days. Below that threshold, it selects the oldest eligible day
-and then the highest eligible generation within that day.
-The exact count of all live generation-0 batches, including those exclusions,
-is exported as `fanout_compaction_backlog_batches`. Time spent waiting is
-`fanout_ingest_backpressure_seconds_total`. This bounds reclaimable debt rather
-than imposing an absolute limit on retained batch count.
+Ingest admission starts adapting a rows-per-second cap at 512 batches of
+reclaimable generation-0 compaction debt. Rising debt decreases the cap by 15%
+every 250 ms; falling debt increases it by 10%. The band cap keeps at least one
+normal batch per pressure window (50,000 rows/s), or its measured entry rate if
+lower, because further cuts shrink files without reducing their frequency. Rising interactive refusals or
+queue-wait timeouts also reduce admission, to a floor of half the measured
+pre-starvation rate. Panel queueing alone does not reduce admission, and the
+read floor never overrides the compaction cap. Rejected exports receive retryable OTLP responses before row
+conversion: gRPC `RESOURCE_EXHAUSTED` with `RetryInfo`, or HTTP 429 with
+`Retry-After`. Senders must enable retries and honor the delay. At 1,024 batches
+of debt all new exports are refused with a two-second delay; already admitted
+exports continue draining and retain durable acknowledgement semantics.
+
+Under debt pressure, group commits target 200,000 rows over at most one second,
+including gaps between sparse retry arrivals below 50,000 total rows. Once a
+50,000-row batch is available, 20 ms without arrivals closes the group so
+closed-loop exporters can send again. The 64 MiB group bound and 50,000-row
+Parquet row groups remain unchanged. Exemplars and trace detail have reserved
+read capacity and priority over queued panels. Their bounded queue still returns
+busy responses when interactive demand exceeds capacity.
+
+Debt excludes oversized terminal batches and reserves 127 smaller inputs per
+ingestion window, so it measures reclaimable work rather than total inventory.
+At 512 batches compaction prioritizes eligible generation-0 groups. Below that
+threshold it selects the oldest eligible day and then its highest eligible
+generation. Compaction keeps running under read pressure.
+
+`fanout_compaction_backlog_batches` counts all live generation-0 batches,
+including the exclusions. `fanout_ingest_throttled_total{reason}` counts refused
+exports (`debt`, `reads`, or `budget`), and
+`fanout_ingest_admission_rows_per_second` reports the cap (zero means uncapped).
+`fanout_ingest_backpressure_seconds_total` now measures seconds with a cap
+active, replacing its earlier blocked-writer semantics; those historical values
+are not directly comparable. `fanout_compaction_pass_seconds` and
+`fanout_compaction_retired_batches_total` expose retirement throughput.
 
 Service dependency traversal reads the complete edge rollup within the selected
 window, including edges outside the topology view's displayed page. It follows

@@ -19,7 +19,10 @@ export FANOUT_RETENTION_DAYS=30
 
 Zero means keep everything. Changing it does not delete anything immediately;
 expired data goes when maintenance next runs, so disk use falls on the
-maintenance cycle after restart. Expiry uses ingestion time; see
+maintenance cycle after restart. Expiry uses ingestion time and removes whole
+files: a file goes once its newest row is past the cutoff, so data can stay up
+to one day past the retention period, plus one maintenance interval. Size disk
+for retention plus a day. See
 [storage semantics](/docs/concepts/storage#small-files-are-bounded-by-compaction).
 
 Observability API, MCP, and dashboard queries can span up to this retention
@@ -47,7 +50,9 @@ export FANOUT_INGEST_BATCH_SIZE=50000
 A larger target can improve sustained write throughput and create fewer files
 under concurrent ingest. The target groups concurrent small requests; a request
 above the target remains one atomic batch. Every request is acknowledged only
-after its Parquet batch is durably published.
+after its Parquet batch is durably published; a request whose sender stops
+waiting before its commit starts is dropped, so the sender's retry is the only
+copy.
 
 ## What the knobs interact with
 

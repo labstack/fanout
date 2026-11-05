@@ -124,8 +124,8 @@ func metricRateCarryCTE(scope Scope) string {
         UNION ALL BY NAME SELECT * FROM metric_rate_carry)`
 }
 
-func metricGaugeCTE(filters []Filter, scope Scope, kinds []string) (string, []any, error) {
-	cte, args, err := metricPointsCTE(filters, scope, kinds, metricStaleness)
+func metricGaugeCTE(source metricRead, scope Scope, kinds []string) (string, []any, error) {
+	cte, args, err := metricPointsCTE(source, scope, kinds, metricStaleness)
 	if err != nil {
 		return "", nil, err
 	}

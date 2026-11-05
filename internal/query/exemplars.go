@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -87,13 +88,48 @@ func selectionWhere(p *Panel, filters []Filter, scope Scope, dimensions map[stri
 	return where, args, nil
 }
 
+// Exemplars answers a selection's sample traces or logs through the result
+// cache, keyed by the canonical request, so a burst of identical drill-downs
+// runs once. Relative windows end now, the stamp of a cached answer.
 func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (ExemplarResponse, error) {
 	now := e.now()
+	key, err := keyOf(struct {
+		Kind    string          `json:"kind"`
+		Request ExemplarRequest `json:"request"`
+	}{"exemplars", req})
+	if err != nil {
+		return e.exemplars(ctx, req, now)
+	}
+	out, _, err := loadCached(e, ctx, key, now, func(run context.Context) (ExemplarResponse, int64, bool, error) {
+		// Leave room for execution and the response inside the 15s client bound.
+		wait, cancel := context.WithTimeout(run, 2*time.Second)
+		release, err := e.admit(wait)
+		cancel()
+		if err != nil {
+			if run.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+				err = ErrBusy
+			}
+			return ExemplarResponse{Traces: []Exemplar{}}, 0, false, err
+		}
+		defer release()
+		out, err := e.exemplars(run, req, now)
+		size := int64(256+len(out.Traces)*256) + out.Logs.size()
+		return out, size, err == nil, err
+	})
+	if err != nil {
+		return ExemplarResponse{Traces: []Exemplar{}}, err
+	}
+	out.Logs = out.Logs.clone()
+	out.Traces = slices.Clone(out.Traces)
+	return out, nil
+}
+
+func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.Time) (ExemplarResponse, error) {
 	out := ExemplarResponse{Traces: []Exemplar{}}
 	if req.Kind != "" && req.Kind != "traces" && req.Kind != "logs" {
 		return out, Problems{{Path: "kind", Message: "kind must be traces or logs", Hint: "choose traces or logs"}}
 	}
-	ctx, cancel := context.WithTimeout(ctx, e.timeout)
+	ctx, cancel := context.WithTimeout(ctx, min(e.timeout, 10*time.Second))
 	defer cancel()
 	d := req.Dashboard
 	Normalize(&d)
@@ -182,12 +218,70 @@ func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (Exemplar
 		where += " AND contains(lower(body),lower(?))"
 		args = append(args, p.Options.Highlight)
 	}
-	// Candidate membership is filtered; root metadata is selected within the full panel window.
-	candidateSource := structuredSource(p.Query.From)
-	text := checkedTraceSQL(candidateSource, where, 21, "duration_ms DESC,trace_id,namespace", "start_time::TIMESTAMP_NS")
-	args = append(args, start, end)
+	// Rank only the narrow span projection in the selected bucket. DuckDB uses
+	// a bounded TOP_N heap; the extra row detects truncation without feeding
+	// more than 64 candidates to root lookup. Logs retain their sampling order.
+	// Root metadata still uses the full panel window.
+	candidateCtx := queryrows.WithWindow(ctx, queryrows.Window{Start: lo, End: hi})
+	candidateSQL := "SELECT namespace,trace_id FROM " + structuredSource(p.Query.From) + " WHERE " + where + " AND trace_id<>'' LIMIT 65"
+	if p.Query.From == "spans" {
+		candidateSQL = "SELECT namespace,trace_id FROM (SELECT namespace,trace_id,duration_ms FROM spans WHERE " + where + " AND trace_id<>'' ORDER BY duration_ms DESC LIMIT 65)"
+	}
+	probe, err := e.engine.QueryContext(candidateCtx, candidateSQL, args...)
+	if err != nil {
+		return out, exemplarError(ctx, err)
+	}
+	type identity struct{ namespace, trace string }
+	seen := make(map[identity]bool)
+	var candidates []string
+	var rootArgs []any
+	count := 0
+	for probe.Next() {
+		var id identity
+		if err := probe.Scan(&id.namespace, &id.trace); err != nil {
+			probe.Close()
+			return out, exemplarError(ctx, err)
+		}
+		count++
+		if count > 64 {
+			out.Truncated = true
+			break
+		}
+		if !seen[id] {
+			seen[id] = true
+			candidates = append(candidates, "struct_pack(namespace := ?::VARCHAR, trace_id := ?::VARCHAR)")
+			rootArgs = append(rootArgs, id.namespace, id.trace)
+		}
+	}
+	err = probe.Err()
+	probe.Close()
+	if err != nil {
+		return out, exemplarError(ctx, err)
+	}
+	if len(candidates) == 0 {
+		return out, nil
+	}
+	// Keep the bounded keys as constants in a predicate. Joining a VALUES
+	// relation lets zero-cardinality Parquet estimates reverse the hash build
+	// into every retained span, consuming memory and CPU before returning roots.
+	// One aggregate state per candidate trace also bounds root selection memory
+	// when a candidate trace has many spans. Prefer a root, then time and span ID,
+	// exactly as the trace-row path does, and retain errors from all its spans.
+	text := fmt.Sprintf(`WITH roots AS (
+SELECT s.namespace,s.trace_id,
+arg_min(struct_pack(service := s.service, operation := s.operation, duration_ms := s.duration_ms, status := s.status, start_time := s.start_time),
+struct_pack(child := coalesce(s.parent_span_id,'')<>'', start_time := s.start_time, span_id := s.span_id)) AS root,
+bool_or(s.status='STATUS_CODE_ERROR') AS has_error
+FROM spans s WHERE struct_pack(namespace := s.namespace, trace_id := s.trace_id) IN (%s)
+AND s.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+GROUP BY s.namespace,s.trace_id)
+SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(root.service,''),coalesce(root.operation,''),coalesce(root.duration_ms,0),
+CASE WHEN has_error THEN 'STATUS_CODE_ERROR' ELSE coalesce(root.status,'') END,root.start_time::TIMESTAMP_NS,false
+FROM roots ORDER BY root.duration_ms DESC,trace_id,namespace LIMIT 21`, strings.Join(candidates, ","))
+
+	rootArgs = append(rootArgs, start, end)
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end})
-	rows, err := e.engine.QueryContext(ctx, text, args...)
+	rows, err := e.engine.QueryContext(ctx, text, rootArgs...)
 	if err != nil {
 		return out, exemplarError(ctx, err)
 	}
@@ -212,7 +306,7 @@ func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (Exemplar
 		out.Traces = out.Traces[:20]
 		out.Truncated = true
 	}
-	// A 21st root or a 1,001st candidate proves truncation; exactly 20 does not.
+	// A 21st root or a 65th matching row proves truncation; exactly 20 does not.
 	return out, nil
 }
 func traceRootsSQL() string {
@@ -221,32 +315,13 @@ FROM spans s JOIN candidates c ON s.namespace=c.namespace AND s.trace_id=c.trace
 WHERE s.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS`
 }
 
-func checkedTraceSQL(source, where string, limit int, order, startProjection string) string {
-	// Span candidates prioritize the slowest matching span per trace. Logs are a
-	// deterministic sample by namespace and trace ID, not a global latency ranking.
-	candidateOrder := "namespace,trace_id"
-	if source == "spans" {
-		candidateOrder = "max(duration_ms) DESC,namespace,trace_id"
-	}
-	return fmt.Sprintf(`WITH candidate_probe AS (SELECT namespace,trace_id,row_number() OVER (ORDER BY %s) AS candidate_rank FROM %s WHERE %s AND trace_id<>'' GROUP BY namespace,trace_id ORDER BY candidate_rank LIMIT 1001),
-candidates AS (SELECT namespace,trace_id FROM candidate_probe WHERE candidate_rank<=1000), roots AS (%s)
-SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(service,''),coalesce(operation,''),coalesce(duration_ms,0),coalesce(status,''),coalesce(start_time,TIMESTAMP_NS '1970-01-01'),capped
-FROM (SELECT count(*)>1000 AS capped FROM candidate_probe) cap LEFT JOIN
-(SELECT trace_id,namespace,service,operation,duration_ms,status,%s AS start_time FROM roots WHERE n=1 ORDER BY %s LIMIT %d) selected ON TRUE
-ORDER BY %s`, candidateOrder, source, where, traceRootsSQL(), startProjection, order, limit, order)
-}
-
 // Bound matching trace candidates before the root window functions. Like
 // exemplars, ranking is approximate when filters exclude the root span.
-func checkedTraceRowsSQL(where string, limit int, order string) string {
-	limit = min(limit, 1001)
-	candidateOrder := "max(duration_ms) DESC,namespace,trace_id"
-	if strings.HasPrefix(order, "start_time ASC") {
-		candidateOrder = "min(start_time) ASC,namespace,trace_id"
-	}
-	return fmt.Sprintf(`WITH candidates AS (SELECT namespace,trace_id FROM spans WHERE %s AND trace_id<>'' GROUP BY namespace,trace_id ORDER BY %s LIMIT %d), roots AS (%s)
+// checkedTraceRowsSQL returns the root of each candidate trace, at most limit.
+func checkedTraceRowsSQL(candidates, order string, limit int) string {
+	return fmt.Sprintf(`WITH candidates AS (%s), roots AS (%s)
 SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(service,''),coalesce(operation,''),coalesce(duration_ms,0),coalesce(status,''),epoch_ms(start_time::TIMESTAMP_NS)::BIGINT AS start
-FROM roots WHERE n=1 ORDER BY %s LIMIT %d`, where, candidateOrder, limit, traceRootsSQL(), order, limit)
+FROM roots WHERE n=1 ORDER BY %s LIMIT %d`, candidates, traceRootsSQL(), order, limit)
 }
 
 func exemplarError(ctx context.Context, err error) error {

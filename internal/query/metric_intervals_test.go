@@ -25,7 +25,7 @@ func TestMetricGapDeltasAttributeWholeIncreaseAndBoundExpansion(t *testing.T) {
 				insertMetrics(t, db, metricHistogram(later, "[10,20]", "[43210,43210,0]", 86420, 1296300, "a"))
 			}
 			scope := Scope{Start: fixtureStart, End: later.Add(6 * time.Minute), Interval: 10 * time.Second}
-			cte, args, err := metricSeriesCTE(nil, scope, []string{kind})
+			cte, args, err := metricSeriesCTE(metricRead{}, scope, []string{kind})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -36,7 +36,7 @@ func TestMetricGapDeltasAttributeWholeIncreaseAndBoundExpansion(t *testing.T) {
 			// could conceal amplification. This is an engine assertion, not a
 			// time or output-size proxy.
 			var deltas, maxRows int64
-			if err := db.QueryRowContext(t.Context(), cte+` SELECT count(*),max(n) FROM (
+			if err := db.db().QueryRowContext(t.Context(), cte+` SELECT count(*),max(n) FROM (
                 SELECT series_id,time,count(*) AS n FROM metric_interval_buckets GROUP BY series_id,time)`, args...).Scan(&deltas, &maxRows); err != nil {
 				t.Fatal(err)
 			}
@@ -47,7 +47,7 @@ func TestMetricGapDeltasAttributeWholeIncreaseAndBoundExpansion(t *testing.T) {
 			var bucket int64
 			var covered, increase, sum float64
 			var weights string
-			if err := db.QueryRowContext(t.Context(), cte+` SELECT _bucket,elapsed_s,
+			if err := db.db().QueryRowContext(t.Context(), cte+` SELECT _bucket,elapsed_s,
                 coalesce(increase,count_increase),coalesce(sum_increase,0),
                 coalesce(to_json(bound_increases)::VARCHAR,'null') FROM metric_spread`, args...).Scan(&bucket, &covered, &increase, &sum, &weights); err != nil {
 				t.Fatal(err)
@@ -78,7 +78,7 @@ func TestMetricGapDeltasAttributeWholeIncreaseAndBoundExpansion(t *testing.T) {
 			// execution may automatically widen buckets to respect its limit.
 			var rows, carried, firstBucket, lastBucket int64
 			var minRate, maxRate, totalIncrease float64
-			if err := db.QueryRowContext(t.Context(), cte+metricRateCarryCTE(scope)+` SELECT
+			if err := db.db().QueryRowContext(t.Context(), cte+metricRateCarryCTE(scope)+` SELECT
                 count(*),count(*) FILTER (WHERE _carry),min(_bucket),max(_bucket),
                 min(_rate_share/_rate_covered),max(_rate_share/_rate_covered),
                 sum(coalesce(increase,count_increase)) FROM metric_rate_rows`, args...).Scan(
@@ -108,7 +108,7 @@ func TestMetricExactlyLookbackDeltasStillSpread(t *testing.T) {
 				insertMetrics(t, db, metricHistogram(later, "[10,20]", "[310,310,0]", 620, 9300, "a"))
 			}
 			scope := Scope{Start: fixtureStart, End: later.Add(time.Second), Interval: 10 * time.Second}
-			cte, args, err := metricSeriesCTE(nil, scope, []string{kind})
+			cte, args, err := metricSeriesCTE(metricRead{}, scope, []string{kind})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,7 +117,7 @@ func TestMetricExactlyLookbackDeltasStillSpread(t *testing.T) {
 			args = append(args, spreadArgs...)
 			var expanded int64
 			var covered, increase float64
-			if err := db.QueryRowContext(t.Context(), cte+` SELECT
+			if err := db.db().QueryRowContext(t.Context(), cte+` SELECT
                 (SELECT count(*) FROM metric_interval_buckets),sum(elapsed_s),
                 sum(coalesce(increase,count_increase)) FROM metric_spread`, args...).Scan(&expanded, &covered, &increase); err != nil {
 				t.Fatal(err)
@@ -220,7 +220,7 @@ func TestMetricGaugeAndUpdownTotalsCarryAndExpire(t *testing.T) {
 				}
 				for seconds := -300 + phase; seconds < 900; seconds += period {
 					m := metricCounter(fixtureStart.Add(time.Duration(seconds)*time.Second), 10)
-					m.Monotonic = false
+					m.Type = "updown"
 					if kind == "gauge" {
 						m.Type, m.Temporality = "gauge", ""
 					}
@@ -336,9 +336,11 @@ func TestMetricRateCarryExpiresAndNeverAddsIncreases(t *testing.T) {
 	}
 }
 
-func TestMetricSpreadClipsSignedNanosecondWindows(t *testing.T) {
+// Ingestion stores a nonpositive metric time as the ingestion time, so stored
+// points are always after the epoch; windows still clip at nanoseconds.
+func TestMetricSpreadClipsNanosecondWindows(t *testing.T) {
 	e, db := metricFixture(t)
-	start := time.Unix(0, -17).UTC()
+	start := time.Unix(0, 17).UTC()
 	insertMetrics(t, db, metricCounter(start.Add(-time.Nanosecond), 0))
 	insertMetrics(t, db, metricCounter(start.Add(time.Nanosecond), 6))
 	for _, bucket := range []string{"", "10s"} {
@@ -352,7 +354,7 @@ func TestMetricSpreadClipsSignedNanosecondWindows(t *testing.T) {
 func TestMetricGaugeCarryReadsEarlierParquetBatchWithoutAddingPoints(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	m := metricCounter(fixtureStart.Add(-time.Minute), 10)
-	m.Type, m.Temporality, m.Monotonic = "gauge", "", false
+	m.Type, m.Temporality = "gauge", ""
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "gauge-lookback", Metrics: []telemetry.Metric{m}}); err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +396,7 @@ func TestMetricGaugeCarryUsesLastPointAcrossInternalGaps(t *testing.T) {
 	e, db := metricFixture(t)
 	for i, seconds := range []int{0, 20, 120} {
 		m := metricCounter(fixtureStart.Add(time.Duration(seconds)*time.Second), float64(10+20*i))
-		m.Type, m.Temporality, m.Monotonic = "gauge", "", false
+		m.Type, m.Temporality = "gauge", ""
 		insertMetrics(t, db, m)
 	}
 	r := runMetricMeasure(t, e, []string{"sum(value)", "avg(value)", "count()"}, "1m", nil, fixtureStart, fixtureStart.Add(9*time.Minute))

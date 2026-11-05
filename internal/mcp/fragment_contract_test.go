@@ -22,7 +22,7 @@ import (
 func TestOmittedArgumentsRawJSONRPC(t *testing.T) {
 	s := newPanelServer(t)
 	h := s.HTTPHandler()
-	for _, name := range []string{"get_telemetry_schema", "list_dashboards", "get_observability_overview"} {
+	for _, name := range []string{"get_telemetry_schema", "list_dashboards", "get_overview"} {
 		t.Run(name, func(t *testing.T) {
 			request := httptest.NewRequest("POST", "/api/mcp", strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`, name)))
 			request.Header.Set("Content-Type", "application/json")
@@ -181,7 +181,7 @@ func TestFragmentNamedToolsMCPSeededGoldens(t *testing.T) {
 	s := panelServerFixtureAt(t, true, now)
 	client := connectTestClient(t, s, nil)
 	root := filepath.Join("..", "..", "ui", "host", "tests", "go-fragments")
-	for kind, name := range map[string]string{"overview": "get_observability_overview", "topology": "get_service_topology", "performance": "get_service_performance", "logs": "search_logs", "trace": "inspect_trace"} {
+	for kind, name := range map[string]string{"overview": "get_overview", "topology": "get_service_topology", "performance": "get_service_performance", "logs": "search_logs", "trace": "inspect_trace"} {
 		args := map[string]any{"namespace": "shop"}
 		if kind == "trace" {
 			args["trace_id"] = "trace-1"

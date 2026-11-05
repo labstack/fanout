@@ -3,17 +3,19 @@ package telemetry
 import (
 	"context"
 	"errors"
-	"io"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	driver "github.com/duckdb/duckdb-go/v2"
+	"github.com/labstack/fanout/internal/telemetry/semconv"
 	"github.com/parquet-go/parquet-go"
 )
 
-func verificationFixture(t *testing.T) (string, []spanParquetRow) {
+func verificationFixture(t *testing.T) (string, []Span) {
 	t.Helper()
 	store, err := OpenParquetStore(t.TempDir())
 	if err != nil {
@@ -21,44 +23,40 @@ func verificationFixture(t *testing.T) (string, []spanParquetRow) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	spans := []Span{
-		{TraceID: "trace", SpanID: "a", StartUnixNanos: 10, Resource: map[string]any{"service.name": "api", "extra": []any{int64(1), true}}, Attributes: map[string]any{"messaging.system": "kafka", "other": []byte{0, 255}}},
+		{TraceID: "trace", SpanID: "a", StartUnixNanos: 10, Resource: map[string]any{"service.name": "api", "extra": []any{int64(1), true}}, Attributes: map[string]any{"messaging.system": "kafka", "other": []byte{0, 255}, "server.port": "80"}},
 		{TraceID: "trace", SpanID: "b", StartUnixNanos: 20},
 		{TraceID: "trace", SpanID: "c", StartUnixNanos: 30},
-		{TraceID: "trace", SpanID: "d", StartUnixNanos: 40, Attributes: map[string]any{"other": []byte{0, 255}}, Resource: map[string]any{"service.name": "last", "extra": []any{int64(2), false}}},
+		{TraceID: "trace", SpanID: "d", StartUnixNanos: 40, Attributes: map[string]any{"other": []byte{0, 255}, "server.port": "81"}, Resource: map[string]any{"service.name": "last", "extra": []any{int64(2), false}}},
 	}
 	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "verify"}, spans, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	dir := store.BatchPath("verify")
-	f, err := os.Open(filepath.Join(dir, "spans.parquet"))
-	if err != nil {
-		t.Fatal(err)
+	perm, _ := sortRows(Spans, spans)
+	rows := make([]Span, len(perm))
+	for i, row := range perm {
+		rows[i] = spans[row]
 	}
-	r := parquet.NewGenericReader[spanParquetRow](f, telemetrySchema[spanParquetRow]())
-	rows := make([]spanParquetRow, len(spans))
-	if n, err := r.Read(rows); n != len(rows) || (err != nil && !errors.Is(err, io.EOF)) {
-		t.Fatal(err)
-	}
-	r.Close()
-	f.Close()
 	// Multiple tiny row groups make a late-page failure observable cheaply.
 	path := filepath.Join(dir, "spans.parquet")
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	f, err = os.Create(path)
+	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer := parquet.NewGenericWriter[spanParquetRow](f, parquetWriterOptions(1024, telemetrySchema[spanParquetRow]())...)
+	writer := parquet.NewGenericWriter[any](f, parquetWriterOptions(1024, Spans.writerOptions()...)...)
+	var spilled spills
 	for i := 0; i < len(rows); i += 2 {
-		if err := writeTelemetryColumns(writer, rows[i:i+2]); err != nil {
+		if err := writeColumns(writer, Spans, rows[i:i+2], []int32{0, 1}, &spilled); err != nil {
 			t.Fatal(err)
 		}
 		if err := writer.Flush(); err != nil {
 			t.Fatal(err)
 		}
 	}
+	spilled.footer(writer, Spans)
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -127,9 +125,9 @@ func TestNativeVerifierRejectsWrongSchemaAndTraceOrdering(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "time_order":
-				rows[2].StartUnixNano = 5
+				rows[2].StartUnixNanos = 5
 			case "id_order":
-				rows[1].StartUnixNano = rows[0].StartUnixNano
+				rows[1].StartUnixNanos = rows[0].StartUnixNanos
 				rows[1].SpanID = "0"
 			case "row_count":
 				rows = rows[:3]
@@ -138,7 +136,7 @@ func TestNativeVerifierRejectsWrongSchemaAndTraceOrdering(t *testing.T) {
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
 				}
-				if err := writeTypedParquet(path, rows, 1024); err != nil {
+				if err := writeUnsorted(path, Spans, rows, 1024); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -192,5 +190,108 @@ func TestNativeVerifierRejectsUnexpectedZeroCountSignal(t *testing.T) {
 	}
 	if err := ValidatePublishedBatch(dir); !IsBatchCorrupt(err) || !strings.Contains(err.Error(), "metadata declares zero") {
 		t.Fatalf("zero-count file = %v", err)
+	}
+}
+
+// writeUnsorted writes rows in the order given, which may break the
+// signal's order.
+func writeUnsorted[R any](path string, s *Signal, rows []R, pageSize int) error {
+	perm := make([]int32, len(rows))
+	for i := range perm {
+		perm[i] = int32(i)
+	}
+	return writeOrdered(path, s, rows, perm, pageSize)
+}
+
+// Log and metric files follow their signal's order, which names time buckets
+// no column stores; verification decodes the key columns and rejects a file
+// out of that order. Both fixtures are listed out of order.
+func TestNativeVerifierRejectsLogAndMetricOrder(t *testing.T) {
+	minute := int64(time.Minute)
+	logs := []Log{
+		{Namespace: "a", ServiceName: "y", EventUnixNanos: 1 * minute},
+		{Namespace: "a", ServiceName: "x", EventUnixNanos: 2 * minute},
+		{Namespace: "a", ServiceName: "x", EventUnixNanos: 6 * minute},
+	}
+	metrics := []Metric{
+		{Namespace: "a", ServiceName: "x", Name: "m", SeriesID: 2, EventUnixNanos: 1 * minute},
+		{Namespace: "a", ServiceName: "x", Name: "m", SeriesID: 1, EventUnixNanos: 2 * minute},
+		{Namespace: "a", ServiceName: "x", Name: "m", SeriesID: 1, EventUnixNanos: 61 * minute},
+	}
+	for _, s := range []*Signal{Logs, Metrics} {
+		t.Run(s.Name, func(t *testing.T) {
+			store, err := OpenParquetStore(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "order"}, nil, logs, metrics); err != nil {
+				t.Fatal(err)
+			}
+			dir := store.BatchPath("order")
+			if err := ValidatePublishedBatch(dir); err != nil {
+				t.Fatalf("committed batch: %v", err)
+			}
+			path := filepath.Join(dir, s.Name+".parquet")
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if s == Logs {
+				err = writeUnsorted(path, s, logs, 1024)
+			} else {
+				err = writeUnsorted(path, s, metrics, 1024)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidatePublishedBatch(dir); !IsBatchCorrupt(err) {
+				t.Fatalf("unsorted %s error = %v", s.Name, err)
+			}
+		})
+	}
+}
+
+// Field-name churn makes every row carry a variant metadata dictionary of up
+// to 4 KiB, as compacted files of high-cardinality attributes do. The
+// verifier checks all of a map's keys in one query over that dictionary, so
+// it must still decode every column and check every key and row within its
+// fixed, non-spilling memory limit.
+func TestNativeVerifierFitsChurnedVariantMetadata(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes and verifies a batch of wide variant metadata")
+	}
+	const rows = 6_000
+	spans := make([]Span, rows)
+	for i := range spans {
+		attributes, resource := map[string]any{}, map[string]any{}
+		for _, key := range Spans.Keys() {
+			var value any = fmt.Sprintf("%s-%d", key.Name, i%97)
+			if key.Type == semconv.Int {
+				value = int64(i % 1013)
+			}
+			if i%10 == 0 {
+				value = fmt.Sprint(value) // converted at ingest
+			}
+			if key.Scope == semconv.Resource {
+				resource[key.Name] = value
+			} else {
+				attributes[key.Name] = value
+			}
+		}
+		for j := range 24 {
+			attributes[fmt.Sprintf("app.generated.attribute.k%05d", (i*31+j*7919)%50_000)] = int64(j)
+		}
+		resource[fmt.Sprintf("host.generated.label.k%04d", i%2000)] = "x"
+		spans[i] = Span{TraceID: fmt.Sprintf("%032x", i/4), SpanID: fmt.Sprintf("%016x", i), ServiceName: "api",
+			Name: "op", StartUnixNanos: int64(i) * 1000, EndUnixNanos: int64(i)*1000 + 500, Resource: resource, Attributes: attributes}
+	}
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "churn"}, spans, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePublishedBatch(store.BatchPath("churn")); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -149,7 +149,7 @@ FROM rollup_state`, edgeRollupStateKey, edgeRollupSubCursorKey).Scan(&watermark,
 	if _, err := d.RefreshReadCaches(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.DrainVersionRollup(ctx); err != nil {
+	if _, _, err := d.DrainVersionRollup(ctx); err != nil {
 		t.Fatal(err)
 	}
 	assertBacklogMarkers(t, d, repo)
@@ -220,7 +220,7 @@ func seedAnalyticalBacklog(t *testing.T, repo *telemetrystore.Repository, base t
 				} else if i == 1 {
 					parent = "s0"
 				}
-				b.Spans = append(b.Spans, telemetry.Span{Namespace: ns, ServiceName: service, ServiceVersion: "v1", TraceID: fmt.Sprint(batch), SpanID: fmt.Sprint("s", i), ParentSpanID: parent, Kind: kind, StartUnixNanos: n, EndUnixNanos: n + int64(time.Millisecond), DurationMS: 1, IngestedAt: ingest + int64(time.Duration(batch)*step)})
+				b.Spans = append(b.Spans, telemetry.Span{Namespace: ns, ServiceName: service, Resource: map[string]any{"service.version": "v1"}, TraceID: fmt.Sprint(batch), SpanID: fmt.Sprint("s", i), ParentSpanID: parent, Kind: kind, StartUnixNanos: n, EndUnixNanos: n + int64(time.Millisecond), DurationMS: 1, IngestedAt: ingest + int64(time.Duration(batch)*step)})
 			}
 			b.Logs = append(b.Logs, telemetry.Log{Namespace: ns, ServiceName: "gateway", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: ingest + int64(time.Duration(batch)*step), Body: "backlog"})
 		}

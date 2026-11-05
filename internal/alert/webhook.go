@@ -3,13 +3,17 @@ package alert
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"text/template"
 	"time"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 // webhookClient is shared across all webhook deliveries.
@@ -37,6 +41,37 @@ func RenderTemplate(tmplStr string, ctx ActionContext) (string, error) {
 		return "", fmt.Errorf("webhook: render template: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// CheckHeaders reports whether headers is empty or a JSON object of valid
+// HTTP header names and string values, naming the first header that is not.
+// A value is never echoed, since it may hold a credential.
+func CheckHeaders(headers string) error {
+	if headers == "" {
+		return nil
+	}
+	var values map[string]any
+	if err := json.Unmarshal([]byte(headers), &values); err != nil || values == nil {
+		return errors.New("webhook headers must be a JSON object")
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if !httpguts.ValidHeaderFieldName(name) {
+			return fmt.Errorf("webhook header name %q is not a valid HTTP header name", name)
+		}
+		value, ok := values[name].(string)
+		if !ok {
+			return fmt.Errorf("webhook header %s must be a string", name)
+		}
+		if !httpguts.ValidHeaderFieldValue(value) {
+			return fmt.Errorf("webhook header %s has a line break or control character in its value", name)
+		}
+	}
+	return nil
 }
 
 // FireWebhook sends the webhook for the given rule. Returns "skipped" if no

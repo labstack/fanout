@@ -1,7 +1,9 @@
 package alert
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	appstore "github.com/labstack/fanout/internal/store"
 )
@@ -15,6 +17,8 @@ func newTestStore(t *testing.T) *Store {
 	t.Cleanup(func() { sqlite.Close() })
 	return NewStore(sqlite.DB)
 }
+
+const episodeStart = "2026-10-31T20:00:00Z"
 
 func makeRule(name string) Rule {
 	return Rule{
@@ -152,11 +156,12 @@ func TestStore_UpsertAndGetAlert(t *testing.T) {
 	}
 
 	a := Alert{
-		RuleID:  rule.ID,
-		Service: "api",
-		State:   "firing",
-		Value:   0.25,
-		FiredAt: "2026-01-01T00:00:00Z",
+		RuleID:    rule.ID,
+		Service:   "api",
+		State:     "firing",
+		Value:     0.25,
+		FiredAt:   "2026-01-01T00:00:00Z",
+		CreatedAt: "2026-01-01T00:00:00Z",
 	}
 
 	created, err := s.UpsertAlert(a)
@@ -170,7 +175,8 @@ func TestStore_UpsertAndGetAlert(t *testing.T) {
 		t.Errorf("State = %q, want %q", created.State, "firing")
 	}
 
-	// Upsert again with updated state.
+	// Upsert the same episode with updated state.
+	a = created
 	a.State = "resolved"
 	a.ResolvedAt = "2026-01-01T01:00:00Z"
 	updated, err := s.UpsertAlert(a)
@@ -198,7 +204,7 @@ func TestStore_ListAlerts(t *testing.T) {
 	states := []string{"firing", "pending", "resolved"}
 	for i, state := range states {
 		svc := []string{"svc-a", "svc-b", "svc-c"}[i]
-		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: svc, State: state}); err != nil {
+		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: svc, State: state, CreatedAt: episodeStart}); err != nil {
 			t.Fatalf("UpsertAlert(%q): %v", state, err)
 		}
 	}
@@ -224,7 +230,7 @@ func TestStore_DeleteAlert(t *testing.T) {
 	s := newTestStore(t)
 
 	rule, _ := s.CreateRule(makeRule("da-rule"))
-	a, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "svc", State: "firing"})
+	a, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "svc", State: "firing", CreatedAt: episodeStart})
 	if err != nil {
 		t.Fatalf("UpsertAlert: %v", err)
 	}
@@ -243,7 +249,7 @@ func TestStore_DeleteRule_CascadesAlerts(t *testing.T) {
 	s := newTestStore(t)
 
 	rule, _ := s.CreateRule(makeRule("cascade-rule"))
-	if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "svc", State: "firing"}); err != nil {
+	if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "svc", State: "firing", CreatedAt: episodeStart}); err != nil {
 		t.Fatalf("UpsertAlert: %v", err)
 	}
 
@@ -272,7 +278,7 @@ func TestStore_AlertSummary(t *testing.T) {
 		{"d", "resolved"},
 	}
 	for _, c := range cases {
-		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: c.svc, State: c.state}); err != nil {
+		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: c.svc, State: c.state, CreatedAt: episodeStart}); err != nil {
 			t.Fatalf("UpsertAlert(%q, %q): %v", c.svc, c.state, err)
 		}
 	}
@@ -289,5 +295,106 @@ func TestStore_AlertSummary(t *testing.T) {
 	}
 	if sum.Resolved != 1 {
 		t.Errorf("Resolved = %d, want 1", sum.Resolved)
+	}
+}
+
+// Episode starts are stored as fixed-width RFC 3339 UTC, so listing sorts
+// them in time order whatever fraction or zone they were written with.
+func TestStoreOrdersAlertsByEpisodeStart(t *testing.T) {
+	s := newTestStore(t)
+	rule, err := s.CreateRule(makeRule("order-rule"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for svc, created := range map[string]string{
+		"first":  "2026-10-31T20:23:37Z",
+		"second": "2026-10-31T20:23:37.3Z",
+		"third":  "2026-10-31T13:23:37.31-07:00",
+	} {
+		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: svc, State: "firing", CreatedAt: created}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := s.ListAlerts("", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, a := range all {
+		order = append(order, a.Service)
+	}
+	if strings.Join(order, ",") != "third,second,first" {
+		t.Fatalf("order %v, want newest first", order)
+	}
+	if all[0].CreatedAt != "2026-10-31T20:23:37.310000000Z" {
+		t.Fatalf("stored created_at %q", all[0].CreatedAt)
+	}
+}
+
+// Only the engine starts an episode: an update without created_at keeps the
+// stored start, and a new alert without one is refused.
+func TestStoreUpsertKeepsEpisodeStart(t *testing.T) {
+	s := newTestStore(t)
+	rule, err := s.CreateRule(makeRule("keep-rule"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "api", State: "firing", CreatedAt: "2026-10-31T20:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.CreatedAt, a.State = "", "resolved"
+	updated, err := s.UpsertAlert(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.CreatedAt != "2026-10-31T20:00:00.000000000Z" || updated.State != "resolved" {
+		t.Fatalf("updated %+v", updated)
+	}
+	if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "new", State: "firing"}); err == nil {
+		t.Fatal("a new alert without an episode start was stored")
+	}
+}
+
+// A rule and service may have many resolved episodes but only one open alert.
+func TestStoreAllowsOneOpenAlertPerService(t *testing.T) {
+	s := newTestStore(t)
+	rule, err := s.CreateRule(makeRule("open-rule"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"resolved", "resolved", "firing"} {
+		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "api", State: state, CreatedAt: episodeStart}); err != nil {
+			t.Fatalf("store %s episode: %v", state, err)
+		}
+	}
+	if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "api", State: "pending", CreatedAt: episodeStart}); err == nil {
+		t.Fatal("stored a second open alert for one rule and service")
+	}
+}
+
+// Resolved times carry the engine's local offset; pruning compares instants,
+// not text, so an alert resolved 30 hours ago in any zone is removed after one day.
+func TestStorePruneResolvedComparesInstants(t *testing.T) {
+	s := newTestStore(t)
+	r, err := s.CreateRule(makeRule("prune"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 30 hours ago written at +14:00 reads as a later calendar day than the
+	// UTC cutoff, so a text comparison keeps it.
+	old := time.Now().Add(-30 * time.Hour).In(time.FixedZone("LINT", 14*3600)).Format(time.RFC3339)
+	recent := time.Now().Add(-time.Hour).In(time.FixedZone("IST", 5*3600+1800)).Format(time.RFC3339)
+	for svc, resolved := range map[string]string{"old": old, "recent": recent} {
+		if _, err := s.UpsertAlert(Alert{RuleID: r.ID, Service: svc, State: "resolved", ResolvedAt: resolved, CreatedAt: episodeStart}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := s.PruneResolved(1)
+	if err != nil || n != 1 {
+		t.Fatalf("pruned %d, %v; want 1", n, err)
+	}
+	if _, err := s.GetAlert(r.ID, "recent"); err != nil {
+		t.Fatalf("recent alert pruned: %v", err)
 	}
 }

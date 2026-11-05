@@ -137,9 +137,43 @@ func TestSelectBoundedCompactionGroupCompactsAnUnderfilledDay(t *testing.T) {
 	}
 }
 
-// Still not worth waking the merge for a couple of files.
-func TestSelectBoundedCompactionGroupIgnoresATrivialDay(t *testing.T) {
-	if got := selectBoundedCompactionGroup(genBatches(3, 1, 3, 5_000), 128, maxCompactionRows, true); len(got) != 0 {
-		t.Errorf("candidate = %d for a 3-batch day, want none: below the effort floor", len(got))
+// A finished window merges even a pair, so a quiet install keeps one file per
+// hour, but a lone batch has nothing to merge with.
+func TestSelectBoundedCompactionGroupMergesAFinishedPair(t *testing.T) {
+	if got := selectBoundedCompactionGroup(genBatches(3, 1, 2, 5_000), 128, maxCompactionRows, true); len(got) != 2 {
+		t.Errorf("candidate = %d for a finished pair, want 2", len(got))
+	}
+	if got := selectBoundedCompactionGroup(genBatches(3, 1, 2, 5_000), 128, maxCompactionRows, false); len(got) != 0 {
+		t.Errorf("candidate = %d for a pair in a window still being written, want none", len(got))
+	}
+	if got := selectBoundedCompactionGroup(genBatches(3, 1, 1, 5_000), 128, maxCompactionRows, true); len(got) != 0 {
+		t.Errorf("candidate = %d for a lone batch, want none", len(got))
+	}
+}
+
+// Span files sort by trace, so every row group spans the file's whole time
+// range and a narrow query decodes the entire file. A merge across a day put a
+// one-minute attribute filter over 8.8 million rows (2.5-7 s); keeping each
+// output inside one ingest hour bounds that to an hour of rows.
+func TestCompactionKeepsEachOutputInsideOneHour(t *testing.T) {
+	var batches []telemetry.BatchMetadata
+	for hour := int64(30); hour < 33; hour++ {
+		for i := range 100 {
+			at := hour*int64(time.Hour) + int64(i)*int64(time.Second)
+			batches = append(batches, telemetry.BatchMetadata{ID: fmt.Sprintf("%d-%d", hour, i), Spans: 100, MinIngestedNanos: at, MaxIngestedNanos: at})
+		}
+	}
+	selected := selectCompactionBatchesWithHigherCap(batches, 128, 128, 0)
+	if len(selected) < 2 {
+		t.Fatalf("selected %d batches, want a finished hour", len(selected))
+	}
+	hour := selected[0].MaxIngestedNanos / int64(time.Hour)
+	for _, b := range selected {
+		if b.MaxIngestedNanos/int64(time.Hour) != hour {
+			t.Fatalf("merge spans hours %d and %d", hour, b.MaxIngestedNanos/int64(time.Hour))
+		}
+	}
+	if hour != 30 || len(selected) != 100 {
+		t.Fatalf("selected hour %d with %d batches, want all 100 of the oldest hour", hour, len(selected))
 	}
 }

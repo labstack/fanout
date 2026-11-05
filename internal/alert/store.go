@@ -129,6 +129,7 @@ func alertToUpsertParams(a Alert) generated.UpsertAlertParams {
 		LastEvaluatedAt:    nullString(a.LastEvaluatedAt),
 		LastDeliveryStatus: nullString(a.LastDeliveryStatus),
 		LastDeliveryAt:     nullString(a.LastDeliveryAt),
+		CreatedAt:          a.CreatedAt,
 	}
 }
 
@@ -212,8 +213,27 @@ func (s *Store) DeleteRule(id string) error {
 	return nil
 }
 
-// UpsertAlert inserts or updates an alert instance keyed on (rule_id, service).
+// UpsertAlert inserts an alert episode, or updates the one with a.ID. Each
+// episode is its own row; at most one per (rule_id, service) is open.
 func (s *Store) UpsertAlert(a Alert) (Alert, error) {
+	// Only the engine starts an episode. An update without a start keeps the
+	// stored one; a new alert must bring its own.
+	if a.CreatedAt == "" {
+		if a.ID == "" {
+			return Alert{}, fmt.Errorf("store: new alert (%q, %q) needs created_at", a.RuleID, a.Service)
+		}
+		if _, err := s.q.GetAlertByID(context.Background(), a.ID); errors.Is(err, sql.ErrNoRows) {
+			return Alert{}, fmt.Errorf("store: new alert (%q, %q) needs created_at", a.RuleID, a.Service)
+		} else if err != nil {
+			return Alert{}, fmt.Errorf("store: get alert: %w", err)
+		}
+	} else {
+		started, err := parseStoredTime(a.CreatedAt)
+		if err != nil {
+			return Alert{}, fmt.Errorf("store: alert created_at: %w", err)
+		}
+		a.CreatedAt = formatStoredTime(started)
+	}
 	if a.ID == "" {
 		id, err := newID()
 		if err != nil {
@@ -228,7 +248,8 @@ func (s *Store) UpsertAlert(a Alert) (Alert, error) {
 	return genAlertToAlert(ga), nil
 }
 
-// GetAlert retrieves an alert by (rule_id, service).
+// GetAlert retrieves the latest episode of (rule_id, service): the open one
+// when there is one, else the most recent resolved one.
 func (s *Store) GetAlert(ruleID, service string) (Alert, error) {
 	ga, err := s.q.GetAlert(context.Background(), generated.GetAlertParams{
 		RuleID:  ruleID,
@@ -316,15 +337,14 @@ func (s *Store) DeleteAlert(id string) error {
 	return nil
 }
 
-// UpdateDeliveryStatus updates only the delivery status columns for a (rule_id, service) pair.
+// UpdateDeliveryStatus updates only the delivery status columns of one alert episode.
 // This is used by fireWebhookAsync to avoid overwriting alert state that may have changed
 // between when the goroutine was launched and when the webhook completed.
-func (s *Store) UpdateDeliveryStatus(ruleID, service, status, deliveredAt string) error {
+func (s *Store) UpdateDeliveryStatus(id, status, deliveredAt string) error {
 	err := s.q.UpdateDeliveryStatus(context.Background(), generated.UpdateDeliveryStatusParams{
 		LastDeliveryStatus: nullString(status),
 		LastDeliveryAt:     nullString(deliveredAt),
-		RuleID:             ruleID,
-		Service:            service,
+		ID:                 id,
 	})
 	if err != nil {
 		return fmt.Errorf("store: update delivery status: %w", err)

@@ -50,9 +50,6 @@ func TestLatencyBudgets(t *testing.T) {
 		schemaFetches.Add(1)
 		return completionFixtureSchema(), nil
 	}))
-	// Freeze cache time so CI pauses cannot expire the warm schema.
-	now := time.Now()
-	warm.now = func() time.Time { return now }
 	waitCompletion(t, warm, completionRequest("spans "), func(r CompleteResponse) bool { return r.Schema.Warm })
 	registryOnly := NewCompleter(nil)
 	var compileSamples, formatSamples, completeSamples, parseRankSamples []time.Duration
@@ -205,10 +202,9 @@ func BenchmarkFormat(b *testing.B) {
 // BenchmarkComplete measures the section 0 spec budget: warm completion p95 < 30 ms.
 func BenchmarkComplete(b *testing.B) {
 	fixtures := readCorpus(b)
-	c := NewCompleter(nil)
-	now := time.Now()
-	c.now = func() time.Time { return now }
-	c.cache[completionKey{window: "1h"}] = completionSchemaEntry{schema: completionFixtureSchema(), expires: now.Add(time.Hour)}
+	source := completionSchemaFunc(nil)
+	source.cached[[2]string{"1h", ""}] = completionFixtureSchema()
+	c := NewCompleter(source)
 	complete := func(i int) {
 		fixture := fixtures[i%len(fixtures)]
 		_ = c.Complete(b.Context(), CompleteRequest{Text: fixture.Text, Cursor: utf8.RuneCountInString(fixture.Text), Window: "1h", Options: Options{Viz: fixture.Viz}})

@@ -13,6 +13,11 @@ const (
 	CompactionPressureMaxRows = 4_000_000
 	CompactionBatchLimit      = 128
 	CompactionDebtLimit       = 1024
+	// CompactionWindow bounds what one merge may combine by ingest time. Span
+	// files sort by trace, so each row group covers its file's whole time
+	// range and a narrow query decodes the entire file: file size, not window
+	// size, sets its cost. An hour of pico-rate ingest is about 325,000 spans.
+	CompactionWindow = time.Hour
 )
 
 // Generation0BatchCount is the exact live ingest-batch inventory, including
@@ -32,8 +37,8 @@ func (p *ParquetStore) CompactionDebt() int {
 
 // changeGeneration0Locked also maintains conservative, reclaimable debt. A raw
 // generation-0 limit can deadlock on arbitrary oversized requests or on many
-// finished days with fewer than eight inputs. Exempt batches above half the
-// pressured merge row ceiling, and reserve one underfilled group per day.
+// finished windows that cannot form a merge. Exempt batches above half the
+// pressured merge row ceiling, and reserve one underfilled group per window.
 // Positive debt then guarantees a selectable group within the pressured ceiling. Larger
 // indivisible inputs can still compact below pressure, but cannot block ingest
 // behind debt that the pressured policy is unable to retire.
@@ -46,24 +51,23 @@ func (p *ParquetStore) changeGeneration0Locked(b BatchMetadata, delta int) {
 	if b.MaxIngestedNanos <= 0 || rows <= 0 || rows > CompactionPressureMaxRows/2 {
 		return
 	}
-	if p.generation0ByDay == nil {
-		p.generation0ByDay = make(map[int64]int)
+	if p.generation0ByWindow == nil {
+		p.generation0ByWindow = make(map[int64]int)
 	}
-	day := b.MaxIngestedNanos / int64(24*time.Hour)
-	before := p.generation0ByDay[day]
+	window := b.MaxIngestedNanos / int64(CompactionWindow)
+	before := p.generation0ByWindow[window]
 	after := before + delta
 	p.compactionDebt += max(0, after-(CompactionBatchLimit-1)) - max(0, before-(CompactionBatchLimit-1))
 	if after == 0 {
-		delete(p.generation0ByDay, day)
+		delete(p.generation0ByWindow, window)
 	} else {
-		p.generation0ByDay[day] = after
+		p.generation0ByWindow[window] = after
 	}
 }
 
 // setBatchLocked is the sole live-catalog mutation. Replacement, restoration,
 // rollback, startup and retention all use the same inventory accounting.
 func (p *ParquetStore) setBatchLocked(id string, batch *storedBatch) {
-	debtBefore := p.compactionDebt
 	if old := p.batches[id]; old != nil {
 		p.changeGeneration0Locked(old.metadata, -1)
 	}
@@ -74,10 +78,6 @@ func (p *ParquetStore) setBatchLocked(id string, batch *storedBatch) {
 		p.changeGeneration0Locked(batch.metadata, 1)
 	}
 	p.generation0Snapshot.Store(int64(p.generation0Batches))
-	if p.compactionDebt < debtBefore && p.debtChanged != nil {
-		close(p.debtChanged)
-		p.debtChanged = nil
-	}
 	if p.compactionDebt >= CompactionDebtLimit && p.debtLimitReached != nil {
 		close(p.debtLimitReached)
 		p.debtLimitReached = nil
@@ -104,34 +104,5 @@ func (p *ParquetStore) WaitForCompactionLimit(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
-	}
-}
-
-// WaitForCompaction releases the catalog lock before sleeping and wakes on a
-// debt retirement or cancellation. No storage lock or query gate is held.
-func (p *ParquetStore) WaitForCompaction(ctx context.Context) (time.Duration, error) {
-	var began time.Time
-	for {
-		p.mu.Lock()
-		if p.compactionDebt < CompactionDebtLimit {
-			p.mu.Unlock()
-			if began.IsZero() {
-				return 0, ctx.Err()
-			}
-			return time.Since(began), ctx.Err()
-		}
-		if p.debtChanged == nil {
-			p.debtChanged = make(chan struct{})
-		}
-		changed := p.debtChanged
-		p.mu.Unlock()
-		if began.IsZero() {
-			began = time.Now()
-		}
-		select {
-		case <-changed:
-		case <-ctx.Done():
-			return time.Since(began), ctx.Err()
-		}
 	}
 }

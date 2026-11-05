@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/labstack/fanout/internal/config"
@@ -139,82 +140,64 @@ func TestExportConversionRowsMatchBaseline(t *testing.T) {
 		t.Fatalf("converted rows changed:\n%s", encoded)
 	}
 }
-func TestTraceSemanticConventionPriority(t *testing.T) {
-	for _, tc := range []struct {
-		name                                  string
-		current, older                        bool
-		method, status, database, environment string
-	}{
-		{"current wins", true, true, "GET", "200", "postgresql", "production"},
-		{"current only", true, false, "GET", "200", "postgresql", "production"},
-		{"external older names", false, true, "POST", "503", "mysql", "staging"},
-		{"absent", false, false, "", "", "", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			text := func(k, v string) *common.KeyValue {
-				return &common.KeyValue{Key: k, Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: v}}}
-			}
-			integer := func(k string, v int64) *common.KeyValue {
-				return &common.KeyValue{Key: k, Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: v}}}
-			}
-			attrs := []*common.KeyValue{text("rpc.method", "GetOrder"), text("rpc.service", "Orders")}
-			resource := &resourcepb.Resource{}
-			// Put the older names first to verify key priority, independent of wire order.
-			if tc.older {
-				attrs = append(attrs, text("http.method", "POST"), integer("http.status_code", 503), text("db.system", "mysql"))
-				resource.Attributes = append(resource.Attributes, text("deployment.environment", "staging"))
-			}
-			if tc.current {
-				attrs = append(attrs, text("http.request.method", "GET"), integer("http.response.status_code", 200), text("db.system.name", "postgresql"))
-				resource.Attributes = append(resource.Attributes, text("deployment.environment.name", "production"))
-			}
-			var got telemetrystore.Batch
-			srv := NewServer(config.Config{}, conversionSubmitter(func(_ context.Context, b telemetrystore.Batch) error { got = b; return nil }))
-			req := &collectortrace.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{{Resource: resource, ScopeSpans: []*tracepb.ScopeSpans{{Spans: []*tracepb.Span{{Attributes: attrs, Status: &tracepb.Status{Code: tracepb.Status_STATUS_CODE_ERROR}}}}}}}}
-			if _, err := srv.exportTraces(t.Context(), req); err != nil {
-				t.Fatal(err)
-			}
-			span := got.Spans[0]
-			if span.HTTPMethod != tc.method || span.HTTPStatusCode != tc.status || span.DBSystem != tc.database || span.DeploymentEnv != tc.environment {
-				t.Fatalf("extracted method=%q status=%q database=%q environment=%q", span.HTTPMethod, span.HTTPStatusCode, span.DBSystem, span.DeploymentEnv)
-			}
-			if span.RPCMethod != "GetOrder" || span.RPCService != "Orders" || span.StatusCode != "STATUS_CODE_ERROR" {
-				t.Fatalf("RPC or status changed: %+v", span)
-			}
-		})
+
+// Fanout stores keys exactly as sent: current and deprecated spellings both
+// stay in the maps, and neither fills a column for the other.
+func TestTraceKeepsAttributeSpellingsAsSent(t *testing.T) {
+	text := func(k, v string) *common.KeyValue {
+		return &common.KeyValue{Key: k, Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: v}}}
+	}
+	integer := func(k string, v int64) *common.KeyValue {
+		return &common.KeyValue{Key: k, Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: v}}}
+	}
+	attrs := []*common.KeyValue{text("http.method", "POST"), integer("http.status_code", 503), text("http.request.method", "GET"), integer("http.response.status_code", 200)}
+	resource := &resourcepb.Resource{Attributes: []*common.KeyValue{text("deployment.environment", "staging"), text("deployment.environment.name", "production")}}
+	var got telemetrystore.Batch
+	srv := NewServer(config.Config{}, conversionSubmitter(func(_ context.Context, b telemetrystore.Batch) error { got = b; return nil }))
+	req := &collectortrace.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{{Resource: resource, ScopeSpans: []*tracepb.ScopeSpans{{Spans: []*tracepb.Span{{Attributes: attrs}}}}}}}
+	if _, err := srv.exportTraces(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	span := got.Spans[0]
+	want := map[string]any{"http.method": "POST", "http.status_code": int64(503), "http.request.method": "GET", "http.response.status_code": int64(200)}
+	if !reflect.DeepEqual(span.Attributes, want) {
+		t.Fatalf("attributes = %v, want %v", span.Attributes, want)
+	}
+	if span.Resource["deployment.environment"] != "staging" || span.Resource["deployment.environment.name"] != "production" {
+		t.Fatalf("resource = %v", span.Resource)
 	}
 }
 
 func TestTraceRPCSemanticConventions(t *testing.T) {
 	for _, tc := range []struct {
-		name            string
-		attrs           map[string]string
-		service, method string
+		name    string
+		attrs   map[string]string
+		service string
 	}{
-		{"old convention", map[string]string{"rpc.service": "oteldemo.CurrencyService", "rpc.method": "Convert"}, "oteldemo.CurrencyService", "Convert"},
-		{"grpc", map[string]string{"rpc.system.name": "grpc", "rpc.method": "oteldemo.CurrencyService/Convert"}, "oteldemo.CurrencyService", "Convert"},
-		{"deprecated grpc", map[string]string{"rpc.system": "grpc", "rpc.method": "oteldemo.CurrencyService/Convert"}, "oteldemo.CurrencyService", "Convert"},
-		{"connect rpc", map[string]string{"rpc.system.name": "connectrpc", "rpc.method": "oteldemo.CurrencyService/Convert"}, "oteldemo.CurrencyService", "Convert"},
-		{"connect rpc with deprecated system", map[string]string{"rpc.system.name": "connectrpc", "rpc.system": "connect_rpc", "rpc.method": "oteldemo.CurrencyService/Convert"}, "oteldemo.CurrencyService", "Convert"},
-		{"deprecated connect rpc", map[string]string{"rpc.system": "connect_rpc", "rpc.method": "oteldemo.CurrencyService/Convert"}, "oteldemo.CurrencyService", "Convert"},
-		{"jsonrpc", map[string]string{"rpc.system.name": "jsonrpc", "rpc.method": "textDocument/hover"}, "", "textDocument/hover"},
-		{"deprecated jsonrpc", map[string]string{"rpc.system": "jsonrpc", "rpc.method": "textDocument/hover"}, "", "textDocument/hover"},
-		{"unknown system", map[string]string{"rpc.system.name": "unknown", "rpc.method": "service/method"}, "", "service/method"},
-		{"deprecated unknown system", map[string]string{"rpc.system": "unknown", "rpc.method": "service/method"}, "", "service/method"},
-		{"no system", map[string]string{"rpc.method": "service/method"}, "", "service/method"},
-		{"current grpc wins", map[string]string{"rpc.system.name": "grpc", "rpc.system": "jsonrpc", "rpc.method": "service/method"}, "service", "method"},
-		{"current jsonrpc wins", map[string]string{"rpc.system.name": "jsonrpc", "rpc.system": "grpc", "rpc.method": "textDocument/hover"}, "", "textDocument/hover"},
-		{"explicit service with qualified method", map[string]string{"rpc.system.name": "grpc", "rpc.service": "CurrencyService", "rpc.method": "oteldemo.CurrencyService/Convert"}, "CurrencyService", "oteldemo.CurrencyService/Convert"},
-		{"method without slash", map[string]string{"rpc.method": "Convert"}, "", "Convert"},
-		{"last slash", map[string]string{"rpc.system.name": "grpc", "rpc.method": "package/CurrencyService/Convert"}, "package/CurrencyService", "Convert"},
-		{"trailing slash", map[string]string{"rpc.system.name": "grpc", "rpc.method": "oteldemo.CurrencyService/"}, "oteldemo.CurrencyService", ""},
-		{"leading slash", map[string]string{"rpc.system.name": "grpc", "rpc.method": "/Convert"}, "", "Convert"},
-		{"slash only", map[string]string{"rpc.system.name": "grpc", "rpc.method": "/"}, "", ""},
-		{"empty method", map[string]string{"rpc.method": ""}, "", ""},
-		{"empty service with qualified method", map[string]string{"rpc.system.name": "grpc", "rpc.service": "", "rpc.method": "oteldemo.CurrencyService/Convert"}, "", "oteldemo.CurrencyService/Convert"},
-		{"empty values", map[string]string{"rpc.service": "", "rpc.method": ""}, "", ""},
-		{"service only", map[string]string{"rpc.service": "CurrencyService"}, "CurrencyService", ""},
-		{"absent", nil, "", ""},
+		{"old convention", map[string]string{"rpc.service": "oteldemo.CurrencyService", "rpc.method": "Convert"}, "oteldemo.CurrencyService"},
+		{"grpc", map[string]string{"rpc.system.name": "grpc", "rpc.method": "oteldemo.CurrencyService/Convert"}, "oteldemo.CurrencyService"},
+		{"deprecated grpc", map[string]string{"rpc.system": "grpc", "rpc.method": "oteldemo.CurrencyService/Convert"}, "oteldemo.CurrencyService"},
+		{"connect rpc", map[string]string{"rpc.system.name": "connectrpc", "rpc.method": "oteldemo.CurrencyService/Convert"}, "oteldemo.CurrencyService"},
+		{"connect rpc with deprecated system", map[string]string{"rpc.system.name": "connectrpc", "rpc.system": "connect_rpc", "rpc.method": "oteldemo.CurrencyService/Convert"}, "oteldemo.CurrencyService"},
+		{"deprecated connect rpc", map[string]string{"rpc.system": "connect_rpc", "rpc.method": "oteldemo.CurrencyService/Convert"}, "oteldemo.CurrencyService"},
+		{"jsonrpc", map[string]string{"rpc.system.name": "jsonrpc", "rpc.method": "textDocument/hover"}, ""},
+		{"deprecated jsonrpc", map[string]string{"rpc.system": "jsonrpc", "rpc.method": "textDocument/hover"}, ""},
+		{"unknown system", map[string]string{"rpc.system.name": "unknown", "rpc.method": "service/method"}, ""},
+		{"deprecated unknown system", map[string]string{"rpc.system": "unknown", "rpc.method": "service/method"}, ""},
+		{"no system", map[string]string{"rpc.method": "service/method"}, ""},
+		{"current grpc wins", map[string]string{"rpc.system.name": "grpc", "rpc.system": "jsonrpc", "rpc.method": "service/method"}, "service"},
+		{"current jsonrpc wins", map[string]string{"rpc.system.name": "jsonrpc", "rpc.system": "grpc", "rpc.method": "textDocument/hover"}, ""},
+		{"explicit service with qualified method", map[string]string{"rpc.system.name": "grpc", "rpc.service": "CurrencyService", "rpc.method": "oteldemo.CurrencyService/Convert"}, "CurrencyService"},
+		{"method without slash", map[string]string{"rpc.method": "Convert"}, ""},
+		{"last slash", map[string]string{"rpc.system.name": "grpc", "rpc.method": "package/CurrencyService/Convert"}, "package/CurrencyService"},
+		{"trailing slash", map[string]string{"rpc.system.name": "grpc", "rpc.method": "oteldemo.CurrencyService/"}, "oteldemo.CurrencyService"},
+		{"leading slash", map[string]string{"rpc.system.name": "grpc", "rpc.method": "/Convert"}, ""},
+		{"slash only", map[string]string{"rpc.system.name": "grpc", "rpc.method": "/"}, ""},
+		{"empty method", map[string]string{"rpc.method": ""}, ""},
+		{"empty service with qualified method", map[string]string{"rpc.system.name": "grpc", "rpc.service": "", "rpc.method": "oteldemo.CurrencyService/Convert"}, ""},
+		{"empty values", map[string]string{"rpc.service": "", "rpc.method": ""}, ""},
+		{"service only", map[string]string{"rpc.service": "CurrencyService"}, "CurrencyService"},
+		{"absent", nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var attrs []*common.KeyValue
@@ -231,8 +214,8 @@ func TestTraceRPCSemanticConventions(t *testing.T) {
 				t.Fatalf("got %d spans, want 1", len(got.Spans))
 			}
 			span := got.Spans[0]
-			if span.RPCService != tc.service || span.RPCMethod != tc.method {
-				t.Fatalf("extracted service=%q method=%q, want service=%q method=%q", span.RPCService, span.RPCMethod, tc.service, tc.method)
+			if span.RPCService != tc.service {
+				t.Fatalf("extracted service=%q, want %q", span.RPCService, tc.service)
 			}
 			if len(span.Attributes) != len(tc.attrs) {
 				t.Fatalf("raw attributes changed: got %v, want %v", span.Attributes, tc.attrs)
@@ -269,3 +252,5 @@ func BenchmarkExportConversion(b *testing.B) {
 		})
 	}
 }
+
+func (conversionSubmitter) Admit(context.Context, int) error { return nil }

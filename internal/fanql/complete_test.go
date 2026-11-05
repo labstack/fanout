@@ -15,7 +15,17 @@ import (
 	"github.com/labstack/fanout/internal/query"
 )
 
-type completionSchemaFunc func(context.Context, query.SchemaRequest) (*query.Schema, error)
+// fakeSchemas fetches with fetch and, like the executor, answers cached
+// lookups from the fetches that succeeded.
+type fakeSchemas struct {
+	fetch  func(context.Context, query.SchemaRequest) (*query.Schema, error)
+	mu     sync.Mutex
+	cached map[[2]string]*query.Schema
+}
+
+func completionSchemaFunc(fetch func(context.Context, query.SchemaRequest) (*query.Schema, error)) *fakeSchemas {
+	return &fakeSchemas{fetch: fetch, cached: map[[2]string]*query.Schema{}}
+}
 
 // expectAt replaces a whole lexical token even when the cursor is in its middle.
 // Punctuation is consumed by the grammar: a cursor after ':' expects a value.
@@ -61,14 +71,29 @@ func TestCompleteBoundsDistinctNamespaceFetchAdmission(t *testing.T) {
 	}
 }
 
-func (f completionSchemaFunc) Schema(ctx context.Context, req query.SchemaRequest) (*query.Schema, error) {
-	return f(ctx, req)
+func (f *fakeSchemas) Schema(ctx context.Context, req query.SchemaRequest) (*query.Schema, error) {
+	key := [2]string{req.Window, req.Namespace}
+	if req.Cached {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if schema := f.cached[key]; schema != nil {
+			return schema, nil
+		}
+		return nil, query.ErrSchemaNotCached
+	}
+	schema, err := f.fetch(ctx, req)
+	if err == nil && schema != nil {
+		f.mu.Lock()
+		f.cached[key] = schema
+		f.mu.Unlock()
+	}
+	return schema, err
 }
 
 func completionFixtureSchema() *query.Schema {
 	return &query.Schema{Signals: map[string]query.SignalSchema{
 		"logs": {Columns: []query.ColumnSchema{
-			{Field: query.Field{Name: "severity"}, Values: []query.Option{{Value: "ERROR"}, {Value: "INFO"}, {Value: "WARN"}}},
+			{Field: query.Field{Name: "severity"}, Values: []query.Option{{Value: "ERROR"}, {Value: "INFO"}, {Value: "WARN"}, {Value: "UNSPECIFIED"}}},
 			{Field: query.Field{Name: "service"}, Values: []query.Option{{Value: "api"}, {Value: "checkout"}}},
 		}},
 		"spans": {Attributes: []query.AttributeSchema{
@@ -176,7 +201,7 @@ func TestCompleteFixtures(t *testing.T) {
 		replace                   *query.TextSpan
 	}{
 		{text: "logs where sev¦erity:error", first: "severity", replace: &query.TextSpan{Start: 11, End: 19}},
-		{text: "logs where severity:¦", includes: []string{"trace", "debug", "info", "warn", "error", "fatal", "*"}, excludes: []string{"ERROR", "INFO", "WARN"}},
+		{text: "logs where severity:¦", includes: []string{"trace", "debug", "info", "warn", "error", "fatal", "unspecified", "*"}, excludes: []string{"ERROR", "INFO", "WARN", "UNSPECIFIED"}},
 		{text: "logs where severity>=¦", exact: []string{"trace", "debug", "info", "warn", "error", "fatal"}},
 		{text: "spans where http.¦", exact: []string{"http.target", "http.method"}, insert: "http.target"},
 		{text: "spans where attributes['htt¦", first: "http.target", insert: "http.target']", replace: &query.TextSpan{Start: 24, End: 27}},
@@ -358,10 +383,8 @@ func TestCompleteColdCacheCoalesces(t *testing.T) {
 		t.Fatalf("negative cache %+v calls %d", r.Schema, failed.Load())
 	}
 	now = now.Add(10 * time.Second)
-	waitCompletion(t, bad, CompleteRequest{Window: "1h"}, func(r CompleteResponse) bool { return r.Schema.Error })
-	if failed.Load() != 2 {
-		t.Fatalf("negative expiry calls %d", failed.Load())
-	}
+	// The error stays reported while the retry runs.
+	waitCompletion(t, bad, CompleteRequest{Window: "1h"}, func(r CompleteResponse) bool { return r.Schema.Error && failed.Load() == 2 })
 }
 
 func TestCompleteItemsRankByPrefixThenSubstringThenCount(t *testing.T) {
@@ -390,7 +413,7 @@ func TestCompleteVocabularyPrecedesSampledValues(t *testing.T) {
 	schema.Signals["logs"] = logs
 	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
 	r := waitCompletion(t, c, completionRequest("logs where severity:¦"), func(r CompleteResponse) bool { return r.Schema.Warm })
-	if got := completionLabels(r); len(got) < 7 || !slices.Equal(got[:7], []string{"trace", "debug", "info", "warn", "error", "fatal", "CUSTOM"}) {
+	if got := completionLabels(r); len(got) < 7 || !slices.Equal(got[:7], []string{"trace", "debug", "info", "warn", "error", "fatal", "custom"}) {
 		t.Fatalf("vocabulary before samples: %v", got)
 	}
 }
@@ -437,7 +460,7 @@ func TestCompleteSchemaConcurrencyIsProcessWide(t *testing.T) {
 	gate := make(chan struct{})
 	started := make(chan struct{}, 12)
 	var active, maximum, calls atomic.Int32
-	source := completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
+	fetch := func(context.Context, query.SchemaRequest) (*query.Schema, error) {
 		calls.Add(1)
 		n := active.Add(1)
 		defer active.Add(-1)
@@ -446,8 +469,8 @@ func TestCompleteSchemaConcurrencyIsProcessWide(t *testing.T) {
 		started <- struct{}{}
 		<-gate
 		return completionFixtureSchema(), nil
-	})
-	a, b := NewCompleter(source), NewCompleter(source)
+	}
+	a, b := NewCompleter(completionSchemaFunc(fetch)), NewCompleter(completionSchemaFunc(fetch))
 	for i := 0; i < 6; i++ {
 		a.Complete(context.Background(), CompleteRequest{Window: "1h", Namespace: string(rune('a' + i))})
 		b.Complete(context.Background(), CompleteRequest{Window: "1h", Namespace: string(rune('a' + i))})
@@ -561,4 +584,174 @@ func TestCompleteInsertedAttributeFieldsPreserveScope(t *testing.T) {
 func applyCompletion(text string, replace query.TextSpan, insert string) string {
 	runes := []rune(text)
 	return string(runes[:replace.Start]) + insert + string(runes[replace.End:])
+}
+
+func TestCompleteTermStartAfterWordsCaseAndNegation(t *testing.T) {
+	schema := completionFixtureSchema()
+	spans := schema.Signals["spans"]
+	spans.Attributes = append(spans.Attributes, query.AttributeSchema{Key: "rpc.grpc.status_code", Scope: "attributes", Type: "number", Count: 2000, Services: "checkout"})
+	spans.Attributes[1].Values = []query.Option{{Value: "GET", Count: 9}, {Value: "POST", Count: 3}}
+	spans.Attributes[2].Values = []query.Option{{Value: "7", Count: 4}}
+	spans.Columns = []query.ColumnSchema{{Field: query.Field{Name: "service"}, Values: []query.Option{{Value: "checkout", Count: 5}}}}
+	schema.Signals["spans"] = spans
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
+	waitCompletion(t, c, completionRequest("spans "), func(r CompleteResponse) bool { return r.Schema.Warm })
+	labels := func(marked string, vars ...query.Variable) []string {
+		req := completionRequest(marked)
+		req.Variables = vars
+		return completionLabels(c.Complete(context.Background(), req))
+	}
+	before := func(got []string, a, b string) bool {
+		i, j := slices.Index(got, a), slices.Index(got, b)
+		return i >= 0 && (j < 0 || i < j)
+	}
+	for _, text := range []string{"spans where foo ¦", "spans where ¦", "spans where -¦", "spans where not ¦"} {
+		got := labels(text)
+		if len(got) == 0 || got[0] != "namespace" || !before(got, "service", ":") || !before(got, "service", "sort") || slices.Contains(got, "where") {
+			t.Errorf("%s: fields first and no second where: %v", text, got)
+		}
+		if strings.Contains(text, "-") || strings.Contains(text, "not") {
+			if slices.Contains(got, "sort") || slices.Contains(got, "|") {
+				t.Errorf("%s: clause words after negation: %v", text, got)
+			}
+		}
+	}
+	for _, text := range []string{"logs where timeout serv¦", "spans where café serv¦"} {
+		if !slices.Contains(labels(text), "service") {
+			t.Errorf("%s: %v", text, labels(text))
+		}
+	}
+	if got := labels("SPANS WHERE SERVICE:¦"); !slices.Contains(got, "checkout") {
+		t.Errorf("uppercase field values: %v", got)
+	}
+	if got := labels("SPANS WHERE KIND:¦"); !slices.Contains(got, "server") {
+		t.Errorf("uppercase vocabulary: %v", got)
+	}
+	r := c.Complete(context.Background(), CompleteRequest{Text: "spans where $", Cursor: 13, Variables: []query.Variable{{Name: "service"}}})
+	if got := completionLabels(r); !slices.Equal(got, []string{"$service"}) || r.Replace != (query.TextSpan{Start: 12, End: 13}) {
+		t.Errorf("variable after $: %v %+v", got, r.Replace)
+	}
+	if got := labels("spans where service:checkout | count() by ¦"); !before(got, "operation", "rpc.grpc.status_code") {
+		t.Errorf("columns before boosted attributes after by: %v", got)
+	}
+	if got := labels("spans where service:checkout | count_if(¦"); !before(got, "operation", "rpc.grpc.status_code") {
+		t.Errorf("columns before boosted attributes in count_if: %v", got)
+	}
+	if got := labels("spans where service:checkout | p95(¦"); len(got) == 0 || got[0] != "duration" {
+		t.Errorf("duration first in a numeric slot: %v", got)
+	}
+	if got := labels("spans where http.method:¦"); !before(got, "GET", "POST") || !slices.Contains(got, "*") {
+		t.Errorf("attribute values: %v", got)
+	}
+	r = c.Complete(context.Background(), completionRequest("spans where user.score:¦"))
+	if i := slices.IndexFunc(r.Items, func(i Item) bool { return i.Label == "7" }); i < 0 || r.Items[i].Insert != "7" {
+		t.Errorf("number attribute values insert bare: %+v", r.Items)
+	}
+	if got := labels("logs where body~¦"); slices.Contains(got, "*") {
+		t.Errorf("* offered under ~: %v", got)
+	}
+	r = c.Complete(context.Background(), completionRequest("metrics sort ¦"))
+	if len(r.Items) != 1 || r.Items[0].Detail == "" {
+		t.Errorf("metrics sort explains itself: %+v", r.Items)
+	}
+}
+
+func TestCheckCompleteRequest(t *testing.T) {
+	for _, tt := range []struct {
+		req  CompleteRequest
+		want string
+	}{
+		{CompleteRequest{Text: "spans", Cursor: 5, Window: "1h"}, ""},
+		{CompleteRequest{Text: "spans", Cursor: 0, Window: "7d"}, ""},
+		{CompleteRequest{Text: "日本", Cursor: 2}, ""},
+		{CompleteRequest{Text: "spans", Cursor: 999}, "cursor must be from 0 to 5"},
+		{CompleteRequest{Text: "spans", Cursor: -1}, "cursor must be from 0 to 5"},
+		{CompleteRequest{Text: "spans", Cursor: 1, Window: "bogus"}, `unknown window "bogus"`},
+		{CompleteRequest{Text: "spans", Cursor: 1, Window: "-1h"}, `unknown window "-1h"`},
+	} {
+		err := CheckCompleteRequest(tt.req)
+		if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.HasPrefix(err.Error(), tt.want)) {
+			t.Errorf("%+v: %v, want %q", tt.req, err, tt.want)
+		}
+	}
+}
+
+func TestCompleteAbsoluteRangeUsesItsLength(t *testing.T) {
+	requests := make(chan query.SchemaRequest, 2)
+	c := NewCompleter(completionSchemaFunc(func(_ context.Context, r query.SchemaRequest) (*query.Schema, error) {
+		requests <- r
+		return completionFixtureSchema(), nil
+	}))
+	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
+	c.now = func() time.Time { return now }
+	from, to := now.Add(-3*time.Hour), now
+	r := c.Complete(context.Background(), CompleteRequest{From: &from, To: &to})
+	if r.Schema.Window != "3h" || r.Schema.Recent {
+		t.Errorf("range ending now: %+v", r.Schema)
+	}
+	<-requests
+	from, to = now.Add(-50*time.Hour), now.Add(-48*time.Hour)
+	if r := c.Complete(context.Background(), CompleteRequest{From: &from, To: &to}); r.Schema.Window != "3h" || !r.Schema.Recent {
+		t.Errorf("past range: %+v", r.Schema)
+	}
+}
+
+// The completer keeps no schema of its own: each completion reads the
+// source's cache, which serves stale entries while it refreshes them.
+func TestCompleteReadsTheSourceCache(t *testing.T) {
+	var calls atomic.Int32
+	source := completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
+		calls.Add(1)
+		return completionFixtureSchema(), nil
+	})
+	c := NewCompleter(source)
+	req := CompleteRequest{Text: "spans where http.", Cursor: 17, Window: "1h"}
+	waitCompletion(t, c, req, func(r CompleteResponse) bool { return r.Schema.Warm })
+	refreshed := completionFixtureSchema()
+	spans := refreshed.Signals["spans"]
+	spans.Attributes = append(spans.Attributes, query.AttributeSchema{Key: "http.route", Scope: "attributes", Type: "string", Count: 1})
+	refreshed.Signals["spans"] = spans
+	source.mu.Lock()
+	source.cached[[2]string{"1h", ""}] = refreshed
+	source.mu.Unlock()
+	r := c.Complete(context.Background(), req)
+	if !slices.Contains(completionLabels(r), "http.route") || calls.Load() != 1 {
+		t.Fatalf("labels %v after %d fetches", completionLabels(r), calls.Load())
+	}
+}
+
+// Levels stored in two cases complete once, in lowercase.
+func TestCompleteSeverityOncePerLevel(t *testing.T) {
+	schema := completionFixtureSchema()
+	logs := schema.Signals["logs"]
+	logs.Columns[0].Values = append(logs.Columns[0].Values, query.Option{Value: "error", Count: 5}, query.Option{Value: "Custom", Count: 3}, query.Option{Value: "CUSTOM", Count: 2})
+	schema.Signals["logs"] = logs
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
+	r := waitCompletion(t, c, completionRequest("logs where severity:¦"), func(r CompleteResponse) bool { return r.Schema.Warm })
+	seen := map[string]int{}
+	for _, label := range completionLabels(r) {
+		seen[label]++
+	}
+	if seen["error"] != 1 || seen["custom"] != 1 {
+		t.Fatalf("labels %v", completionLabels(r))
+	}
+}
+
+// A standard key completes with its column's type and an indexed mark.
+func TestCompleteMarksIndexedKeys(t *testing.T) {
+	schema := completionFixtureSchema()
+	spans := schema.Signals["spans"]
+	spans.Attributes = append(spans.Attributes, query.AttributeSchema{Key: "http.response.status_code", Scope: "attributes", Type: "number", Count: 4, Indexed: true})
+	schema.Signals["spans"] = spans
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
+	r := waitCompletion(t, c, completionRequest("spans where http.response.¦"), func(r CompleteResponse) bool { return r.Schema.Warm })
+	for _, item := range r.Items {
+		if item.Label == "http.response.status_code" {
+			if item.Detail != "number, indexed" {
+				t.Fatalf("detail %q", item.Detail)
+			}
+			return
+		}
+	}
+	t.Fatalf("labels %v", completionLabels(r))
 }

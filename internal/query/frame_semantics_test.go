@@ -37,10 +37,10 @@ func TestSeriesKeepsNewestBucket(t *testing.T) {
 	if f == nil {
 		t.Fatalf("missing frame: %+v", results[0])
 	}
-	if f.Rows != 840 || f.Truncated {
+	if f.Rows != 420 || f.Truncated {
 		t.Fatalf("rows=%d truncated=%v", f.Rows, f.Truncated)
 	}
-	if got := f.Values[0][f.Rows-1]; got != fixtureStart.Add(time.Hour-30*time.Second).UnixMilli() {
+	if got := f.Values[0][f.Rows-1]; got != fixtureStart.Add(time.Hour-time.Minute).UnixMilli() {
 		t.Fatalf("last bucket=%v", got)
 	}
 }

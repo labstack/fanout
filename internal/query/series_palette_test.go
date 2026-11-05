@@ -71,7 +71,7 @@ func TestGroupedBarOtherAggregatesBeforeErrorRate(t *testing.T) {
 			sp.SpanID = fmt.Sprintf("s%d_e%d", service, event)
 			sp.TraceID = sp.SpanID
 			sp.ServiceName = fmt.Sprintf("svc%d", service)
-			sp.HTTPRoute = "/cart"
+			sp.Attributes = map[string]any{"http.route": "/cart"}
 			sp.StatusCode = "STATUS_CODE_OK"
 			if service == 7 {
 				sp.StatusCode = "STATUS_CODE_ERROR"
@@ -82,7 +82,7 @@ func TestGroupedBarOtherAggregatesBeforeErrorRate(t *testing.T) {
 	commit(t, repo, spans, nil)
 	e := NewExecutor(duck, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
-	d := Dashboard{Name: "Bars", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "s", Title: "S", Viz: "bar", Better: "higher", Query: &Spec{From: "spans", Measures: []string{"error_rate()"}, By: []string{"http_route", "service"}}}}}
+	d := Dashboard{Name: "Bars", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "s", Title: "S", Viz: "bar", Better: "higher", Query: &Spec{From: "spans", Measures: []string{"error_rate()"}, By: []string{"attributes['http.route']", "service"}}}}}
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil || got[0].Frame == nil {
 		t.Fatalf("run: %+v %v", got, err)

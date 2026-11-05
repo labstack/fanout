@@ -13,9 +13,9 @@ it("uses nearest-rank p95 without dropping slow samples or mutating input", () =
 });
 
 it("counts completed refresh requests including duplicates and variable reloads", () => {
-  const valid = ["/api/queries/run", "/api/annotations"];
+  const valid = ["/api/queries/run", "/api/annotations/query"];
   expect(() => assertRefreshRequests(valid)).not.toThrow();
-  for (const extra of ["/api/queries/run", "/api/annotations", "/api/queries/variables/resolve"]) {
+  for (const extra of ["/api/queries/run", "/api/annotations/query", "/api/queries/variables/resolve"]) {
     expect(() => assertRefreshRequests([...valid, extra])).toThrow();
   }
   expect(() => assertRefreshRequests(valid.slice(0, 1))).toThrow();

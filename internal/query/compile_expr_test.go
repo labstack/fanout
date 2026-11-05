@@ -16,13 +16,13 @@ func TestCheckCountIfFilters(t *testing.T) {
 		{"count_if(" + strings.Repeat(" ", 480) + "status = 'STATUS_CODE_ERROR') as e", "filters are 1 to 500 characters"},
 	} {
 		d := exprDashboard(tc.text)
-		_, problems, err := Check(t.Context(), duck, &d)
+		_, problems, err := checkWith(t.Context(), duck, &d, nil)
 		if err != nil || len(problems) != 1 || problems[0].Path != "panels[0].query.measures[0]" || !strings.Contains(problems[0].Message, tc.want) {
 			t.Errorf("%s: %+v %v", tc.text, problems, err)
 		}
 	}
 	d := exprDashboard("count_if(status = 'STATUS_CODE_ERROR') as e")
-	checked, problems, err := Check(t.Context(), duck, &d)
+	checked, problems, err := checkWith(t.Context(), duck, &d, nil)
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("%+v %v", problems, err)
 	}
@@ -34,11 +34,11 @@ func TestCheckCountIfFilters(t *testing.T) {
 }
 func TestCompileExpressionSQL(t *testing.T) {
 	duck, _ := newTestEngine(t)
-	text := "count_if(TRY_CAST(http_status_code AS INTEGER) >= 500) / count() * 100 as pct_5xx"
+	text := "count_if(attributes['http.response.status_code'] >= 500) / count() * 100 as pct_5xx"
 	d := exprDashboard(text)
-	d.Panels[0].Query.By = []string{"http_route"}
+	d.Panels[0].Query.By = []string{"attributes['http.route']"}
 	d.Panels[0].Query.Where = []string{"kind = 'SPAN_KIND_SERVER'"}
-	checked, problems, err := Check(t.Context(), duck, &d)
+	checked, problems, err := checkWith(t.Context(), duck, &d, nil)
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("%+v %v", problems, err)
 	}
@@ -47,13 +47,13 @@ func TestCompileExpressionSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, part := range []string{"count(*) FILTER (WHERE (", "TRY_CAST(http_status_code AS INTEGER)", " / nullif(count(*)::DOUBLE, 0) * 100 AS \"pct_5xx\""} {
+	for _, part := range []string{"count(*) FILTER (WHERE (", "attributes['http.response.status_code'] >= 500", " / nullif(count(*)::DOUBLE, 0) * 100 AS \"pct_5xx\""} {
 		if !strings.Contains(compiled.SQL, part) {
 			t.Fatalf("missing %s: %s", part, compiled.SQL)
 		}
 	}
 	d = exprDashboard("(count_if(duration_ms <= 500) + count_if(duration_ms > 500 AND duration_ms <= 2000) / 2) / count() as apdex")
-	checked, problems, err = Check(t.Context(), duck, &d)
+	checked, problems, err = checkWith(t.Context(), duck, &d, nil)
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("%+v %v", problems, err)
 	}
@@ -64,7 +64,7 @@ func TestCompileExpressionSQL(t *testing.T) {
 	d = exprDashboard("count_if(status = 'STATUS_CODE_ERROR') as a", "p95(duration_ms)")
 	d.Panels[0].Viz = "scatter"
 	d.Panels[0].Query.By = []string{"service"}
-	checked, problems, err = Check(t.Context(), duck, &d)
+	checked, problems, err = checkWith(t.Context(), duck, &d, nil)
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("%+v %v", problems, err)
 	}
@@ -89,7 +89,7 @@ func TestCompileExpressionTrendsAndTotals(t *testing.T) {
 	capture := &expressionSQLCapture{Engine: duck}
 	e := NewExecutor(capture, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
-	for _, tc := range []struct{ measure, alias, fragment string }{{"count_if(status = 'STATUS_CODE_ERROR') / count() as e", "e", "FILTER (WHERE"}, {"share()", "share", "_trend_totals AS"}} {
+	for _, tc := range []struct{ measure, alias, fragment string }{{"count_if(status = 'STATUS_CODE_ERROR') / count() as e", "e", "FILTER (WHERE"}, {"share()", "share", "sum(sum(spans)) OVER"}} {
 		capture.queries = nil
 		d := exprDashboard(tc.measure)
 		p := &d.Panels[0]
@@ -107,7 +107,7 @@ func TestCompileExpressionTrendsAndTotals(t *testing.T) {
 				if !strings.Contains(sql, tc.fragment) {
 					t.Fatalf("trend: %s", sql)
 				}
-				if tc.alias == "share" && (!strings.Contains(sql, "100.0*count(*)/nullif(max(_trend_total),0)") || !strings.Contains(sql, "FROM _trend_scope JOIN _trend_totals")) {
+				if tc.alias == "share" && (!strings.Contains(sql, "100.0 * sum(spans) / sum(sum(spans)) OVER") || !strings.Contains(sql, "FROM span_rollup")) {
 					t.Fatalf("share scope changed: %s", sql)
 				}
 			}
@@ -126,7 +126,7 @@ func TestCompileExpressionTrendsAndTotals(t *testing.T) {
 	}
 	found := false
 	for _, sql := range capture.queries {
-		if strings.Contains(sql, "FILTER (WHERE") && !strings.Contains(sql, "time_bucket(") {
+		if strings.Contains(sql, "FILTER (WHERE") && strings.Contains(sql, "GROUPING SETS") {
 			found = true
 		}
 	}

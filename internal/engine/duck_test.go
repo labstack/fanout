@@ -19,114 +19,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-func TestLatencyRowStruct(t *testing.T) {
-	r := LatencyRow{
-		ServiceName: "api-gateway",
-		P95Ms:       45.5,
-		ErrorRate:   0.01,
-		Spans:       1000,
-	}
-
-	if r.ServiceName != "api-gateway" {
-		t.Errorf("ServiceName = %q", r.ServiceName)
-	}
-	if r.P95Ms != 45.5 {
-		t.Errorf("P95Ms = %f", r.P95Ms)
-	}
-	if r.ErrorRate != 0.01 {
-		t.Errorf("ErrorRate = %f", r.ErrorRate)
-	}
-	if r.Spans != 1000 {
-		t.Errorf("Spans = %d", r.Spans)
-	}
-}
-
-func TestLogsSampleStruct(t *testing.T) {
-	s := LogsSample{
-		TS:   "2024-01-15T10:30:00Z",
-		Body: "Connection failed",
-		Svc:  "user-service",
-		Sev:  "ERROR",
-	}
-
-	if s.TS != "2024-01-15T10:30:00Z" {
-		t.Errorf("TS = %q", s.TS)
-	}
-	if s.Body != "Connection failed" {
-		t.Errorf("Body = %q", s.Body)
-	}
-	if s.Svc != "user-service" {
-		t.Errorf("Svc = %q", s.Svc)
-	}
-	if s.Sev != "ERROR" {
-		t.Errorf("Sev = %q", s.Sev)
-	}
-}
-
-func TestThroughputRowStruct(t *testing.T) {
-	r := ThroughputRow{
-		Bucket: "2024-01-15T10:00:00Z",
-		Spans:  5000,
-	}
-
-	if r.Bucket != "2024-01-15T10:00:00Z" {
-		t.Errorf("Bucket = %q", r.Bucket)
-	}
-	if r.Spans != 5000 {
-		t.Errorf("Spans = %d", r.Spans)
-	}
-}
-
-func TestServiceThroughputRowStruct(t *testing.T) {
-	r := ServiceThroughputRow{
-		Service:        "checkout",
-		SpansPerMinute: 120,
-	}
-
-	if r.Service != "checkout" {
-		t.Errorf("Service = %q", r.Service)
-	}
-	if r.SpansPerMinute != 120 {
-		t.Errorf("SpansPerMinute = %d", r.SpansPerMinute)
-	}
-}
-
-func TestErrorRouteStruct(t *testing.T) {
-	r := ErrorRoute{
-		Route: "POST /api/orders",
-		Count: 42,
-	}
-
-	if r.Route != "POST /api/orders" {
-		t.Errorf("Route = %q", r.Route)
-	}
-	if r.Count != 42 {
-		t.Errorf("Count = %d", r.Count)
-	}
-}
-
-func TestErrorRouteRowStruct(t *testing.T) {
-	r := ErrorRouteRow{
-		ServiceName: "payment-service",
-		Name:        "process_payment",
-		Errors:      10,
-		ErrorRate:   0.05,
-	}
-
-	if r.ServiceName != "payment-service" {
-		t.Errorf("ServiceName = %q", r.ServiceName)
-	}
-	if r.Name != "process_payment" {
-		t.Errorf("Name = %q", r.Name)
-	}
-	if r.Errors != 10 {
-		t.Errorf("Errors = %d", r.Errors)
-	}
-	if r.ErrorRate != 0.05 {
-		t.Errorf("ErrorRate = %f", r.ErrorRate)
-	}
-}
-
 func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -300,91 +192,60 @@ func TestReadTransactionRollbackFailureDiscardsTheConnection(t *testing.T) {
 	}
 }
 
-func TestQueryContextHoldsParquetLockUntilRowsFinish(t *testing.T) {
+// Open rows keep their snapshot pinned: a batch retired meanwhile keeps its
+// files until the rows finish.
+func TestQueryContextHoldsParquetPinUntilRowsFinish(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	defer db.Close()
+	repository := emptyRepository(t)
+	if err := commitRestoredFixture(repository, context.Background(), telemetrystore.Batch{ID: "expired", Spans: []telemetry.Span{{TraceID: "trace", IngestedAt: 1}}}); err != nil {
+		t.Fatal(err)
+	}
 	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(1))
-	d := &Duck{DB: db, writeDB: db}
+	d := &Duck{DB: db, writeDB: db, repository: repository}
 	rows, err := d.QueryContext(context.Background(), "SELECT 1")
 	if err != nil {
 		t.Fatalf("QueryContext: %v", err)
 	}
-	lockAcquired := make(chan struct{})
-	go func() {
-		mustLock(&d.parquetMu)
-		close(lockAcquired)
-		d.parquetMu.Unlock()
-	}()
-	select {
-	case <-lockAcquired:
-		t.Fatal("Parquet write lock acquired while query rows were still open")
-	case <-time.After(25 * time.Millisecond):
+	if n, err := repository.PruneParquet(context.Background(), d, time.Now().UnixNano(), 10); err != nil || n != 1 {
+		t.Fatalf("retention while rows are open: pruned=%d err=%v", n, err)
 	}
-	if !rows.Next() {
-		t.Fatalf("rows.Next() = false: %v", rows.Err())
+	dir := repository.Parquet.BatchPath("expired")
+	if n, err := repository.CollectRetiredParquet(); err != nil || n != 0 {
+		t.Fatalf("collected %d retired batches under open rows: %v", n, err)
 	}
-	var value int
-	if err := rows.Scan(&value); err != nil {
-		t.Fatalf("rows.Scan: %v", err)
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("retired files removed while rows were open: %v", err)
 	}
-	if rows.Next() {
-		t.Fatal("rows.Next() returned an unexpected second row")
+	for rows.Next() {
 	}
-	select {
-	case <-lockAcquired:
-	case <-time.After(time.Second):
-		t.Fatal("Parquet write lock remained blocked after row iteration completed")
+	if n, err := repository.CollectRetiredParquet(); err != nil || n != 1 {
+		t.Fatalf("collected %d retired batches after rows finished: %v", n, err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("retired files remain after rows finished: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestQueryRowScanCancelsWhileMaintenanceWaitsForReaders(t *testing.T) {
-	d := &Duck{}
-	mustLock(&d.parquetMu)
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	started := time.Now()
-	err := d.QueryRowScan(ctx, []any{new(int)}, "SELECT 1")
-	d.parquetMu.Unlock()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("QueryRowScan error = %v, want deadline exceeded", err)
-	}
-	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
-		t.Fatalf("QueryRowScan ignored lock deadline for %s", elapsed)
-	}
-}
-
-func TestPublishParquetHonorsContext(t *testing.T) {
-	d := &Duck{}
-	mustRLock(t, &d.parquetMu)
-	timeoutsBefore := testutil.ToFloat64(metrics.ParquetPublishTimeouts)
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+// Publication never waits for readers, however long they hold a snapshot.
+func TestPublishParquetDoesNotWaitForReaders(t *testing.T) {
+	d := &Duck{repository: emptyRepository(t)}
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	called := false
-	err := d.PublishParquet(ctx, func(context.Context) error {
-		called = true
-		return nil
-	})
-	d.parquetMu.RUnlock()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("PublishParquet error = %v, want deadline exceeded", err)
+	if err := d.PublishParquet(ctx, func(context.Context) error { called = true; return nil }); err != nil {
+		t.Fatalf("publication waited for a pinned reader: %v", err)
 	}
-	if called {
-		t.Fatal("publication ran after its context expired")
-	}
-	if got := waitingParquetWriters(&d.parquetMu); got != 0 {
-		t.Fatalf("canceled publication remained queued: %d", got)
-	}
-	if got := testutil.ToFloat64(metrics.ParquetPublishTimeouts); got != timeoutsBefore+1 {
-		t.Fatalf("publication timeouts = %v, want %v", got, timeoutsBefore+1)
-	}
-	if got := testutil.ToFloat64(metrics.ParquetPublishWaiters); got != 0 {
-		t.Fatalf("publication waiters after timeout = %v, want 0", got)
+	if !called {
+		t.Fatal("publication callback did not run")
 	}
 }
 
@@ -403,74 +264,6 @@ func TestParquetPublicationDoesNotWaitForDuckDBWriteGate(t *testing.T) {
 	}
 }
 
-func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(1))
-	d := &Duck{DB: db, writeDB: db}
-	mustRLock(t, &d.parquetMu)
-	writerAcquired := make(chan struct{})
-	releaseWriter := make(chan struct{})
-	writerDone := make(chan struct{})
-	go func() {
-		mustLock(&d.parquetMu)
-		close(writerAcquired)
-		<-releaseWriter
-		d.parquetMu.Unlock()
-		close(writerDone)
-	}()
-	deadline := time.Now().Add(time.Second)
-	for waitingParquetWriters(&d.parquetMu) == 0 {
-		if time.Now().After(deadline) {
-			d.parquetMu.RUnlock()
-			t.Fatal("maintenance writer did not begin waiting")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	var value int
-	if err := d.QueryRowScan(context.Background(), []any{&value}, "SELECT 1"); err != nil {
-		d.parquetMu.RUnlock()
-		t.Fatalf("new read blocked behind waiting maintenance: %v", err)
-	}
-	if value != 1 {
-		d.parquetMu.RUnlock()
-		t.Fatalf("value = %d, want 1", value)
-	}
-	d.parquetMu.RUnlock()
-	select {
-	case <-writerAcquired:
-	case <-time.After(time.Second):
-		t.Fatal("maintenance writer did not run after readers drained")
-	}
-	close(releaseWriter)
-	select {
-	case <-writerDone:
-	case <-time.After(time.Second):
-		t.Fatal("maintenance writer did not release")
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRollupReadAdmissionSkipsPublication(t *testing.T) {
-	d := &Duck{publicationBounds: func() (int64, int64, int64) { return 2, 2, 1 }, rollupWatermarks: map[string]int64{serviceRollupStateKey: 1}}
-	mustLock(&d.parquetMu)
-	defer d.parquetMu.Unlock()
-	if rows, err := d.refreshServiceRollup(t.Context()); err != nil || rows != 0 {
-		t.Fatalf("service skip rows=%d error=%v", rows, err)
-	}
-	if rows, pending, err := d.refreshEdgeRollupPass(t.Context()); err != nil || rows != 0 || pending {
-		t.Fatalf("edge skip rows=%d pending=%v error=%v", rows, pending, err)
-	}
-	if d.rollupWatermarks[serviceRollupStateKey] != 1 {
-		t.Fatal("skipped pass moved watermark")
-	}
-}
-
 func TestRollupAdmissionDoesNotCancelAdmittedWork(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -483,7 +276,28 @@ func TestRollupAdmissionDoesNotCancelAdmittedWork(t *testing.T) {
 	mock.ExpectExec("CREATE OR REPLACE TEMP TABLE service_pass_affected").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("SELECT epoch_ns").WillReturnRows(sqlmock.NewRows([]string{"lo", "hi"}).AddRow(0, 60_000_000_000))
 	mock.ExpectExec("DELETE FROM service_rollup").WillDelayFor(20 * time.Millisecond).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM span_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM log_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM endpoint_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM receiver_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM resource_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM receiver_entity_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE OR REPLACE TEMP TABLE service_pass_spans").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("FROM service_pass_affected").WillReturnRows(sqlmock.NewRows([]string{"namespace", "bucket", "service"}).AddRow("ns", int64(0), "api"))
+	mock.ExpectExec("INSERT INTO service_pass_spans").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO span_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("WITH span_agg").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DROP TABLE service_pass_spans").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("FROM service_pass_affected").WillReturnRows(sqlmock.NewRows([]string{"namespace", "bucket", "service"}).AddRow("ns", int64(0), "api"))
+	mock.ExpectExec("INSERT INTO resource_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO endpoint_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("FROM service_pass_affected").WillReturnRows(sqlmock.NewRows([]string{"namespace", "bucket", "service"}).AddRow("ns", int64(0), "api"))
+	mock.ExpectExec("INSERT INTO resource_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO log_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("FROM service_pass_affected").WillReturnRows(sqlmock.NewRows([]string{"namespace", "bucket", "service"}).AddRow("ns", int64(0), "api"))
+	mock.ExpectExec("INSERT INTO resource_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO receiver_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO receiver_entity_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DROP TABLE service_pass_affected").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO rollup_state").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -496,51 +310,9 @@ func TestRollupAdmissionDoesNotCancelAdmittedWork(t *testing.T) {
 	}
 }
 
-func TestIndexedTraceReadHonorsParquetGateContext(t *testing.T) {
-	repository, err := telemetrystore.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repository.Close()
-	d := &Duck{repository: repository}
-	mustLock(&d.parquetMu)
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	_, _, err = d.Trace(ctx, telemetry.TraceQuery{TraceID: "trace", StartNanos: 1, EndNanos: 2, Limit: 1})
-	d.parquetMu.Unlock()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Trace error = %v, want deadline exceeded", err)
-	}
-}
-
-func TestParquetStatsWaitForStableNamespace(t *testing.T) {
-	repository, err := telemetrystore.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repository.Close()
-	d := &Duck{repository: repository}
-	mustLock(&d.parquetMu)
-	done := make(chan struct{})
-	go func() {
-		d.updateParquetStats(context.Background())
-		close(done)
-	}()
-	select {
-	case <-done:
-		d.parquetMu.Unlock()
-		t.Fatal("Parquet stats read while the batch namespace was changing")
-	case <-time.After(25 * time.Millisecond):
-	}
-	d.parquetMu.Unlock()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("Parquet stats did not resume after publication")
-	}
-}
-
-func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
+// Retention publishes while a reader is pinned and the DuckDB write gate is
+// held; only the rollup pruning that needs the gate waits for it.
+func TestRepositoryPublicationDoesNotWaitForReadersOrDuckDBWrites(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -555,26 +327,38 @@ func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectExec("DELETE FROM service_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM span_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM log_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM endpoint_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM receiver_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM resource_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM receiver_entity_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DELETE FROM edge_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
 	d := &Duck{DB: db, writeDB: db, repository: repository, cfg: config.Config{MaintenanceInterval: time.Nanosecond, RetentionDays: 1}}
-	mustRLock(t, &d.parquetMu)
+	pin := d.pinParquet()
 	release := d.writeGate.Lock(writegate.RollupService)
 	done := make(chan error, 1)
 	go func() { done <- d.runRepositoryMaintenance(context.Background()) }()
-	deadline := time.Now().Add(time.Second)
-	for waitingParquetWriters(&d.parquetMu) == 0 && time.Now().Before(deadline) {
+	deadline := time.Now().Add(5 * time.Second)
+	for len(repository.Parquet.BatchMetadata()) != 0 {
+		if time.Now().After(deadline) {
+			release()
+			d.unpinParquet(pin)
+			t.Fatal("retention waited for a pinned reader or the DuckDB write gate")
+		}
 		time.Sleep(time.Millisecond)
 	}
-	if waiting := waitingParquetWriters(&d.parquetMu); waiting != 1 {
-		d.parquetMu.RUnlock()
-		release()
-		t.Fatalf("publication waiters = %d, want 1 while DuckDB write gate is independently held", waiting)
+	if _, err := os.Stat(repository.Parquet.BatchPath("expired")); err != nil {
+		t.Fatalf("retention deleted files a pinned reader may open: %v", err)
 	}
-	d.parquetMu.RUnlock()
 	release()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+	d.unpinParquet(pin)
+	if n, err := repository.CollectRetiredParquet(); err != nil || n != 1 {
+		t.Fatalf("collected %d retired batches after the reader left: %v", n, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -619,7 +403,7 @@ func TestMaintenanceTracksConsecutiveFailures(t *testing.T) {
 		mock.ExpectExec("CHECKPOINT").WillReturnError(errors.New("injected checkpoint failure"))
 	}
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
-	d := &Duck{DB: db, writeDB: db}
+	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t)}
 	for range 3 {
 		if err := d.runRepositoryMaintenance(context.Background()); err == nil {
 			t.Fatal("maintenance succeeded despite checkpoint failure")
@@ -659,7 +443,7 @@ func TestMaintenanceRecoversCompactionBeforeRetention(t *testing.T) {
 	defer repository.Close()
 	db := openTestDuck(t)
 	defer db.Close()
-	for _, table := range []string{"service_rollup", "edge_rollup"} {
+	for _, table := range []string{"service_rollup", "span_rollup", "log_rollup", "endpoint_rollup", "receiver_rollup", "resource_rollup", "receiver_entity_rollup", "edge_rollup"} {
 		if _, err := db.Exec("CREATE TABLE " + table + " (bucket TIMESTAMP)"); err != nil {
 			t.Fatal(err)
 		}
@@ -854,7 +638,7 @@ func TestMaintenanceRunsOnEveryTick(t *testing.T) {
 	defer db.Close()
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
-	d := &Duck{DB: db, writeDB: db, cfg: config.Config{MaintenanceInterval: time.Hour}}
+	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), cfg: config.Config{MaintenanceInterval: time.Hour}}
 	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -867,31 +651,5 @@ func TestMaintenanceRunsOnEveryTick(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// TestUpdateParquetStatsDoesNotParkOnAStalledPublication pins that the gauge
-// refresh gives up rather than waiting out a stuck publication. It is the only
-// Parquet reader that runs on the rollup and maintenance loop goroutines under
-// the process context, so an unbounded wait here stops those loops entirely —
-// the same failure this storage layer has produced repeatedly, one level down.
-func TestUpdateParquetStatsDoesNotParkOnAStalledPublication(t *testing.T) {
-	originalWait := parquetStatsWait
-	parquetStatsWait = 25 * time.Millisecond
-	t.Cleanup(func() { parquetStatsWait = originalWait })
-
-	d := &Duck{}
-	mustLock(&d.parquetMu)
-	defer d.parquetMu.Unlock()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		d.updateParquetStats(context.Background())
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("stats refresh parked on a stalled publication instead of giving up")
 	}
 }

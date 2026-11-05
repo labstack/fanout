@@ -120,6 +120,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// A failed run exits nonzero after every deferred close has run, so a
+	// supervisor restarts it.
+	failed := false
+	defer func() {
+		if failed {
+			os.Exit(1)
+		}
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -139,23 +147,20 @@ func main() {
 		slog.Error("duckdb init failed", "err", err)
 		os.Exit(1)
 	}
-	defer q.Close()
+	// A stalled engine may still be running native code, so its handles stay
+	// open; the process exits instead.
+	stalled := false
+	defer func() {
+		if !stalled {
+			_ = q.Close()
+		}
+	}()
 
 	writer := telemetrystore.NewWriter(repository, cfg.IngestBatchSize)
 	writer.SetInFlightBudget(cfg.IngestMaxInFlightBytes)
 	writerResult := make(chan error, 1)
-	go func() {
-		err := writer.Run(ctx)
-		// Publish the result before notifying the process-wide error channel. The
-		// shutdown path waits on writerResult after Writer.Wait, so a final-commit
-		// failure cannot be lost in the close(done) -> goroutine-send scheduling gap.
-		writerResult <- err
-		if err != nil {
-			errCh <- fmt.Errorf("telemetry writer: %w", err)
-		}
-	}()
 
-	go q.RunRollups(ctx)
+	go q.Watch(ctx)
 
 	// Start intelligence detector
 	detector := intelligence.NewDetector(q, intelligence.DefaultDetectorConfig())
@@ -276,11 +281,25 @@ func main() {
 	// raw *sql.DB here bypassed the Telemetry maintenance-race protection.
 	queries := observability.New(q, q, cfg.RetentionDays)
 	panels := query.NewExecutor(q, cfg.RetentionDays)
+	writer.SetAdmission(repository.CompactionDebt, panels.InteractiveRefusals)
+	go func() {
+		err := writer.Run(ctx)
+		// Publish the result before notifying the process-wide error channel. The
+		// shutdown path waits on writerResult after Writer.Wait, so a final-commit
+		// failure cannot be lost in the close(done) -> goroutine-send scheduling gap.
+		writerResult <- err
+		if err != nil {
+			errCh <- fmt.Errorf("telemetry writer: %w", err)
+		}
+	}()
+	q.SetReadPressure(panels.Pressure)
+	go q.RunRollups(ctx)
 	panels.SetRollupReader(queries)
+	panels.SetCacheTTL(cfg.QueryCacheTTL)
 	api.RegisterQueryRoutes(e, panels)
 	api.RegisterFanQLRoutes(e, q, panels)
 	api.RegisterAnnotationRoutes(e, annotations.New(q))
-	api.RegisterTraceRoutes(e, queries, cfg.RetentionDays)
+	api.RegisterTraceRoutes(e, panels.CachedTraces(queries), cfg.RetentionDays)
 	api.RegisterIntelligenceRoutes(e, detector)
 	dashboards := dashboard.New(sqlite.DB, panels)
 	api.RegisterDashboardRoutes(e, dashboards)
@@ -415,7 +434,15 @@ func main() {
 	case <-stop:
 		slog.Info("shutting down")
 	case err := <-errCh:
+		failed = true
 		slog.Error("fatal error, shutting down", "err", err)
+	case err := <-q.Fatal():
+		// DuckDB invalidated its database, or Fanout's own work on it stalled.
+		// Flush ingest and exit nonzero so the supervisor restarts Fanout,
+		// which rebuilds the query cache from Parquet.
+		failed = true
+		stalled = errors.Is(err, engine.ErrStalled)
+		slog.Error("query engine failed, shutting down for a restart", "err", err)
 	}
 
 	// Stop every surface and finish in-flight exports before stopping the writer.
@@ -427,6 +454,8 @@ func main() {
 		_ = httpSrv.Close()
 	}
 	shutdownCancel()
+	// Schema discoveries outlive their requests; stop them before the engine.
+	panels.Close()
 	grpcSrv.Stop()
 	cancel()
 	writer.Wait()

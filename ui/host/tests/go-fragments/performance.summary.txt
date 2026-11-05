@@ -1,8 +1,8 @@
 latency: status=ok rows=1 truncated=false
-  time=2026-10-07T19:15:00Z, p95=100 ms
+  time=2026-10-07T19:15:00Z, p95=107.1880787361571 ms
 errors: status=ok rows=1 truncated=false
   time=2026-10-07T19:15:00Z, error_rate=100%
 requests: status=ok rows=1 truncated=false
-  time=2026-10-07T19:15:00Z, rate=1/s
+  time=2026-10-07T19:15:00Z, rate=0.5/s
 operations: status=ok rows=1 truncated=false
   operation=GET cart, p95=100 ms

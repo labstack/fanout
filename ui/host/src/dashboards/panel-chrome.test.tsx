@@ -182,6 +182,28 @@ it.each([120,300])("bounds the full error state inside a %ipx body with inline R
   vi.unstubAllGlobals();
 });
 
+// A panel the server never started has not failed: it reads as waiting, keeps
+// its whole reason reachable, and offers Retry, in stat-sized cards too.
+it.each([120,300])("shows a busy panel as not run yet in a %ipx body",async height=>{
+  const observers:{callback:ResizeObserverCallback;elements:Element[]}[]=[];
+  vi.stubGlobal("ResizeObserver",class { record:{callback:ResizeObserverCallback;elements:Element[]}; constructor(callback:ResizeObserverCallback){this.record={callback,elements:[]};observers.push(this.record);} observe(el:Element){this.record.elements.push(el);} disconnect(){} });
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
+  const message="Not run: other queries kept the server busy. Refresh to try again.",retry=vi.fn();
+  await act(async()=>root.render(<MantineProvider env="test"><PanelCard panel={{...p,viz:"stat"}} title={p.title} result={{id:p.id,status:"error",elapsed_ms:0,error:message,reason:"busy",retryable:true,request_error:[p.id]}} loading={false} height={388} group="g" editing={false} agentAvailable={true} onFix={()=>{}} onRetry={retry}/></MantineProvider>));
+  const body=host.querySelector<HTMLElement>('[data-panel-body]')!;
+  await act(async()=>observers.find(o=>o.elements.includes(body))!.callback([{target:body,contentRect:{height,width:300}} as unknown as ResizeObserverEntry],{} as ResizeObserver));
+  expect(host.textContent).not.toContain("failed");
+  const state=host.querySelector<HTMLElement>('[data-panel-busy]')!;
+  expect(state.textContent).toContain("Not run yet");
+  expect(state.querySelector('[data-panel-error-message]')).toBeNull();
+  const button=within(state).getByRole("button",{name:"Retry"});
+  expect(button.getAttribute("aria-describedby")).toBeTruthy();
+  expect(document.getElementById(button.getAttribute("aria-describedby")!)!.textContent).toBe(message);
+  if(height>=160)expect(state.textContent).toContain(message);
+  else expect(state.textContent).not.toContain("…");
+  await act(async()=>button.click());expect(retry).toHaveBeenCalledOnce();
+});
+
 
 it.each(["heatmap","state_timeline"] as const)("renders %s with literal styles and visual color without the deprecated api.style",viz=>{
   const theme=chartThemeFor(false);
@@ -359,4 +381,11 @@ it.each(["traces","logs","table","log_patterns"] as const)("reserves a separate 
   expect(noteRect.top).toBeGreaterThanOrEqual(visibleRowBottom+8);
   expect(body.contains(footer)).toBe(false);expect(body.nextElementSibling).toBe(footer);
   expect(footer.style.flexShrink).toBe("0");
+});
+
+it("shows a zero count's diagnosis as a note under the 0",async()=>{
+  const frame={columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"count",type:"number" as const,role:"measure" as const}],values:[[],[]],rows:0,totals:[null,0]};
+  const h=await render({...p,viz:"stat"},{...r,frame,diagnosis:"No spans for service nope in this time range."});
+  expect(h.querySelector('[data-stat-value]')?.textContent).toBe("0");
+  expect([...h.querySelectorAll('[data-panel-note]')].map(n=>n.textContent)).toEqual(["No spans for service nope in this time range."]);
 });

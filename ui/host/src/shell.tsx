@@ -3,12 +3,17 @@ import { ActionIcon, Alert, AppShell, Avatar, Burger, Drawer, Group, Menu, Toolt
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { BookOpen, PlugsConnected, SignOut } from "@phosphor-icons/react";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { createDashboardPrompt, useFanoutApp } from "./app-context";
 import { logout, useViewer } from "./auth";
 import { BrandLockup } from "./brand";
 import { docs } from "../../links";
+import { useOpener } from "./opener";
+
 import Rail, { type RailHandle, type RailProps } from "./rail";
+
+// The editor and its CodeMirror load only when a dashboard is being created.
+const NewDashboard = lazy(() => import("./dashboards/new-dashboard").then(module => ({ default: module.NewDashboard })));
 
 export default function Shell({ children }: { children: ReactNode }) {
   const { agentAvailable, threadID, threadMissing, newThread, selectThread, openChat } = useFanoutApp();
@@ -22,7 +27,10 @@ export default function Shell({ children }: { children: ReactNode }) {
   // keyboard over them. Only ⌘K is asking to search.
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [signOutError, setSignOutError] = useState("");
+  const [creating, setCreating] = useState(false);
   const railRef = useRef<RailHandle>(null);
+  const burger = useRef<HTMLButtonElement>(null);
+  const opener = useOpener();
   // The navbar stays mounted below `md`, only collapsed, so its ref is never
   // null and cannot say which rail the viewer can see. The breakpoint can.
   const mobile = useMediaQuery("(max-width: 62em)");
@@ -47,19 +55,26 @@ export default function Shell({ children }: { children: ReactNode }) {
     agentAvailable,
     activeThreadID: isChat && !threadMissing && pathname !== "/chat" ? threadID : undefined,
     activeDashboardID: dashboardId,
+    activePath: pathname,
     onNewChat: newThread,
     onSelectThread: selectThread,
     onDeletedThread: (deletedID) => { if (deletedID === threadID) newThread(); },
     onSelectDashboard: (id) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: {} }),
     onCreateDashboard: () => openChat(createDashboardPrompt),
+    // The editor opens over the page, not over the mobile drawer, and returns focus to the burger that opened the drawer.
+    onNewDashboard: () => { opener.remember(mobileRef.current ? burger.current : document.activeElement); drawer.close(); setCreating(true); },
+    onNavigate: (path) => void navigate({ to: path }),
     onInvestigateService: (service) => openChat(`Investigate the ${service} service. Explain its errors and latency.`),
   };
 
+  const closeNew = () => { setCreating(false); opener.restore(); };
+
   return <AppShell header={{ height: 52 }} navbar={{ width: 256, breakpoint: "md", collapsed: { mobile: true } }} padding={0}>
+    <a className="skip-link" href="#main">Skip to content</a>
     <AppShell.Header>
       <Group h="100%" px={{ base: "sm", sm: "md" }} justify="space-between" wrap="nowrap">
         <Group gap="sm" wrap="nowrap">
-          <Burger hiddenFrom="md" opened={drawerOpened} onClick={() => { setKeyboardOpen(false); drawer.toggle(); }} size="sm" aria-label={drawerOpened ? "Close navigation" : "Open navigation"} />
+          <Burger ref={burger} hiddenFrom="md" opened={drawerOpened} aria-expanded={drawerOpened} onClick={() => { setKeyboardOpen(false); drawer.toggle(); }} size="sm" aria-label={drawerOpened ? "Close navigation" : "Open navigation"} />
           <BrandLockup size="small" />
         </Group>
         <Group gap="xs" wrap="nowrap">
@@ -77,13 +92,14 @@ export default function Shell({ children }: { children: ReactNode }) {
       </Group>
     </AppShell.Header>
     <AppShell.Navbar p="sm"><Rail ref={railRef} {...railProps} /></AppShell.Navbar>
-    <Drawer opened={drawerOpened} onClose={drawer.close} hiddenFrom="md" size={288} padding="sm" title={<BrandLockup size="small" />} overlayProps={{ backgroundOpacity: 0.24, blur: 1 }}>
+    <Drawer opened={drawerOpened} onClose={drawer.close} returnFocus={!creating} hiddenFrom="md" size={288} padding="sm" title={<BrandLockup size="small" />} overlayProps={{ backgroundOpacity: 0.24, blur: 1 }}>
       <Rail {...railProps} autoFocusSearch={drawerOpened && keyboardOpen} />
     </Drawer>
-    <AppShell.Main>
+    <AppShell.Main id="main" tabIndex={-1}>
       {signOutError && <Alert color="bad" m="md" withCloseButton onClose={() => setSignOutError("")}>{signOutError}</Alert>}
       {children}
     </AppShell.Main>
+    {creating && <Suspense fallback={null}><NewDashboard onClose={closeNew} onCreated={id => { setCreating(false); void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: {} }); }} /></Suspense>}
   </AppShell>;
 }
 

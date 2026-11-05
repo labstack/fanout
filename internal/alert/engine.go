@@ -3,12 +3,10 @@ package alert
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
-	"math/big"
+	"regexp"
 	"runtime/debug"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,15 +18,19 @@ const pruneHistDays = 7
 
 // Engine drives the alert evaluation loop.
 type Engine struct {
-	store       *Store
-	duck        *engine.Duck           // may be nil in tests
-	detector    *intelligence.Detector // may be nil in tests
-	mu          sync.RWMutex
-	programs    map[string]Program // rule ID → compiled program
+	store    *Store
+	duck     *engine.Duck           // may be nil in tests
+	detector *intelligence.Detector // may be nil in tests
+	mu       sync.RWMutex
+	programs map[string]Program // rule ID → compiled program
+	// stopped holds rules disabled or deleted since a tick last listed them
+	// as enabled, so a tick that listed one before it stopped skips it.
+	stopped     map[string]bool
 	interval    time.Duration
 	histDays    int
 	lastPrune   time.Time
 	envOverride map[string]Env // for testing — bypasses DuckDB query
+	afterList   func()         // for testing — runs once a tick has listed its rules
 }
 
 // NewEngine creates an Engine ready to Run.
@@ -44,8 +46,45 @@ func NewEngine(
 		duck:     duck,
 		detector: detector,
 		programs: make(map[string]Program),
+		stopped:  make(map[string]bool),
 		interval: interval,
 		histDays: histDays,
+	}
+}
+
+// DisableRule stops evaluating a rule. Its firing alerts resolve, staying in
+// history and notifying as a cleared condition would; pending ones never
+// fired and are dropped. Holding the lock waits out a tick's transitions for
+// the rule, and the tick skips it from then on.
+func (e *Engine) DisableRule(rule Rule) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.stop(rule.ID)
+	alerts, err := e.store.ListAlerts("", "", rule.ID)
+	if err != nil {
+		slog.Error("alert: list alerts of disabled rule", "rule", rule.ID, "err", err)
+		return
+	}
+	now := time.Now().Format(time.RFC3339)
+	for _, a := range alerts {
+		switch a.State {
+		case "pending":
+			if err := e.store.DeleteAlert(a.ID); err != nil {
+				slog.Error("alert: drop pending of disabled rule", "rule", rule.ID, "service", a.Service, "err", err)
+			}
+		case "firing":
+			a.State = "resolved"
+			a.ResolvedAt = now
+			a.LastEvaluatedAt = now
+			saved, err := e.store.UpsertAlert(a)
+			if err != nil {
+				slog.Error("alert: resolve alert of disabled rule", "rule", rule.ID, "service", a.Service, "err", err)
+				continue
+			}
+			if rule.NotifyOnResolve {
+				e.fireWebhookAsync(rule, saved, Env{Service: a.Service}, "resolved")
+			}
+		}
 	}
 }
 
@@ -53,7 +92,14 @@ func NewEngine(
 func (e *Engine) RemoveRule(ruleID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.stop(ruleID)
+}
+
+// stop drops a rule's program and keeps a tick from compiling it again until
+// the rule is recompiled. The caller holds e.mu.
+func (e *Engine) stop(ruleID string) {
 	delete(e.programs, ruleID)
+	e.stopped[ruleID] = true
 }
 
 // Run starts the evaluation ticker. It blocks until ctx is cancelled.
@@ -79,15 +125,6 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
-// BuildAllEnvs returns all current Envs keyed by service name.
-func (e *Engine) BuildAllEnvs(ctx context.Context) map[string]Env {
-	envs := e.buildEnvs(ctx)
-	if envs == nil {
-		return map[string]Env{}
-	}
-	return envs
-}
-
 // ---- internal ----
 
 func (e *Engine) safeEvaluateOnce(ctx context.Context) {
@@ -105,45 +142,66 @@ func (e *Engine) evaluateOnce(ctx context.Context) {
 		slog.Error("alert: list enabled rules", "err", err)
 		return
 	}
+	if e.afterList != nil {
+		e.afterList()
+	}
 	if len(rules) == 0 {
 		return
 	}
 
 	e.compileRules(rules)
 
+	// Every transition of a tick happens at the tick's start, so holds are
+	// measured between ticks however long reading the data takes.
+	now := time.Now()
 	envs := e.buildEnvs(ctx)
 	if envs == nil {
 		return // DuckDB error — skip evaluation entirely, don't false-fire
 	}
 
 	for _, rule := range rules {
-		e.mu.RLock()
-		prog, ok := e.programs[rule.ID]
-		e.mu.RUnlock()
-		if !ok {
-			// Compilation already logged the error; skip.
-			continue
-		}
-
-		services := e.resolveServices(rule, envs)
-		for _, svc := range services {
-			env := envs[svc]
-			triggered, evalErr := SafeEval(prog, env)
-			if evalErr != nil {
-				slog.Warn("alert: eval error", "rule", rule.ID, "service", svc, "err", evalErr)
-				triggered = false
-			}
-			e.transition(rule, svc, triggered, env)
-		}
+		e.evaluateRule(rule, envs, now)
 	}
 }
 
-// compileRules compiles any rules that have not yet been compiled.
+// evaluateRule runs one rule's transitions under the read lock, so a rule
+// disabled meanwhile is either skipped or cleaned up after them.
+func (e *Engine) evaluateRule(rule Rule, envs map[string]Env, now time.Time) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	prog, ok := e.programs[rule.ID]
+	if !ok {
+		// Stopped, or compilation already logged the error.
+		return
+	}
+	for _, svc := range e.resolveServices(rule, envs) {
+		env := envs[svc]
+		triggered, evalErr := SafeEval(prog, env)
+		if evalErr != nil {
+			slog.Warn("alert: eval error", "rule", rule.ID, "service", svc, "err", evalErr)
+			triggered = false
+		}
+		e.transition(rule, svc, triggered, env, now)
+	}
+}
+
+// compileRules compiles any listed rules that have not yet been compiled and
+// were not stopped since. A stopped rule this tick no longer lists is
+// forgotten: later ticks never see it.
 func (e *Engine) compileRules(rules []Rule) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	listed := make(map[string]bool, len(rules))
 	for _, r := range rules {
-		if _, ok := e.programs[r.ID]; ok {
+		listed[r.ID] = true
+	}
+	for id := range e.stopped {
+		if !listed[id] {
+			delete(e.stopped, id)
+		}
+	}
+	for _, r := range rules {
+		if _, ok := e.programs[r.ID]; ok || e.stopped[r.ID] {
 			continue
 		}
 		prog, err := CompileExpression(r.Expression)
@@ -174,10 +232,16 @@ func (e *Engine) resolveServices(rule Rule, envs map[string]Env) []string {
 	return []string{rule.Service}
 }
 
-// transition implements the alert state machine for a (rule, service) pair.
-func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
-	now := time.Now()
+// holdSlack absorbs ticker delivery jitter, so a hold that ends on a tick
+// fires on that tick.
+const holdSlack = time.Second
+
+// transition implements the alert state machine for a (rule, service) pair at
+// the evaluation time now. created_at marks when the current pending or firing
+// episode began.
+func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env, now time.Time) {
 	nowStr := now.Format(time.RFC3339)
+	began := formatStoredTime(now)
 
 	existing, err := e.store.GetAlert(rule.ID, svc)
 	noAlert := errors.Is(err, ErrNotFound)
@@ -196,6 +260,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			Value:           primaryValue(rule, env),
 			FiredAt:         nowStr,
 			LastEvaluatedAt: nowStr,
+			CreatedAt:       began,
 		}
 		saved, upsertErr := e.store.UpsertAlert(a)
 		if upsertErr != nil {
@@ -212,6 +277,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			State:           "pending",
 			Value:           primaryValue(rule, env),
 			LastEvaluatedAt: nowStr,
+			CreatedAt:       began,
 		}
 		if _, upsertErr := e.store.UpsertAlert(a); upsertErr != nil {
 			slog.Error("alert: upsert pending", "rule", rule.ID, "service", svc, "err", upsertErr)
@@ -222,13 +288,13 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 
 	case !noAlert && existing.State == "pending" && triggered:
 		// Check whether the for-duration has elapsed.
-		createdAt, parseErr := time.Parse(time.RFC3339, existing.CreatedAt)
+		createdAt, parseErr := parseStoredTime(existing.CreatedAt)
 		if parseErr != nil {
 			slog.Error("alert: invalid created_at, skipping", "rule", rule.ID, "service", svc, "created_at", existing.CreatedAt, "err", parseErr)
 			return
 		}
 		forDuration := time.Duration(rule.ForSeconds) * time.Second
-		if now.Sub(createdAt) >= forDuration {
+		if now.Sub(createdAt)+holdSlack >= forDuration {
 			// Promote to firing.
 			existing.State = "firing"
 			existing.FiredAt = nowStr
@@ -310,13 +376,18 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			}
 		}
 
+		// A new episode gets its own row; the resolved one stays in history.
+		a := Alert{
+			RuleID:          rule.ID,
+			Service:         svc,
+			Value:           primaryValue(rule, env),
+			LastEvaluatedAt: nowStr,
+			CreatedAt:       began,
+		}
 		if rule.ForSeconds == 0 {
-			existing.State = "firing"
-			existing.FiredAt = nowStr
-			existing.ResolvedAt = ""
-			existing.LastEvaluatedAt = nowStr
-			existing.Value = primaryValue(rule, env)
-			saved, upsertErr := e.store.UpsertAlert(existing)
+			a.State = "firing"
+			a.FiredAt = nowStr
+			saved, upsertErr := e.store.UpsertAlert(a)
 			if upsertErr != nil {
 				slog.Error("alert: re-fire from resolved", "rule", rule.ID, "service", svc, "err", upsertErr)
 				return
@@ -324,36 +395,62 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			e.fireWebhookAsync(rule, saved, env, "firing")
 		} else {
 			// Enter pending again.
-			existing.State = "pending"
-			existing.FiredAt = ""
-			existing.ResolvedAt = ""
-			existing.LastEvaluatedAt = nowStr
-			existing.Value = primaryValue(rule, env)
-			if _, upsertErr := e.store.UpsertAlert(existing); upsertErr != nil {
+			a.State = "pending"
+			if _, upsertErr := e.store.UpsertAlert(a); upsertErr != nil {
 				slog.Error("alert: re-pend from resolved", "rule", rule.ID, "service", svc, "err", upsertErr)
 			}
 		}
 	}
 }
 
-// primaryValue picks the most relevant metric value based on the rule expression.
-// If the expression mentions p95, use P95. If it mentions throughput, use that.
-// Default to error_rate as the most common alert metric.
+var (
+	quoted   = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`)
+	variable = regexp.MustCompile(`\b(error_rate_delta|p95_delta|throughput_delta|error_rate|p50|p95|throughput|log_count|z_score|health_score)\b`)
+)
+
+// primaryValue is the first numeric variable the expression reads, outside
+// string literals; the UI names and formats the value by the same rule.
 func primaryValue(rule Rule, env Env) float64 {
-	expr := rule.Expression
-	if strings.Contains(expr, "p95") {
-		return env.P95
+	name := variable.FindString(quoted.ReplaceAllString(rule.Expression, `""`))
+	value, _ := celActivation(env)[name].(float64)
+	return value
+}
+
+// TestResult is one service's dry run of a rule.
+type TestResult struct {
+	Service   string `json:"service"`
+	Triggered bool   `json:"triggered"`
+	Error     string `json:"error,omitempty"`
+	// NoData is set when the service has no recent telemetry, which usually
+	// means its name is misspelled.
+	NoData bool `json:"no_data,omitempty"`
+	Env    Env  `json:"env"`
+}
+
+var errCurrentData = errors.New("current data could not be read")
+
+// Test evaluates a rule against current data without changing any alert.
+func (e *Engine) Test(ctx context.Context, rule Rule) ([]TestResult, error) {
+	prog, err := CompileExpression(rule.Expression)
+	if err != nil {
+		return nil, err
 	}
-	if strings.Contains(expr, "p50") {
-		return env.P50
+	envs := e.buildEnvs(ctx)
+	if envs == nil {
+		return nil, errCurrentData
 	}
-	if strings.Contains(expr, "throughput") {
-		return env.Throughput
+	results := []TestResult{}
+	for _, svc := range e.resolveServices(rule, envs) {
+		env, seen := envs[svc]
+		// A service without data is evaluated with zeros, as the engine does.
+		result := TestResult{Service: svc, NoData: !seen, Env: env}
+		result.Triggered, err = SafeEval(prog, env)
+		if err != nil {
+			result.Error = err.Error()
+		}
+		results = append(results, result)
 	}
-	if strings.Contains(expr, "z_score") {
-		return env.ZScore
-	}
-	return env.ErrorRate
+	return results, nil
 }
 
 // fireWebhookAsync fires the webhook for an alert in a goroutine and updates delivery status.
@@ -376,7 +473,7 @@ func (e *Engine) fireWebhookAsync(rule Rule, alert Alert, env Env, event string)
 			slog.Warn("alert: webhook delivery", "rule", rule.ID, "service", alert.Service, "event", event, "err", err)
 		}
 		now := time.Now().Format(time.RFC3339)
-		if updateErr := e.store.UpdateDeliveryStatus(alert.RuleID, alert.Service, status, now); updateErr != nil {
+		if updateErr := e.store.UpdateDeliveryStatus(alert.ID, status, now); updateErr != nil {
 			slog.Error("alert: update delivery status", "rule", rule.ID, "service", alert.Service, "err", updateErr)
 		}
 	}()
@@ -398,7 +495,7 @@ WITH current AS (
            avg(error_rate) as error_rate,
            COALESCE(avg(p50_ms) FILTER (WHERE served_spans > 0), avg(p50_ms)) as p50,
            COALESCE(avg(p95_ms) FILTER (WHERE served_spans > 0), avg(p95_ms)) as p95,
-           sum(spans) as throughput, sum(log_count) as log_count
+           sum(spans)::DOUBLE as throughput, sum(log_count)::DOUBLE as log_count
     FROM service_rollup
     WHERE bucket >= (SELECT max(bucket) FROM service_rollup) - INTERVAL '5 minutes'
     GROUP BY service
@@ -407,23 +504,30 @@ previous AS (
     SELECT service,
            avg(error_rate) as error_rate,
            COALESCE(avg(p95_ms) FILTER (WHERE served_spans > 0), avg(p95_ms)) as p95,
-           sum(spans) as throughput
+           sum(spans)::DOUBLE as throughput
     FROM service_rollup
     WHERE bucket >= (SELECT max(bucket) FROM service_rollup) - INTERVAL '10 minutes'
       AND bucket < (SELECT max(bucket) FROM service_rollup) - INTERVAL '5 minutes'
     GROUP BY service
 )
-SELECT c.service, c.error_rate, c.p50, c.p95, c.throughput, c.log_count,
-    ((c.error_rate - p.error_rate) / NULLIF(p.error_rate, 0)) * 100 as error_rate_delta,
-    ((c.p95 - p.p95) / NULLIF(p.p95, 0)) * 100 as p95_delta,
-    ((c.throughput - p.throughput) / NULLIF(p.throughput, 0)) * 100 as throughput_delta
-FROM current c LEFT JOIN previous p ON c.service = p.service`
+SELECT c.service, coalesce(c.error_rate, 0), coalesce(c.p50, 0), coalesce(c.p95, 0),
+    coalesce(c.throughput, 0), coalesce(c.log_count, 0),
+    coalesce(((c.error_rate - p.error_rate) / NULLIF(p.error_rate, 0)) * 100, 0),
+    coalesce(((c.p95 - p.p95) / NULLIF(p.p95, 0)) * 100, 0),
+    coalesce(((c.throughput - p.throughput) / NULLIF(p.throughput, 0)) * 100, 0)
+FROM current c LEFT JOIN previous p ON c.service = p.service
+WHERE c.service <> ''`
 
-	resp := e.duck.ExecuteSQL(ctx, engine.SQLRequest{Query: envSQL})
-	if resp.Error != "" {
-		slog.Error("alert: buildEnvs query failed", "err", resp.Error)
+	// A fixed statement over the rollup cache: the typed read path, not the
+	// untrusted-SQL one.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	rows, err := e.duck.QueryContext(ctx, envSQL)
+	if err != nil {
+		slog.Error("alert: buildEnvs query failed", "err", err)
 		return nil
 	}
+	defer rows.Close()
 
 	// Collect health score and z-scores from the detector snapshot.
 	var healthScore float64
@@ -440,26 +544,20 @@ FROM current c LEFT JOIN previous p ON c.service = p.service`
 		}
 	}
 
-	envs := make(map[string]Env, len(resp.Results))
-	for _, row := range resp.Results {
-		svc, _ := row["service"].(string)
-		if svc == "" {
-			continue
+	envs := map[string]Env{}
+	for rows.Next() {
+		env := Env{HealthScore: healthScore}
+		if err := rows.Scan(&env.Service, &env.ErrorRate, &env.P50, &env.P95, &env.Throughput, &env.LogCount,
+			&env.ErrorRateDelta, &env.P95Delta, &env.ThroughputDelta); err != nil {
+			slog.Error("alert: buildEnvs scan failed", "err", err)
+			return nil
 		}
-		env := Env{
-			Service:         svc,
-			ErrorRate:       toFloat(row["error_rate"]),
-			P50:             toFloat(row["p50"]),
-			P95:             toFloat(row["p95"]),
-			Throughput:      toFloat(row["throughput"]),
-			LogCount:        toFloat(row["log_count"]),
-			ErrorRateDelta:  toFloat(row["error_rate_delta"]),
-			P95Delta:        toFloat(row["p95_delta"]),
-			ThroughputDelta: toFloat(row["throughput_delta"]),
-			HealthScore:     healthScore,
-			ZScore:          zScores[svc],
-		}
-		envs[svc] = env
+		env.ZScore = zScores[env.Service]
+		envs[env.Service] = env
+	}
+	if err := rows.Err(); err != nil {
+		slog.Error("alert: buildEnvs query failed", "err", err)
+		return nil
 	}
 	return envs
 }
@@ -485,37 +583,6 @@ func (e *Engine) pruneOldAlerts() {
 	}
 }
 
-// toFloat converts an interface{} value to float64. Returns 0 for unknown types.
-func toFloat(v interface{}) float64 {
-	switch n := v.(type) {
-	case float64:
-		return n
-	case int64:
-		return float64(n)
-	case int:
-		return float64(n)
-	case *big.Int:
-		// DuckDB widens SUM over integer columns to HUGEINT, which the driver
-		// scans as *big.Int — sum(spans)/sum(log_count) arrive here.
-		f, _ := new(big.Float).SetInt(n).Float64()
-		return f
-	case nil:
-		// NULL from SQL (e.g. delta columns when no previous window) — 0 is
-		// the intended semantics, not a conversion loss.
-		return 0
-	default:
-		// A type this switch doesn't know silently zeroed throughput/log_count
-		// for months (the *big.Int case above). Never let the next widened
-		// type hide the same way — but log once, not on every 30s eval tick.
-		toFloatUnknownOnce.Do(func() {
-			slog.Warn("alert: env value of unhandled type coerced to 0", "type", fmt.Sprintf("%T", v))
-		})
-		return 0
-	}
-}
-
-var toFloatUnknownOnce sync.Once
-
 // abs returns the absolute value of f.
 func abs(f float64) float64 {
 	if f < 0 {
@@ -533,5 +600,20 @@ func (e *Engine) RecompileRule(ruleID, expression string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.programs[ruleID] = prog
+	delete(e.stopped, ruleID)
 	return nil
+}
+
+// storedTimeLayout is RFC 3339 in UTC with all nine fraction digits, so
+// stored episode starts sort as text.
+const storedTimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+// formatStoredTime writes an episode start as the store keeps it.
+func formatStoredTime(t time.Time) string {
+	return t.UTC().Format(storedTimeLayout)
+}
+
+// parseStoredTime reads a time the engine or store wrote (RFC 3339).
+func parseStoredTime(value string) (time.Time, error) {
+	return time.Parse(time.RFC3339, value)
 }

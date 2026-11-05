@@ -64,6 +64,9 @@ func PresentError(err error, kind ErrorKind) string {
 }
 
 func errorMessage(err error, kind ErrorKind) string {
+	if errors.Is(err, ErrBusy) {
+		return BusyMessage
+	}
 	if kind == ReadError || isOperational(err) {
 		return ReadFailure
 	}

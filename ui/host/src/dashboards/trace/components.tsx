@@ -1,6 +1,5 @@
-import { Button, Center, Group, Text, ThemeIcon, Box } from "@mantine/core";
-import { useEffect, useState, type ReactNode } from "react";
-import { pageItems, TRACE_PAGE_SIZE } from "./pagination";
+import { Center, Group, Text, ThemeIcon, Box } from "@mantine/core";
+import type { ReactNode } from "react";
 export function EmptyState({
   icon,
   title,
@@ -28,69 +27,5 @@ export function EmptyState({
         </Box>
       </Group>
     </Center>
-  );
-}
-export function usePagedItems<T>(items: T[], pageSize = TRACE_PAGE_SIZE) {
-  const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
-  const start = (page - 1) * pageSize;
-  return {
-    page,
-    setPage,
-    totalPages,
-    pageItems: pageItems(items, page, pageSize),
-    from: items.length ? start + 1 : 0,
-    to: Math.min(start + pageSize, items.length),
-    total: items.length,
-  };
-}
-export function PageControls({
-  page,
-  totalPages,
-  from,
-  to,
-  total,
-  onChange,
-}: {
-  page: number;
-  totalPages: number;
-  from: number;
-  to: number;
-  total: number;
-  onChange: (page: number) => void;
-}) {
-  if (totalPages <= 1) return null;
-  return (
-    <Group justify="space-between" mt="xs">
-      <Text c="dimmed" size="xs">
-        {from}–{to} of {total}
-      </Text>
-      <Group gap={4}>
-        {[
-          { label: "First page", page: 1, disabled: page === 1 },
-          { label: "Previous page", page: page - 1, disabled: page === 1 },
-          { label: "Next page", page: page + 1, disabled: page === totalPages },
-          {
-            label: "Last page",
-            page: totalPages,
-            disabled: page === totalPages,
-          },
-        ].map((item) => (
-          <Button
-            key={item.label}
-            size="compact-xs"
-            variant="subtle"
-            aria-label={item.label}
-            disabled={item.disabled}
-            onClick={() => onChange(item.page)}
-          >
-            {item.label}
-          </Button>
-        ))}
-      </Group>
-    </Group>
   );
 }

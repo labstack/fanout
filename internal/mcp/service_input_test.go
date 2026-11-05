@@ -12,6 +12,7 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/querytest"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -39,7 +40,7 @@ func serviceInputFixture(t testing.TB) (*Server, *engine.Duck, *telemetrystore.R
 	for i, service := range []string{"checkout", "fraud-detection", "accounting"} {
 		for j := range 6 - 2*i {
 			n := from.Add(time.Minute).UnixNano() + int64(j)
-			batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: service, TraceID: service, SpanID: fmt.Sprint(j), Name: "orders process", Kind: "SPAN_KIND_CONSUMER", StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, IngestedAt: n, DBSystem: "postgresql", PeerService: "broker", Attributes: map[string]any{"messaging.system": "kafka"}})
+			batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: service, TraceID: service, SpanID: fmt.Sprint(j), Name: "orders process", Kind: "SPAN_KIND_CONSUMER", StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, IngestedAt: n, PeerService: "broker", Attributes: map[string]any{"db.system.name": "postgresql", "messaging.system": "kafka"}})
 		}
 	}
 	batch.Logs = []telemetry.Log{{Namespace: "shop", ServiceName: "logger", TraceID: "logs-only", TimeUnixNanos: from.Add(time.Minute).UnixNano(), Severity: "INFO", Body: "log only"}}
@@ -47,6 +48,9 @@ func serviceInputFixture(t testing.TB) (*Server, *engine.Duck, *telemetrystore.R
 	// These names are valid, but have no traffic in the requested window.
 	batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: "idle", TraceID: "idle", SpanID: "idle", StartUnixNanos: from.Add(-time.Hour).UnixNano(), EndUnixNanos: from.Add(-time.Hour).UnixNano() + 1}, telemetry.Span{Namespace: "other", ServiceName: "elsewhere", TraceID: "elsewhere", SpanID: "elsewhere", StartUnixNanos: from.Add(time.Minute).UnixNano(), EndUnixNanos: from.Add(time.Minute).UnixNano() + 1})
 	if err := repo.Commit(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+	if err := querytest.RefreshSpanRollup(duck.DB); err != nil {
 		t.Fatal(err)
 	}
 	executor := query.NewExecutor(duck, 30)
@@ -151,7 +155,7 @@ func (e *serviceGuidanceSpy) EmptyGuidance(ctx context.Context, req query.RunReq
 
 func TestServiceInputsWithResultsSkipMembership(t *testing.T) {
 	s, duck, _, from, to := serviceInputFixture(t)
-	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','broker',6,1,0,'call')`, from.Add(time.Minute)); err != nil {
+	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) VALUES ('shop',?,'checkout','broker',6,1,0,'call')`, from.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	spy := &serviceGuidanceSpy{panelExecutor: s.panels}
@@ -345,13 +349,13 @@ func TestServiceGuidanceLimitsSuggestionsAndScopesAliases(t *testing.T) {
 	for i := range 12 {
 		for j := range 20 - i {
 			n := from.Add(2*time.Minute).UnixNano() + int64(j)
-			batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: fmt.Sprintf("rank%02d", i), TraceID: fmt.Sprint(i), SpanID: fmt.Sprint(j), StartUnixNanos: n, EndUnixNanos: n + 1, PeerService: "alias", DBSystem: "alias", Attributes: map[string]any{"messaging.system": "alias"}})
+			batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: fmt.Sprintf("rank%02d", i), TraceID: fmt.Sprint(i), SpanID: fmt.Sprint(j), StartUnixNanos: n, EndUnixNanos: n + 1, PeerService: "alias", Attributes: map[string]any{"db.system.name": "alias", "messaging.system": "alias"}})
 		}
 	}
 	if err := repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','external',9,1,0,'call'),('other',?,'elsewhere','external',99,1,0,'call')`, from.Add(time.Minute), from.Add(time.Minute)); err != nil {
+	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) VALUES ('shop',?,'checkout','external',9,1,0,'call'),('other',?,'elsewhere','external',99,1,0,'call')`, from.Add(time.Minute), from.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	message, err := s.panels.ServiceGuidance(t.Context(), from, to, "shop", "external")

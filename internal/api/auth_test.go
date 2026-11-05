@@ -118,6 +118,8 @@ func firstCookie(t *testing.T, rec *httptest.ResponseRecorder, name string) *htt
 func TestRetiredRoutesDoNotReachSPA(t *testing.T) {
 	s := newTestAuthServer(t)
 	registerTestUserRoutes(s)
+	RegisterIntelligenceRoutes(s.e, fakeIntelligenceSnapshots{})
+	RegisterAnnotationRoutes(s.e, annotationFake{})
 	admin, err := s.users.CreateWithAudit("retired-routes@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +132,8 @@ func TestRetiredRoutesDoNotReachSPA(t *testing.T) {
 		{http.MethodPost, "/api/auth/login-link"},
 		{http.MethodGet, "/api/dashboard"},
 		{http.MethodGet, "/api/health"},
+		{http.MethodGet, "/api/intelligence"},
+		{http.MethodPost, "/api/annotations"},
 		{http.MethodGet, "/api/rules"},
 		{http.MethodPost, "/api/agent"},
 		{http.MethodPost, "/api/users/" + admin.ID + "/logout-all"},
@@ -167,7 +171,7 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodPost, "/api/auth/oauth/connections/client-1/revoke", routePolicyAuthenticated, ""},
 		{http.MethodGet, "/api/traces/abc", routePolicyCapability, ReadTelemetry},
 		{http.MethodHead, "/api/traces/abc", routePolicyCapability, ReadTelemetry},
-		{http.MethodGet, "/api/intelligence", routePolicyCapability, ReadTelemetry},
+		{http.MethodGet, "/api/insights", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/alerting/alerts", routePolicyCapability, ReadTelemetry},
 		{http.MethodHead, "/api/alerting/alerts", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/alerting/summary", routePolicyCapability, ReadTelemetry},

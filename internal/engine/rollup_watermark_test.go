@@ -30,7 +30,7 @@ func TestRollupHorizonDoesNotSkipInFlightRows(t *testing.T) {
 	}
 	insertRollupTestSpan(t, db, rollupTestSpan{namespace: "ns", traceID: "trace", spanID: "parent", service: "gateway", start: bucket, ingested: 200})
 	insert("later", 200)
-	if _, err := d.rollupOnce(t.Context()); err != nil {
+	if _, err := tableRollupOnce(d, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	requireRowCount(t, db, "SELECT count(*) FROM service_rollup WHERE ?", true, 0)
@@ -44,7 +44,7 @@ func TestRollupHorizonDoesNotSkipInFlightRows(t *testing.T) {
 	insert("earlier", 100)
 	minimum = 100
 	horizon = 200
-	if _, err := d.rollupOnce(t.Context()); err != nil {
+	if _, err := tableRollupOnce(d, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	requireServiceRollupSpans(t, db, "ns", bucket, "earlier", 1)
@@ -133,7 +133,7 @@ func TestRollupFailedFirstAttemptDoesNotOpenEpochWindow(t *testing.T) {
 	if err := repo.Commit(t.Context(), batch); err == nil {
 		t.Fatal("blocked publication succeeded")
 	}
-	if _, err := d.rollupOnce(t.Context()); err != nil {
+	if _, err := tableRollupOnce(d, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if d.rollupWatermarks[serviceRollupStateKey] != 0 || d.rollupWatermarks[edgeRollupStateKey] != 0 {
@@ -145,7 +145,7 @@ func TestRollupFailedFirstAttemptDoesNotOpenEpochWindow(t *testing.T) {
 	if err := repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.rollupOnce(t.Context()); err != nil {
+	if _, err := tableRollupOnce(d, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	requireServiceRollupSpans(t, d.DB, "ns", bucket, "first", 1)
@@ -257,8 +257,9 @@ func TestRollupIncludesRenamedFirstAttemptBeforeAdoption(t *testing.T) {
 	if info, err := os.Stat(repo.Parquet.BatchPath(batch.ID)); err != nil || !info.IsDir() {
 		t.Fatalf("rename did not complete: %v", err)
 	}
-	if len(repo.Parquet.BatchMetadata()) != 0 {
-		t.Fatal("failed commit was registered")
+	// Readers see exactly the catalog, so the renamed attempt is in it.
+	if len(repo.Parquet.BatchMetadata()) != 1 {
+		t.Fatal("renamed attempt is missing from the catalog")
 	}
 	stamp := batch.Spans[0].IngestedAt
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "second", Logs: []telemetry.Log{{Namespace: "ns", ServiceName: "other", TimeUnixNanos: bucket.UnixNano()}}}); err != nil {

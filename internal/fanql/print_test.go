@@ -14,7 +14,7 @@ var canonicalCases = [][2]string{
 	{`logs where severity ~ "ERROR"`, `logs where severity ~ ERROR`},
 	{`logs where body ~ 2e3`, `logs where 2e3`},
 	{`logs where body ~ $term`, `logs where body ~ $term`},
-	{`spans where http_status_code:2e3`, `spans where http_status_code:2e3`},
+	{`spans where operation:2e3`, `spans where operation:2e3`},
 	{`logs where service:"TRUE"`, `logs where service:"TRUE"`},
 	{`spans where attributes['é.x']:api`, `spans where attributes['é.x']:api`},
 	{`spans where duration > 500ms`, `spans where duration>500ms`},

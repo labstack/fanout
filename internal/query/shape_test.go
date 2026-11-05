@@ -93,8 +93,8 @@ func TestCompatibleVizzesOnQueryAsWritten(t *testing.T) {
 		q    Spec
 		want []string
 	}{
-		{Spec{From: "spans", Where: []string{"kind = 'SPAN_KIND_SERVER'"}, Measures: []string{"count()"}, By: []string{"http_route"}}, []string{"bar", "table"}},
-		{Spec{From: "spans", Where: []string{"kind = 'SPAN_KIND_SERVER'"}, Measures: []string{"count()"}, By: []string{"http_route"}, Bucket: "auto"}, []string{"timeseries", "state_timeline"}},
+		{Spec{From: "spans", Where: []string{"kind = 'SPAN_KIND_SERVER'"}, Measures: []string{"count()"}, By: []string{"attributes['http.route']"}}, []string{"bar", "table"}},
+		{Spec{From: "spans", Where: []string{"kind = 'SPAN_KIND_SERVER'"}, Measures: []string{"count()"}, By: []string{"attributes['http.route']"}, Bucket: "auto"}, []string{"timeseries", "state_timeline"}},
 		{Spec{From: "spans", Where: []string{"status = 'STATUS_CODE_ERROR'"}}, []string{"traces"}},
 		{Spec{From: "logs"}, []string{"logs"}},
 		{Spec{From: "logs", Measures: []string{"count()"}, By: []string{"body_template"}}, []string{"bar", "table", "log_patterns"}},

@@ -28,6 +28,10 @@ type Formatted struct {
 	Editable  bool          `json:"editable"`
 	Reason    string        `json:"reason,omitempty"`
 	Notices   []Notice      `json:"notices"`
+	// Each stored filter and measure as FanQL, in stored order, so an editor
+	// can label entries it cannot edit without showing their SQL.
+	Where    []string `json:"where"`
+	Measures []string `json:"measures"`
 }
 type tier uint8
 
@@ -64,7 +68,7 @@ func Format(ctx context.Context, p query.Parser, stored query.Spec, opts Options
 		}
 	}
 	q := &queryTree{Source: stored.From}
-	f := &Formatted{Exactness: Exact, Notices: []Notice{}, Requires: []Requirement{}}
+	f := &Formatted{Exactness: Exact, Notices: []Notice{}, Requires: []Requirement{}, Where: []string{}, Measures: []string{}}
 	_, requirements := query.Shape(&stored, opts.Viz, vars)
 	for _, name := range requirements {
 		satisfied := false
@@ -92,9 +96,10 @@ func Format(ctx context.Context, p query.Parser, stored query.Spec, opts Options
 			return nil, query.Problems{{Path: fmt.Sprintf("where[%d]", i), Message: err.Error()}}, nil
 		}
 		q.Where = append(q.Where, e)
+		f.Where = append(f.Where, printEntry(e, false))
 		if t == tierNormalized {
 			f.Exactness = Normalized
-			f.Notices = append(f.Notices, Notice{Path: fmt.Sprintf("where[%d]", i), Message: fmt.Sprintf("where[%d] is shown as %s; stored text is %q", i, printEntry(e, false), text)})
+			f.Notices = append(f.Notices, Notice{Path: fmt.Sprintf("where[%d]", i), Message: fmt.Sprintf("where[%d] is shown as %s; stored text is %q", i, printEntry(e, len(stored.Where) > 1), text)})
 		}
 	}
 	if len(stored.Measures) > 0 || stored.Histogram != nil || len(stored.By) > 0 || stored.Bucket != "" {
@@ -115,6 +120,7 @@ func Format(ctx context.Context, p query.Parser, stored query.Spec, opts Options
 					return nil, query.Problems{{Path: fmt.Sprintf("measures[%d]", i), Message: err.Error()}}, nil
 				}
 				q.Stage.Measures = append(q.Stage.Measures, m)
+				f.Measures = append(f.Measures, printMeasure(m))
 				if t == tierNormalized {
 					f.Exactness = Normalized
 					f.Notices = append(f.Notices, Notice{Path: fmt.Sprintf("measures[%d]", i), Message: fmt.Sprintf("measures[%d] is shown as %s; stored text is %q", i, printMeasure(m), text)})

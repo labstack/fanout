@@ -49,8 +49,9 @@ func identContinue(r rune) bool { return identStart(r) || unicode.IsDigit(r) }
 func digit(r rune) bool         { return r >= '0' && r <= '9' }
 
 // Lex never fails and always ends with EOF. A depth-zero pipe enters measure
-// context; by/every/sort/limit or another pipe leaves it. count_if's matching
-// parentheses enclose filter context, ignoring delimiters inside quoted tokens.
+// context; by/every/sort/limit, a misplaced where, or another pipe leaves it.
+// count_if's matching parentheses enclose filter context, ignoring delimiters
+// inside quoted tokens.
 func lex(text string) lexTokens {
 	r := []rune(text)
 	ts := make(lexTokens, 0, min(len(r)+1, 1024))
@@ -105,9 +106,11 @@ func lex(text string) lexTokens {
 				}
 			}
 			tok.Text = string(r[start:i])
-			if depth == 0 && brackets == 0 {
+			// After as, a word is an alias, even one spelled where.
+			alias := len(ts) > 0 && strings.EqualFold(ts[len(ts)-1].Text, "as")
+			if depth == 0 && brackets == 0 && !(alias && strings.EqualFold(tok.Text, "where")) {
 				switch strings.ToLower(tok.Text) {
-				case "by", "every", "sort", "limit":
+				case "by", "every", "sort", "limit", "where":
 					ctx = filterContext
 					tok.Ctx = ctx
 					tok.Kind = tokenWord

@@ -357,11 +357,11 @@ func printValue(v literalValue, f fieldName, aliases bool) string {
 			}
 		}
 	}
-	if v.Kind == numberValue && f.Ref != nil && f.Ref.Type == "string" && f.Ref.Key == "" && f.Ref.CompareAs == "" {
+	if v.Kind == numberValue && f.Ref != nil && f.Ref.Type == "string" && f.Ref.Key == "" {
 		return v.Text
 	}
 	if v.Kind == stringValue {
-		if f.Ref != nil && f.Ref.Key == "" && f.Ref.Type == "string" && f.Ref.CompareAs == "" {
+		if f.Ref != nil && f.Ref.Key == "" && f.Ref.Type == "string" {
 			if numberPattern.MatchString(v.Text) {
 				if _, err := strconv.ParseFloat(v.Text, 64); err == nil {
 					return v.Text

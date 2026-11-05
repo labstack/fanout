@@ -89,10 +89,30 @@ traces. Deploy markers and anomaly bands provide context; they do not establish
 the cause of a change.
 
 For queries that need it, a panel can use guarded SQL: one read-only `SELECT`
-over approved telemetry relations, with a required time-window filter. Logs,
+over approved telemetry relations, with a required time-window filter. It
+cannot call edit distances such as `levenshtein` or the Jaro similarities,
+and the pattern of `LIKE`, `ILIKE`, `GLOB`, `SIMILAR TO` and the `regexp_`
+functions, in SQL or a filter, must be a literal or a variable, never a
+column, and at most 256 bytes: DuckDB stops a query only between batches of rows, and
+these are the functions whose cost per row could keep one batch running long
+past its deadline. Name grouping keys explicitly: the pinned DuckDB release
+splits equal attribute values into separate groups under `GROUP BY ALL`, so
+SQL rejects it. For the same reason, functions that hash or deduplicate
+`attributes` or `resource` values outside `GROUP BY` and `DISTINCT`, such as
+`approx_count_distinct`, `approx_top_k`, `histogram`, `mode`, `entropy`,
+`list_distinct` and `list_unique`, can treat equal values as different, and
+`hash` can return different results for them. Cast the value first, for
+example `attributes['http.route']::VARCHAR`. Logs,
 log patterns, traces and scatter use structured queries. SQL state timelines
 return timestamp `time`, a string item, one numeric measure and optional string
 `state`, with thresholds.
+Standard OpenTelemetry keys that the schema marks indexed, such as
+`http.response.status_code` and `k8s.pod.name`, read typed from their own
+columns in SQL and structured queries alike: ingest converts a value sent in
+another type, so `"200"` reads as the number 200, and they need no cast. A
+subquery or CTE that projects only the map, such as
+`WITH s AS (SELECT attributes FROM spans)`, reads values as sent there. Other
+keys read as sent, and `SELECT *` returns the `attributes` and `resource` maps.
 SQL is an authoring escape hatch. **Spec** is a read-only inspection view;
 there is no SQL or chart-style editor there.
 
@@ -142,15 +162,14 @@ reviewed edits before rolling back to a binary without `resource_inventory`.
 ## Choose metric measures by kind
 
 `get_telemetry_schema` lists each metric's name, unit, semantic `type` and
-`temporality`. The `metrics` view uses these kinds: `gauge`, `counter` (a
-monotonic sum), `updown` (a non-monotonic sum), `histogram` (explicit or
-exponential) and `summary`. These differ from the stored OTLP kinds: `gauge`,
-`sum`, `histogram`, `exponential_histogram` and `summary`. Discovery keeps
+`temporality`. The `metrics` view and the stored files use these kinds:
+`gauge`, `counter` (a monotonic sum), `updown` (a non-monotonic sum),
+`histogram` (explicit or exponential) and `summary`. Discovery keeps
 separate entries when one name has different units, kinds or temporalities.
 There is no separate `kind` field in metric discovery.
 
 Counters and histograms carry `cumulative` or `delta` temporality; gauges and
-summaries have empty temporality. `start_time` is the data point's start time,
+summaries have none. `start_time` is the data point's start time,
 or NULL when absent. Choose measures from the discovered kind:
 
 | Measure | gauge, updown | counter | histogram |

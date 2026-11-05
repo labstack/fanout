@@ -44,12 +44,12 @@ func TestToolRegistryNegotiatesMCPApps(t *testing.T) {
 	})
 
 	want := map[string]string{
-		"query_telemetry":            "ui://fanout/panels.html",
-		"get_observability_overview": "ui://fanout/panels.html",
-		"get_service_topology":       "ui://fanout/panels.html",
-		"get_service_performance":    "ui://fanout/panels.html",
-		"inspect_trace":              "ui://fanout/panels.html",
-		"search_logs":                "ui://fanout/panels.html",
+		"query_telemetry":         "ui://fanout/panels.html",
+		"get_overview":            "ui://fanout/panels.html",
+		"get_service_topology":    "ui://fanout/panels.html",
+		"get_service_performance": "ui://fanout/panels.html",
+		"inspect_trace":           "ui://fanout/panels.html",
+		"search_logs":             "ui://fanout/panels.html",
 	}
 	if len(registry.apps) != len(want) {
 		t.Fatalf("registered MCP apps = %v, want %v", registry.apps, want)
@@ -61,13 +61,13 @@ func TestToolRegistryNegotiatesMCPApps(t *testing.T) {
 	}
 	foundIntelligence := false
 	for _, definition := range registry.Definitions() {
-		if definition.Name == "get_intelligence_snapshot" {
+		if definition.Name == "get_insights" {
 			foundIntelligence = true
 			break
 		}
 	}
 	if !foundIntelligence {
-		t.Fatal("get_intelligence_snapshot was not registered for the agent")
+		t.Fatal("get_insights was not registered for the agent")
 	}
 }
 
@@ -120,7 +120,8 @@ func TestRuntimeDashboardHistoryUsesAuthenticatedOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := fanoutmcp.NewWithIntelligence(registryQueries{}, service, executor, nil, "test")
-	if _, err := service.Replace(t.Context(), "owner", created.ID, created.Spec, 1, dashboard.Author{Kind: "user", ID: "owner"}, "Saved again"); err != nil {
+	// Restoring a spec the dashboard already has is rejected, so the save changes it.
+	if _, err := service.Replace(t.Context(), "owner", created.ID, query.Dashboard{Name: "History", Panels: []query.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "second"}}}, 1, dashboard.Author{Kind: "user", ID: "owner"}, "Saved again"); err != nil {
 		t.Fatal(err)
 	}
 	registry, err := NewToolRegistry(t.Context(), server.MCP())

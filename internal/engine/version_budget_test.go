@@ -52,6 +52,11 @@ func TestVersionPendingBudgetsAndSingleRetries(t *testing.T) {
 }
 
 func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
+	if raceDetector {
+		// The pass sizes follow a wall-clock budget, and writing 4.95m rows
+		// under race instrumentation takes minutes; the plain test run covers it.
+		t.Skip("time-budget sizing test does not apply under -race")
+	}
 	// Exercise the budget on the same eight-thread host shape as its sizing
 	// measurement, rather than the two-thread/256MB small annotation fixture.
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", DuckDBThreads: 8, DuckDBMaxConns: 8, RetentionDays: 30}
@@ -75,9 +80,12 @@ func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
 		}
 		commitMixedVersionBatch(t, repo, fmt.Sprintf("mixed-%03d", i), size)
 	}
+	// Only a pass whose budget left batches behind reports a backlog: the
+	// worker repeats at once after those and waits its cadence after the rest.
 	for pass, want := range []int64{12, 12, 12, 12, 12, 0} {
-		if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != want {
-			t.Fatalf("pass %d: batches=%d want=%d err=%v", pass, n, want, err)
+		n, backlog, err := d.refreshVersionRollup(t.Context(), versionRollupWaitBudget)
+		if err != nil || n != want || backlog != (pass < 4) {
+			t.Fatalf("pass %d: batches=%d want=%d backlog=%v err=%v", pass, n, want, backlog, err)
 		}
 	}
 	var marked, limited int
@@ -91,27 +99,23 @@ func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
 	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup`).Scan(&versions); err != nil || versions != 120 {
 		t.Fatalf("versions=%d err=%v", versions, err)
 	}
-	// Requeue the real backlog while publication blocks admission. Anomalies
-	// must persist before publication releases, and the loop must retry later.
+	// Requeue the real backlog. Anomalies must persist while the version loop
+	// works through it, and the loop must mark it again.
 	if _, err := d.writer().Exec(`DELETE FROM version_rollup_batches`); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.parquetMu.LockContext(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	locked := true
-	defer func() {
-		if locked {
-			d.parquetMu.Unlock()
-		}
-	}()
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	done := make(chan struct{})
-	go func() { defer close(done); d.runVersionRollupLoop(ctx) }()
+	go func() {
+		defer close(done)
+		for ctx.Err() == nil {
+			_, backlog, err := d.DrainVersionRollup(ctx)
+			if err != nil || !backlog {
+				return
+			}
+		}
+	}()
 	defer func() { cancel(); <-done }()
-	if n, err := d.RefreshVersionRollup(ctx); err != nil || n != 0 {
-		t.Fatalf("publication skip=%d %v", n, err)
-	}
 	now := time.Now().UTC()
 	finding := annotations.Anomaly{Namespace: "namespace-0", Service: "service-0", Kind: "volume", From: now.Add(-time.Minute), To: now, Title: "Low volume", Severity: "warn"}
 	persisted := make(chan error, 1)
@@ -125,9 +129,7 @@ func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("anomaly persistence starved behind busy version loop")
 	}
-	d.parquetMu.Unlock()
-	locked = false
-	t.Logf("anomaly persisted during blocked Parquet admission in %v", time.Since(start))
+	t.Logf("anomaly persisted during the version loop in %v", time.Since(start))
 	var count int
 	if err := d.DB.QueryRow(`SELECT count(*) FROM anomaly_log WHERE title='Low volume'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("persisted=%d err=%v", count, err)
@@ -158,9 +160,9 @@ func commitMixedVersionBatch(t testing.TB, repo *telemetrystore.Repository, id s
 		resource := map[string]any{"service.version": version, "deployment.environment": "production", "host.name": fmt.Sprintf("host-%d", i%31), "count": int64(i), "enabled": true}
 		attrs := map[string]any{"http.method": "GET", "http.status_code": int64(200), "http.route": "/api/items"}
 		stamp := at + int64(i)*1000
-		batch.Spans[i] = telemetry.Span{Namespace: ns, ServiceName: svc, ServiceVersion: version, TraceID: fmt.Sprintf("%s-%d", id, i/2), SpanID: fmt.Sprint(i), Name: "GET /api/items", Kind: "SPAN_KIND_SERVER", StartUnixNanos: stamp, EndUnixNanos: stamp + 1000000, DurationMS: 1, StatusCode: "STATUS_CODE_OK", Resource: resource, Attributes: attrs}
+		batch.Spans[i] = telemetry.Span{Namespace: ns, ServiceName: svc, TraceID: fmt.Sprintf("%s-%d", id, i/2), SpanID: fmt.Sprint(i), Name: "GET /api/items", Kind: "SPAN_KIND_SERVER", StartUnixNanos: stamp, EndUnixNanos: stamp + 1000000, DurationMS: 1, StatusCode: "STATUS_CODE_OK", Resource: resource, Attributes: attrs}
 		batch.Logs[i] = telemetry.Log{Namespace: ns, ServiceName: svc, EventUnixNanos: stamp, Severity: "INFO", Body: fmt.Sprintf("request %d completed successfully", i), Resource: resource, Attributes: attrs}
-		batch.Metrics[i] = telemetry.Metric{Namespace: ns, ServiceName: svc, EventUnixNanos: stamp, Name: "http.requests", Type: "sum", Value: float64(i), Resource: resource, Attributes: attrs}
+		batch.Metrics[i] = telemetry.Metric{Namespace: ns, ServiceName: svc, EventUnixNanos: stamp, Name: "http.requests", Type: "counter", Temporality: "cumulative", Value: float64(i), Resource: resource, Attributes: attrs}
 	}
 	if err := repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)

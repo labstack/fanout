@@ -44,6 +44,9 @@ func (*fakeFanQLParser) RenderSQL(context.Context, map[string]any) (string, erro
 type fakeFanQLPanels struct{ fakePanels }
 
 func (*fakeFanQLPanels) Schema(_ context.Context, req query.SchemaRequest) (*query.Schema, error) {
+	if req.Cached {
+		return nil, query.ErrSchemaNotCached
+	}
 	return &query.Schema{Window: req.Window, Signals: map[string]query.SignalSchema{
 		"logs": {Columns: []query.ColumnSchema{{Field: query.Field{Name: "severity", Type: query.TypeString}, Values: []query.Option{{Value: "ERROR"}, {Value: "INFO"}, {Value: "WARN"}}}}},
 	}}, nil
@@ -118,7 +121,7 @@ func TestFanQLParseReturnsQueryCanonicalAndVizzes(t *testing.T) {
 
 func TestFanQLParseProblemsHaveNoQuery(t *testing.T) {
 	for _, preview := range []bool{false, true} {
-		rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", fmt.Sprintf(`{"text":"spans where a:1 b:2 or c:3 | p99(duration) by http_route every 1m","preview":%t}`, preview))
+		rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", fmt.Sprintf(`{"text":"spans where a:1 b:2 or c:3 | p99(duration) by http.route every 1m","preview":%t}`, preview))
 		var body struct {
 			Code     string         `json:"code"`
 			Message  string         `json:"message"`
@@ -345,11 +348,12 @@ func TestFanQLResponsesHaveNoLanguageVersion(t *testing.T) {
 }
 
 func TestFanQLCompletionAbsoluteAndLongWindowsDiscloseRecentSchema(t *testing.T) {
-	for _, window := range []string{
-		`"from":"2026-10-20T10:00:00Z","to":"2026-10-20T11:00:00Z"`,
-		`"window":"7d"`,
+	for _, tt := range []struct{ window, want string }{
+		// A past absolute range keeps its length; schema windows end now.
+		{`"from":"2026-10-20T10:00:00Z","to":"2026-10-20T11:00:00Z"`, "1h"},
+		{`"window":"7d"`, "24h"},
 	} {
-		rec := serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", `{"text":"logs where sev","cursor":14,`+window+`}`)
+		rec := serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", `{"text":"logs where sev","cursor":14,`+tt.window+`}`)
 		var body struct {
 			Schema struct {
 				Window string `json:"window"`
@@ -358,8 +362,21 @@ func TestFanQLCompletionAbsoluteAndLongWindowsDiscloseRecentSchema(t *testing.T)
 			} `json:"schema"`
 		}
 		fanqlResponse(t, rec, http.StatusOK, &body)
-		if body.Schema.Window != "24h" || !body.Schema.Recent || body.Schema.Notice != "keys seen in the last 24h (recent), not in the selected interval" {
+		if body.Schema.Window != tt.want || !body.Schema.Recent || body.Schema.Notice != "keys seen in the last "+tt.want+" (recent), not in the selected interval" {
 			t.Fatalf("disclosure: %s", rec.Body)
+		}
+	}
+}
+
+func TestFanQLCompletionRejectsBadCursorAndWindow(t *testing.T) {
+	for _, body := range []string{
+		`{"text":"spans","cursor":999}`,
+		`{"text":"spans","cursor":-1}`,
+		`{"text":"spans","cursor":5,"window":"bogus"}`,
+	} {
+		rec := serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", body)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_input") {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body)
 		}
 	}
 }
@@ -385,6 +402,59 @@ func TestFanQLFormatReportsPanelRequirements(t *testing.T) {
 		fanqlResponse(t, rec, http.StatusOK, &body)
 		if len(body.Requires) != 1 || body.Requires[0].Name != tt.name || body.Requires[0].Satisfied != tt.satisfied {
 			t.Fatalf("requirements: %s", rec.Body)
+		}
+	}
+}
+
+// FanQL problems quote the user's own text, which is often a URL path; the
+// engine-error scrubber must not mistake them for filesystem paths.
+func TestFanQLParseProblemsKeepURLPaths(t *testing.T) {
+	for _, tc := range []struct{ text, message, hint string }{
+		{"spans where http.target:/a:b", "unexpected : after /a", `quote the value: http.target:"/a:b"`},
+		{"logs where http://x:8080/y", "unexpected : after http", `quote the value: "http://x:8080/y"`},
+		{"spans where url.path:/a/b:c", "unexpected : after /a/b", `quote the value: url.path:"/a/b:c"`},
+	} {
+		body, _ := json.Marshal(map[string]string{"text": tc.text})
+		rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", string(body))
+		var got struct {
+			Problems query.Problems `json:"problems"`
+		}
+		fanqlResponse(t, rec, http.StatusBadRequest, &got)
+		if len(got.Problems) == 0 || got.Problems[0].Message != tc.message || got.Problems[0].Hint != tc.hint {
+			t.Errorf("%s: %s", tc.text, rec.Body)
+		}
+	}
+}
+
+type fakeCachedSchemaPanels struct{ fakePanels }
+
+func (*fakeCachedSchemaPanels) Schema(_ context.Context, req query.SchemaRequest) (*query.Schema, error) {
+	if req.Window == "7d" {
+		return nil, query.Problems{{Path: "window", Message: "window must be one of 5m, 15m, 1h, 3h, 6h, 12h or 24h"}}
+	}
+	if !req.Cached || req.Window != "1h" || req.Namespace != "" {
+		return nil, query.ErrSchemaNotCached
+	}
+	return &query.Schema{Window: req.Window, Signals: map[string]query.SignalSchema{
+		"spans": {Attributes: []query.AttributeSchema{{Key: "http.route", Scope: "attributes"}}},
+	}}, nil
+}
+
+// Parse compares keys with a schema already cached, never waiting for one.
+// It offers the seen key as a fix only when that schema covers the query's
+// window and namespace; otherwise it only names the key.
+func TestFanQLParseOffersSeenDottedKey(t *testing.T) {
+	for _, tt := range []struct {
+		scope string
+		fix   bool
+	}{{`,"window":"1h"`, true}, {`,"window":"15m"`, false}, {``, false}, {`,"window":"7d"`, false}, {`,"window":"1h","namespace":"shop"`, false}} {
+		rec := serveFanQL(t, nil, &fakeCachedSchemaPanels{}, http.MethodPost, "/api/fanql/parse", `{"text":"spans where http.rout:/api/cart | count()"`+tt.scope+`}`)
+		var body struct {
+			Notices []fanql.Notice `json:"notices"`
+		}
+		fanqlResponse(t, rec, http.StatusOK, &body)
+		if len(body.Notices) != 1 || (len(body.Notices[0].FixIts) == 1) != tt.fix || !strings.Contains(body.Notices[0].Message, "did you mean http.route?") {
+			t.Errorf("%s: %s", tt.scope, rec.Body)
 		}
 	}
 }

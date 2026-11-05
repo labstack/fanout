@@ -10,7 +10,7 @@ import (
 
 func TestExemplarsCheckedScope(t *testing.T) {
 	e := newFixtureExecutor(t)
-	req := ExemplarRequest{Dashboard: shopDashboard(), PanelID: "by_route", From: fixtureStart.Add(30 * time.Minute), To: fixtureStart.Add(31 * time.Minute), Dimensions: map[string]string{"http_route": "/cart"}}
+	req := ExemplarRequest{Dashboard: shopDashboard(), PanelID: "by_route", From: fixtureStart.Add(30 * time.Minute), To: fixtureStart.Add(31 * time.Minute), Dimensions: map[string]string{"attributes['http.route']": "/cart"}}
 	got, err := e.Exemplars(t.Context(), req)
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestExemplarsRejectForgedDimensions(t *testing.T) {
 	if !errors.As(err, &problems) || !containsProblem(problems, want) {
 		t.Fatalf("got %v want %+v", err, want)
 	}
-	req.Dimensions = map[string]string{"http_route": "x'); DROP TABLE spans; --"}
+	req.Dimensions = map[string]string{"attributes['http.route']": "x'); DROP TABLE spans; --"}
 	got, err := e.Exemplars(t.Context(), req)
 	if err != nil || len(got.Traces) != 0 {
 		t.Fatalf("hostile value: %+v %v", got, err)

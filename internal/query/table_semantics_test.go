@@ -18,7 +18,7 @@ type countingTableTrendEngine struct {
 }
 
 func (e *countingTableTrendEngine) QueryContext(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
-	if strings.HasPrefix(text, "SELECT epoch_ms(time_bucket(") || strings.HasPrefix(text, "WITH _trend_scope AS") {
+	if strings.HasPrefix(text, "SELECT epoch_ms(time_bucket(") || strings.HasPrefix(text, "WITH _trend_scope AS") || (strings.HasPrefix(text, "SELECT * FROM (WITH base AS") && strings.Contains(text, "ORDER BY _t DESC")) {
 		e.queries++
 	}
 	return e.Engine.QueryContext(ctx, text, args...)
@@ -28,7 +28,7 @@ func TestTableSparklinesShareOneQueryAcrossRowsAndMeasures(t *testing.T) {
 	e := newFixtureExecutor(t)
 	counter := &countingTableTrendEngine{Engine: e.engine}
 	e.engine = counter
-	d := Dashboard{Name: "Three rows", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "P", Viz: "table", Query: &Spec{From: "spans", By: []string{"service", "http_route"}, Measures: []string{"count()", "avg(duration_ms) as latency"}}, Options: &Options{Columns: []ColumnFormat{{Field: "count", Format: "sparkline"}, {Field: "latency", Format: "sparkline"}}}}}}
+	d := Dashboard{Name: "Three rows", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "P", Viz: "table", Query: &Spec{From: "spans", By: []string{"service", "attributes['http.route']"}, Measures: []string{"count()", "avg(duration_ms) as latency"}}, Options: &Options{Columns: []ColumnFormat{{Field: "count", Format: "sparkline"}, {Field: "latency", Format: "sparkline"}}}}}}
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil || len(got) != 1 || got[0].Status != StatusOK || got[0].Frame.Rows < 3 {
 		t.Fatalf("table: %+v %v", got, err)
@@ -60,7 +60,7 @@ func TestHealthBudgetNotesEveryFrame(t *testing.T) {
 type overflowingTableTrendEngine struct{ Engine }
 
 func (e overflowingTableTrendEngine) QueryContext(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
-	if strings.HasPrefix(text, "SELECT epoch_ms(time_bucket(") || strings.HasPrefix(text, "WITH _trend_scope AS") {
+	if strings.HasPrefix(text, "SELECT epoch_ms(time_bucket(") || strings.HasPrefix(text, "WITH _trend_scope AS") || (strings.HasPrefix(text, "SELECT * FROM (WITH base AS") && strings.Contains(text, "ORDER BY _t DESC")) {
 		return e.Engine.QueryContext(ctx, "SELECT i::BIGINT, 'checkout', 1.0 FROM range(10002) t(i)")
 	}
 	return e.Engine.QueryContext(ctx, text, args...)
@@ -73,7 +73,7 @@ func TestTrendNotesAppend(t *testing.T) {
 			p := Panel{ID: "p", Title: "P", Viz: "table", Query: &Spec{From: "spans", By: []string{"service"}, Measures: []string{"count()"}}, Options: &Options{Columns: []ColumnFormat{{Field: "count", Format: "sparkline"}}}}
 			d := Dashboard{Name: "Notes", Panels: []Panel{p}}
 			Normalize(&d)
-			checked, problems, err := Check(t.Context(), e.engine, &d)
+			checked, problems, err := checkWith(t.Context(), e.engine, &d, nil)
 			if err != nil || len(problems) > 0 {
 				t.Fatalf("check: %v %v", problems, err)
 			}

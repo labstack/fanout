@@ -2,8 +2,11 @@ package query
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/queryrows"
 )
@@ -12,12 +15,50 @@ import (
 // validator caps queries at 16 filters; diagnosis examines only eight.
 const maxDiagnosedFilters = 8
 
+// deferDiagnosisKey carries the batch admission policy into shared cache runs.
+type deferDiagnosisKey struct{}
+
 // diagnose explains an empty structured panel. It counts the signal in the
 // window, then reruns the count with each of the first maxDiagnosedFilters
 // filters removed in turn. The filter whose removal recovers the most rows is
 // named in the context of the active combination, with the values seen for its
 // field when it was an equality. Ties keep the author's filter order.
-func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, scope Scope) string {
+//
+// The diagnosis shares the panel's deadline, so after a slow query it may not
+// finish; the panel then says only what the query showed.
+func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, scope Scope) (message string, complete bool) {
+	if p.Query == nil {
+		return "The query returned no rows for this time range.", true
+	}
+	deferred, _ := ctx.Value(deferDiagnosisKey{}).(bool)
+	if scope.Rollup || !deferred {
+		if message := e.explain(ctx, p, filters, scope); message != "" {
+			return message, true
+		}
+	}
+	message = fmt.Sprintf("No %s match this query in this time range.", rowNoun(p))
+	for _, f := range filters {
+		if !scope.dropped(f) {
+			message = fmt.Sprintf("No %s match these filters in this time range.", rowNoun(p))
+			break
+		}
+	}
+	if deferred && !scope.Rollup {
+		message += " Filter diagnosis was skipped because the server is busy with other queries."
+	}
+	return message, false
+}
+
+// rowNoun names what a structured panel lists: traces on the traces viz,
+// otherwise the rows of its signal.
+func rowNoun(p *Panel) string {
+	if p.Viz == "traces" {
+		return "traces"
+	}
+	return p.Query.From
+}
+
+func (e *Executor) explain(ctx context.Context, p *Panel, filters []Filter, scope Scope) string {
 	if p.Query == nil {
 		return "The query returned no rows for this time range."
 	}
@@ -79,31 +120,72 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 		others := append(append([]Filter{}, active[:best]...), active[best+1:]...)
 		selection := "one filter"
 		if f.DisplayField != "" {
-			value := f.DisplayLiteral
+			value := spoken(sig, f.EqField, f.DisplayLiteral)
 			if f.DisplayParam != "" {
 				value = strings.Join(scope.Vars[f.DisplayParam].Values, ", ")
 			}
 			if value != "" {
 				selection = f.DisplayField + " " + value
 			} else {
-				selection = f.DisplayField + " filter"
+				selection = "the " + f.DisplayField + " filter"
 			}
 		}
-		message := fmt.Sprintf("No %s match the selected filters in this time range. Without %s, %d match.", sig.name, selection, recovered)
+		// Counts are of the signal's rows, so the message names them even
+		// where the traces viz lists traces of spans.
+		noun, matched := sig.name, grouped(recovered)
+		message := fmt.Sprintf("No %s match the selected filters in this time range. Without %s, %s match.", noun, selection, matched)
 		if f.DisplayField != "" && (f.DisplayLiteral != "" || f.DisplayParam != "") {
-			message = fmt.Sprintf("No %s for %s in this time range. Without that filter, %d match.", sig.name, selection, recovered)
+			message = fmt.Sprintf("No %s for %s in this time range. Without that filter, %s match.", noun, selection, matched)
 		}
 		if len(active) > 1 {
-			message = fmt.Sprintf("No %s match this combination of filters in this time range. Without %s, %d match the remaining filters.", sig.name, selection, recovered)
+			message = fmt.Sprintf("No %s match this combination of filters in this time range. Without %s, %s match the remaining filters.", noun, selection, matched)
 		}
 		if f.EqField != "" {
-			if seen := e.topValues(ctx, sig, f.EqField, others, scope); seen != "" {
+			seen, n, near := e.seenValues(ctx, sig, f, others, scope)
+			if near != "" {
+				message += " Did you mean " + spoken(sig, f.EqField, near) + "?"
+			}
+			if seen != "" {
 				message += " Values seen: " + seen + "."
+			}
+			if n > 0 {
+				// The filter matches one type only; say which form finds the rest.
+				if strings.Contains(f.Expr, "'"+strings.ReplaceAll(f.DisplayLiteral, "'", "''")+"'") {
+					message += fmt.Sprintf(" %s %s store %s %s as a number; write the value without quotes, %s, to match them.", grouped(n), sig.name, f.DisplayField, f.DisplayLiteral, f.DisplayLiteral)
+				} else {
+					message += fmt.Sprintf(" %s %s store %s %s as text; quote the value, \"%s\", to match them.", grouped(n), sig.name, f.DisplayField, f.DisplayLiteral, f.DisplayLiteral)
+				}
 			}
 		}
 		return message
 	}
-	return fmt.Sprintf("%d %s are in this time range, but the filters together match none of them.", total, sig.name)
+	return fmt.Sprintf("%s %s are in this time range, but the filters together match none of them.", grouped(total), sig.name)
+}
+
+// grouped writes a count, which is never negative, with thousands separators.
+func grouped(n int64) string {
+	digits := strconv.FormatInt(n, 10)
+	var b strings.Builder
+	for i, d := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(d)
+	}
+	return b.String()
+}
+
+// spoken writes a stored enum value as FanQL spells it: STATUS_CODE_ERROR is
+// error. Other values are unchanged.
+func spoken(sig *signal, field, value string) string {
+	if v := fieldVocabularies[field]; v.Signal == sig.name {
+		for alias, stored := range v.Aliases {
+			if stored == value {
+				return alias
+			}
+		}
+	}
+	return value
 }
 
 func (e *Executor) count(ctx context.Context, sig *signal, filters []Filter, scope Scope) (int64, error) {
@@ -111,7 +193,7 @@ func (e *Executor) count(ctx context.Context, sig *signal, filters []Filter, sco
 	if err != nil {
 		return 0, err
 	}
-	rows, err := e.engine.QueryContext(ctx, "SELECT count(*) FROM "+structuredSource(sig.name)+" WHERE "+where, args...)
+	rows, err := e.engine.QueryContext(ctx, "SELECT "+diagnosisCount(scope, "")+" FROM "+diagnosisSource(sig, scope)+" WHERE "+where, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -145,7 +227,7 @@ func (e *Executor) filterCounts(ctx context.Context, sig *signal, active []Filte
 	// Positional parameters bind in textual order: the FILTER clauses precede
 	// the window predicate in the statement, so their arguments come first.
 	without = make([]int64, min(len(active), maxDiagnosedFilters))
-	selects := []string{"count(*)"}
+	selects := []string{diagnosisCount(scope, "")}
 	dest := []any{&total}
 	var args []any
 	for i := range without {
@@ -157,14 +239,14 @@ func (e *Executor) filterCounts(ctx context.Context, sig *signal, active []Filte
 			}
 		}
 		if len(others) == 0 {
-			selects = append(selects, "count(*)")
+			selects = append(selects, diagnosisCount(scope, ""))
 		} else {
-			selects = append(selects, "count(*) FILTER (WHERE "+strings.Join(others, " AND ")+")")
+			selects = append(selects, diagnosisCount(scope, " FILTER (WHERE "+strings.Join(others, " AND ")+")"))
 		}
 		dest = append(dest, &without[i])
 	}
 	args = append(args, windowArgs...)
-	rows, err := e.engine.QueryContext(ctx, "SELECT "+strings.Join(selects, ", ")+" FROM "+structuredSource(sig.name)+" WHERE "+window, args...)
+	rows, err := e.engine.QueryContext(ctx, "SELECT "+strings.Join(selects, ", ")+" FROM "+diagnosisSource(sig, scope)+" WHERE "+window, args...)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -192,30 +274,82 @@ func (e *Executor) rerunCounts(ctx context.Context, sig *signal, active []Filter
 	return total, without, nil
 }
 
-func (e *Executor) topValues(ctx context.Context, sig *signal, fieldText string, filters []Filter, scope Scope) string {
-	ref, err := sig.field(fieldText)
+// seenValues lists the five most common values of the filter's field among
+// the rows the other filters keep. For a literal it also finds the nearest
+// other value within a small edit distance, a likely typo, and counts the rows
+// whose attribute equals the literal as text: attribute equality is typed, so
+// 500 misses a stored "500", and in an empty panel the filter itself matches
+// none of these rows. One grouped scan answers all three: decoding attributes
+// dominates the cost, and more scans could outlast the panel's deadline.
+func (e *Executor) seenValues(ctx context.Context, sig *signal, f Filter, others []Filter, scope Scope) (seen string, other int64, near string) {
+	ref, err := sig.field(f.EqField)
 	if err != nil {
-		return ""
+		return "", 0, ""
 	}
-	where, args, err := buildWhere(sig, filters, scope)
+	where, args, err := buildWhere(sig, others, scope)
 	if err != nil {
-		return ""
+		return "", 0, ""
 	}
 	expr := ref.stringSQL()
-	rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5", expr, structuredSource(sig.name), where, expr), args...)
+	query := fmt.Sprintf("WITH g AS MATERIALIZED (SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL GROUP BY 1) "+
+		"SELECT * FROM (SELECT v, n, 'seen' AS kind FROM g ORDER BY n DESC, v LIMIT 5) UNION ALL SELECT '', sum(n), 'rows' FROM g", expr, diagnosisSource(sig, scope), where, expr)
+	if literal := f.DisplayLiteral; literal != "" {
+		if _, err := strconv.ParseFloat(literal, 64); err != nil && ref.Type == TypeString && utf8.RuneCountInString(literal) >= 3 && fieldVocabularies[f.EqField].Signal != sig.name {
+			// A typo changes about one character in four of a name; numbers,
+			// short literals and named values such as status error are no
+			// typos. Only the 1,000 most common values of the same length,
+			// give or take that, are compared, so an ID field stays cheap.
+			k := utf8.RuneCountInString(literal)/4 + 1
+			query += " UNION ALL SELECT * FROM (SELECT v, n, 'near' FROM (SELECT v, n, levenshtein(v, ?) AS d FROM (SELECT v, n FROM g WHERE v <> ? AND abs(length(v) - length(?)) <= ? ORDER BY n DESC, v LIMIT 1000)) WHERE d <= ? ORDER BY d, n DESC, v LIMIT 1)"
+			args = append(args, literal, literal, literal, k, k)
+		}
+		// A standard key reads typed: ingest converted its values, so no
+		// other form of the literal matches more rows.
+		if _, dedicated := sig.source.Dedicated(ref.Column, ref.Key); ref.Key != "" && !dedicated {
+			query += " UNION ALL SELECT v, n, 'literal' FROM g WHERE v = ?"
+			args = append(args, literal)
+		}
+	}
+	if scope.Rollup {
+		query = strings.ReplaceAll(query, "count(*) AS n", "sum(spans) AS n")
+	}
+	rows, err := e.engine.QueryContext(ctx, query, args...)
 	if err != nil {
-		return ""
+		return "", 0, ""
 	}
 	defer rows.Close()
 	var parts []string
+	var shown, total int64
 	for rows.Next() {
-		var value string
-		var n int64
-		if rows.Scan(&value, &n) == nil {
-			parts = append(parts, fmt.Sprintf("%s (%d)", value, n))
+		var value, kind string
+		var n sql.NullInt64
+		if rows.Scan(&value, &n, &kind) != nil {
+			continue
+		}
+		switch kind {
+		case "seen":
+			if value == "" {
+				value = `""`
+			}
+			parts = append(parts, fmt.Sprintf("%s (%s)", spoken(sig, f.EqField, value), grouped(n.Int64)))
+			shown += n.Int64
+		case "rows":
+			total = n.Int64
+		case "near":
+			near = value
+		case "literal":
+			other = n.Int64
 		}
 	}
-	return strings.Join(parts, ", ")
+	if rows.Err() != nil {
+		return "", 0, ""
+	}
+	if strings.HasSuffix(ref.Column, "_id") && ref.Key == "" || shown*100 < total {
+		// IDs, and any field whose five most common values cover under one
+		// row in a hundred, are near-unique: listing some says nothing.
+		parts = nil
+	}
+	return strings.Join(parts, ", "), other, near
 }
 
 func (e *Executor) metricKindDiagnosis(ctx context.Context, p *Panel, filters []Filter, scope Scope) string {
@@ -288,4 +422,17 @@ func (e *Executor) metricKindDiagnosis(ctx context.Context, p *Panel, filters []
 		return fmt.Sprintf("This measure is unavailable for %s (%s). Show %s instead.", k.name, k.kind, suggestion)
 	}
 	return ""
+}
+
+func diagnosisSource(sig *signal, scope Scope) string {
+	if scope.Rollup {
+		return rollupReadSource(scope.RollupSource)
+	}
+	return structuredSource(sig.name)
+}
+func diagnosisCount(scope Scope, filter string) string {
+	if scope.Rollup {
+		return "coalesce(sum(spans)" + filter + ",0)::BIGINT"
+	}
+	return "count(*)" + filter
 }

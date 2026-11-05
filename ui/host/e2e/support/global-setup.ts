@@ -90,7 +90,9 @@ export default async function globalSetup({ signalCleanup = true, onSignal = () 
       cwd: dir,
       env: { ...env, FANOUT_DATA_DIR: join(dir, "data"), FANOUT_ADDR: new URL(base).host,
         FANOUT_AUTH_CODE_SECRET: randomBytes(32).toString("hex"),
-        FANOUT_ROLLUP_INTERVAL: "1s" },
+        FANOUT_ROLLUP_INTERVAL: "1s",
+        // Specs assert data they just wrote; cached panels would hide it.
+        FANOUT_QUERY_CACHE_TTL: "0" },
       stdio: ["ignore", fd, fd],
     });
     closeSync(fd);

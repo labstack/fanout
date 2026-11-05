@@ -99,7 +99,7 @@ func reviewedReadOnly(name string, annotations *mcp.ToolAnnotations) bool {
 		return annotations.ReadOnlyHint
 	}
 	switch name {
-	case "get_observability_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs", "get_intelligence_snapshot", "get_telemetry_schema", "query_telemetry", "preview_panels", "list_dashboards", "get_dashboard", "list_dashboard_versions":
+	case "get_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs", "get_insights", "get_telemetry_schema", "query_telemetry", "preview_panels", "list_dashboards", "get_dashboard", "list_dashboard_versions":
 		return true
 	default:
 		return false

@@ -32,3 +32,5 @@ Date: YYYY-MM-DD
 | 0005 | [CalVer releases](0005-calver-releases.md) | Accepted |
 | 0006 | [One structured query path](0006-one-structured-query-path.md) | Accepted |
 | 0007 | [A hand-written FanQL parser](0007-hand-written-fanql-parser.md) | Accepted |
+| 0008 | [Batch format 5](0008-batch-format-5.md) | Accepted |
+| 0009 | [Ingest admission at saturation](0009-ingest-admission-at-saturation.md) | Accepted |

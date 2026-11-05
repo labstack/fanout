@@ -70,7 +70,7 @@ func TestResolveDottedAndPrefixedKeys(t *testing.T) {
 	if r.Query.Stage.Measures[0].Parsed.Field.Key != "user.id" || r.Query.Stage.Measures[1].Parsed.Field.Column != "resource" {
 		t.Fatal(r.Query.Stage)
 	}
-	r, ps = resolvedText(t, "metrics | last(value) by resource.k8s.pod.name", Options{})
+	r, ps = resolvedText(t, "metrics where name:a | last(value) by resource.k8s.pod.name", Options{})
 	if len(ps) > 0 || r.Query.Stage.By[0].Ref.Key != "k8s.pod.name" {
 		t.Fatal(r, ps)
 	}
@@ -131,7 +131,7 @@ func TestResolveSeverityRanges(t *testing.T) {
 			t.Fatal(bands, tt.want)
 		}
 	}
-	r, ps := resolvedText(t, "spans where http_status_code>=warn", Options{})
+	r, ps := resolvedText(t, "spans where http.response.status_code>=warn", Options{})
 	if len(ps) > 0 || r.Query.Where[0].(*comparison).Bands != nil {
 		t.Fatal(r, ps)
 	}
@@ -154,16 +154,10 @@ func TestResolveTypedLiterals(t *testing.T) {
 			t.Fatal(ps)
 		}
 	}
-	for _, tt := range []struct{ text, want string }{{"spans where http_status_code>=500", "integer"}, {"spans where http_status_code:500", ""}} {
-		r, ps := resolvedText(t, tt.text, Options{})
-		if len(ps) > 0 || r.Query.Where[0].(*comparison).Field.Ref.CompareAs != tt.want {
-			t.Fatal(r, ps)
-		}
-	}
 }
 
 func TestResolveFilterFunctions(t *testing.T) {
-	for _, text := range []string{`logs where length(body)>1000`, `spans where lower(service) = "api"`, `spans where starts_with(http_route, "/api")`, `logs where regexp_matches(body, "error.*")`} {
+	for _, text := range []string{`logs where length(body)>1000`, `spans where lower(service) = "api"`, `spans where starts_with(operation, "/api")`, `logs where regexp_matches(body, "error.*")`} {
 		if _, ps := resolvedText(t, text, Options{}); len(ps) != 0 {
 			t.Fatal(text, ps)
 		}
@@ -191,19 +185,21 @@ func TestResolveDiagnostics(t *testing.T) {
 		{"logs where severity between error and info", "between needs the lower level first: severity between info and error"},
 		{"logs where severity>=custom", `"custom" has no severity rank; use trace, debug, info, warn, error or fatal`},
 		{"logs where severity>=unspecified", `"unspecified" has no severity rank`},
-		{"spans where http_status_code>500ms", "units apply to duration only; write http_status_code>500"},
+		{"spans where operation>500ms", "units apply to duration only; write operation>500"},
+		{"spans where durationn>1s", `"durationn" is not a spans column; did you mean duration?`},
+		{"logs where durationn>1s", "durationn takes a number, not a unit; write durationn>1"},
 		{"spans where duration>500", "duration needs a unit; e.g. duration>500ms"},
 		{"spans where duration>-1ms", "durations are not negative"},
-		{"spans where duration>1h30m", "duration needs a unit"},
+		{"spans where duration>1h30m", "compound durations are not supported; write 90m"},
 		{"spans where duration_ms:true", "duration_ms needs a number"},
 		{"logs where time:x", `"time" is a time column; compare it with > or <`},
 		{`spans where start_time>"yesterday"`, "RFC 3339"},
-		{"metrics where timeout", "free text needs a field on metrics; use name:http.server.duration"},
+		{"metrics where timeout", "free text needs a field on metrics; use name:http.server.request.duration"},
 		{"spans where P95(Duration)", "function p95 is not allowed in a filter"},
-		{"spans where starts_with(http_route, /api)", "starts_with needs a quoted string"},
+		{"spans where starts_with(operation, /api)", "starts_with needs a quoted string"},
 		{"logs where length(body)", "length(...) needs a comparison"},
 		{"spans where lower(k)", "lower(...) needs a comparison"},
-		{`spans where starts_with(http_route, "/api") > 1`, "predicates are not compared"},
+		{`spans where starts_with(operation, "/api") > 1`, "predicates are not compared"},
 		{"spans | p95(service)", "p95 needs a numeric field; service is string"},
 		{"spans | p95()", "p95 takes 1 argument(s), got 0; e.g. p95(duration)"},
 		{"spans | count() as P95", `alias "P95" must be lowercase letters, digits and underscores`},
@@ -240,7 +236,8 @@ func TestResolveSortKeys(t *testing.T) {
 		{"spans sort +duration", "traces", true, ""}, {"spans sort duration", "traces", false, ""}, {"spans sort errors", "traces", false, "sort errors also filters to error spans; new queries: write status:error … sort duration"},
 		{"spans sort +start", "traces", false, ""}, {"logs sort time", "logs", false, ""}, {"logs sort +time", "logs", false, ""}, {"logs sort duration", "logs", true, ""},
 		{"logs | count() by body_template sort count", "log_patterns", false, ""}, {"logs | count() by body_template sort rate", "log_patterns", true, ""},
-		{"spans | count() every 1m sort count", "timeseries", false, "sort does not apply to bucketed series; series are chosen by top (options)"}, {"spans | count() every 1m sort count", "", false, ""},
+		{"spans | count() every 1m sort count", "timeseries", false, "sort does not apply to bucketed series; series are chosen by top (options)"}, {"spans | count() every 1m sort count", "", false, "sort does not apply to bucketed series; series are chosen by top (options)"},
+		{"logs | count() by body_template every 1m sort count", "", false, ""},
 	} {
 		r, ps := resolvedText(t, tt.text, Options{Viz: tt.viz})
 		if tt.bad {
@@ -280,7 +277,7 @@ func TestResolveVariables(t *testing.T) {
 }
 
 func TestResolveCompatibleVizzesAndEdits(t *testing.T) {
-	r, ps := resolvedText(t, "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route", Options{})
+	r, ps := resolvedText(t, "spans where kind:server | count_if(http.response.status_code>=500) / count() * 100 as pct_5xx by http.route", Options{})
 	if len(ps) > 0 {
 		t.Fatal(ps)
 	}
@@ -291,7 +288,7 @@ func TestResolveCompatibleVizzesAndEdits(t *testing.T) {
 	if !reflect.DeepEqual(names, []string{"bar", "table"}) {
 		t.Fatal(r.Compatible)
 	}
-	if len(r.Edits) != 1 || r.Edits[0].Viz != "timeseries" || r.Edits[0].Text != "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route every auto" {
+	if len(r.Edits) != 1 || r.Edits[0].Viz != "timeseries" || r.Edits[0].Text != "spans where kind:server | count_if(http.response.status_code>=500) / count() * 100 as pct_5xx by http.route every auto" {
 		t.Fatal(r.Edits)
 	}
 	r, ps = resolvedText(t, "spans where status:error", Options{})
@@ -308,5 +305,53 @@ func TestResolveCompatibleVizzesAndEdits(t *testing.T) {
 	}
 	if !reflect.DeepEqual(names, []string{"stat", "gauge", "table"}) {
 		t.Fatal(names)
+	}
+}
+
+// A bare dotted key reads attributes on every signal. Keys OpenTelemetry
+// defines for resources are rarely there, so the notice offers the resource.
+func TestResolveResourceKeyNotice(t *testing.T) {
+	for _, text := range []string{"metrics where name:a | avg(value) by host.name", "spans where k8s.pod.name:x | count()"} {
+		c, ps := Compile(text, Options{})
+		if c == nil || len(c.Notices) != 1 || len(c.Notices[0].FixIts) != 1 || !strings.HasPrefix(c.Notices[0].FixIts[0].Text, "resource.") {
+			t.Fatalf("%q: %+v %+v", text, c, ps)
+		}
+	}
+	for _, text := range []string{"metrics where name:a | avg(value) by resource.host.name", "spans where http.route:x | count()", "spans where attributes['host.name']:x"} {
+		if c, ps := Compile(text, Options{}); c == nil || len(c.Notices) != 0 {
+			t.Fatalf("%q: %+v %+v", text, c, ps)
+		}
+	}
+}
+
+// A dotted key the window has not seen, near one it has, is likely a typo: the
+// notice offers the seen key. Without a schema there is nothing to compare.
+func TestResolveDottedKeySpelling(t *testing.T) {
+	schema := &query.Schema{Signals: map[string]query.SignalSchema{"spans": {Attributes: []query.AttributeSchema{
+		{Key: "http.route", Scope: "attributes"}, {Key: "http.request.method", Scope: "attributes"}, {Key: "host.name", Scope: "resource"},
+	}}}}
+	text := "spans where http.rout:/api/cart"
+	r, ps := resolvedText(t, text, Options{Schema: schema})
+	if len(ps) > 0 || len(r.Notices) != 1 || r.Notices[0].Message != `"http.rout" was not seen recently on spans; did you mean http.route?` {
+		t.Fatal(r.Notices, ps)
+	}
+	if fixes := r.Notices[0].FixIts; len(fixes) != 1 || fixes[0].Text != "http.route" || text[fixes[0].Span.Start:fixes[0].Span.End] != "http.rout" {
+		t.Fatal(fixes)
+	}
+	if r, ps := resolvedText(t, "spans where resource.host.nam:a", Options{Schema: schema}); len(ps) > 0 || len(r.Notices) != 1 || r.Notices[0].FixIts[0].Text != "resource.host.name" {
+		t.Fatal(r.Notices, ps)
+	}
+	for _, text := range []string{"spans where http.route:/api/cart", "spans where http.zzz:1", "spans where resource.http.route:a"} {
+		if r, ps := resolvedText(t, text, Options{Schema: schema}); len(ps) > 0 || len(r.Notices) != 0 {
+			t.Errorf("%s: %+v %v", text, r.Notices, ps)
+		}
+	}
+	if r, _ := resolvedText(t, text, Options{}); len(r.Notices) != 0 {
+		t.Fatal(r.Notices)
+	}
+	// A schema that may not cover the query's window or namespace can name
+	// a likely key, but must not rewrite a rare valid one.
+	if r, ps := resolvedText(t, text, Options{Schema: schema, SchemaPartial: true}); len(ps) > 0 || len(r.Notices) != 1 || len(r.Notices[0].FixIts) != 0 {
+		t.Fatal(r.Notices, ps)
 	}
 }

@@ -251,7 +251,7 @@ func TestFailedBatchCacheTransactionPublishesNoContributions(t *testing.T) {
 			t.Fatalf("%s partial rows=%d: %v", table, count, err)
 		}
 	}
-	if err := createBatchCaches(d.DB); err != nil {
+	if err := CreateCacheTables(d.DB); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
@@ -263,6 +263,26 @@ func TestFailedBatchCacheTransactionPublishesNoContributions(t *testing.T) {
 	}
 }
 
+// A pass reports a backlog only while unmarked files remain beyond its
+// budget; a pass that caught up lets the worker wait its idle cadence.
+func TestReadCacheReportsBacklogOnlyBeyondBudget(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	for i := range readCacheBatchLimit + 1 {
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprintf("file-%03d", i), Logs: []telemetry.Log{{TimeUnixNanos: int64(i + 1), IngestedAt: int64(i + 1)}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for pass, want := range []bool{true, false, false} {
+		if _, backlog, err := d.refreshReadCaches(t.Context()); err != nil || backlog != want {
+			t.Fatalf("pass %d: backlog=%v want=%v err=%v", pass, backlog, want, err)
+		}
+	}
+	var marked int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM read_batches`).Scan(&marked); err != nil || marked != readCacheBatchLimit+1 {
+		t.Fatalf("marked=%d err=%v", marked, err)
+	}
+}
+
 func TestReadCacheWorkerAcknowledgesNewFilesWithoutRollupTick(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
 	release := d.writeGate.Lock(writegate.RollupService)
@@ -270,7 +290,7 @@ func TestReadCacheWorkerAcknowledgesNewFilesWithoutRollupTick(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	versionDone := make(chan struct{})
-	go func() { defer close(versionDone); d.runVersionRollupLoop(ctx) }()
+	go func() { defer close(versionDone); _, _ = d.RefreshVersionRollup(ctx) }()
 	go func() { defer close(done); d.runReadCacheLoop(ctx) }()
 	t.Cleanup(func() { cancel(); <-done; <-versionDone })
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "new", Logs: []telemetry.Log{{TimeUnixNanos: 1, IngestedAt: 1}}}); err != nil {
@@ -322,7 +342,10 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, stmt := range []string{`UPDATE read_trace_candidates SET min_start=0`, `UPDATE read_resource_inventory SET first_seen=make_timestamp_ns(0)::TIMESTAMPTZ_NS`, `UPDATE read_cache_version SET version=5`, `INSERT INTO read_edge_buckets VALUES ('ns',now(),10)`, `INSERT INTO rollup_state VALUES ('edge_rollup_v2_substart',1,now()),('edge_rollup_v2_subwindow_end',2,now())`, `CREATE TABLE read_endpoints (value INTEGER)`, `CREATE TABLE read_logs (value INTEGER)`, `CREATE TABLE read_obsolete (value INTEGER)`} {
+	for _, stmt := range []string{`UPDATE read_trace_candidates SET min_start=0`, `UPDATE read_resource_inventory SET first_seen=make_timestamp_ns(0)::TIMESTAMPTZ_NS`, `UPDATE read_cache_version SET version=5`, `INSERT INTO read_edge_buckets VALUES ('ns',now(),10)`, `INSERT INTO rollup_state VALUES ('edge_rollup_v2_substart',1,now()),('edge_rollup_v2_subwindow_end',2,now())`, `CREATE TABLE read_endpoints (value INTEGER)`, `CREATE TABLE read_logs (value INTEGER)`, `CREATE TABLE read_obsolete (value INTEGER)`,
+		`INSERT INTO service_rollup (namespace,bucket,service,spans) VALUES ('ns',now(),'svc',1)`, `INSERT INTO edge_rollup (namespace,bucket,caller,callee,calls) VALUES ('ns',now(),'a','b',1)`,
+		`INSERT INTO version_rollup VALUES ('ns','svc','v1',now(),now())`, `INSERT INTO version_rollup_batches VALUES ('semantic',1)`,
+		`INSERT INTO anomaly_log VALUES ('ns','svc','latency',now(),now(),'slow','bad')`, `INSERT INTO rollup_state VALUES ('service_rollup_v3',1,now())`} {
 		if _, err := d.DB.Exec(stmt); err != nil {
 			t.Fatal(err)
 		}
@@ -330,11 +353,17 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	if err := CreateCacheTables(d.DB); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"read_batches", "read_resource_inventory", "read_trace_parts", "read_trace_candidates", "read_edge_buckets"} {
+	for _, table := range []string{"read_batches", "read_resource_inventory", "read_trace_parts", "read_trace_candidates", "read_edge_buckets",
+		"service_rollup", "edge_rollup", "rollup_state", "version_rollup", "version_rollup_batches"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s survived semantic change: %d %v", table, count, err)
 		}
+	}
+	// Anomaly history is detector output, not derived from Parquet: it survives.
+	var anomalies int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM anomaly_log`).Scan(&anomalies); err != nil || anomalies != 1 {
+		t.Fatalf("anomaly history after a version change: %d %v", anomalies, err)
 	}
 	if watermark, cursor := readEdgeRollupState(t, d); watermark != 0 || cursor != 0 {
 		t.Fatalf("obsolete edge cursor survived: watermark=%d cursor=%d", watermark, cursor)
@@ -355,7 +384,7 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 		t.Fatalf("rebuilt bound=%d: %v", minStart, err)
 	}
 	var version int
-	if err := d.DB.QueryRow(`SELECT version FROM read_cache_version`).Scan(&version); err != nil || version != 6 {
+	if err := d.DB.QueryRow(`SELECT version FROM read_cache_version`).Scan(&version); err != nil || version != readCacheVersion {
 		t.Fatalf("version=%d: %v", version, err)
 	}
 
@@ -433,17 +462,16 @@ func TestPreparedReplacementDoesNotHoldCacheWriteGate(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	// Pin a reader so publication has to drain. Preparation must release the
-	// cache write gate; new cache passes skip until the publisher is gone.
-	if err := d.parquetMu.RLockContext(t.Context(), parquetReadQuery); err != nil {
-		t.Fatal(err)
-	}
-	defer d.parquetMu.RUnlock()
+	// Hold the swap open. Preparation must release the cache write gate, and
+	// cache passes keep running while the publication is in flight.
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- d.PublishParquetReplacement(ctx, telemetry.BatchMetadata{ID: "output"}, []string{"input"}, func(context.Context) error { return nil })
+		done <- d.PublishParquetReplacement(ctx, telemetry.BatchMetadata{ID: "output"}, []string{"input"}, func(ctx context.Context) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -462,7 +490,6 @@ func TestPreparedReplacementDoesNotHoldCacheWriteGate(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "new-input", Logs: []telemetry.Log{{TimeUnixNanos: 2, IngestedAt: 2}}}); err != nil {
 		t.Fatal(err)
 	}
-	waitForQueuedWriter(t, &d.parquetMu)
 	passCtx, stop := context.WithTimeout(t.Context(), time.Second)
 	defer stop()
 	unlock, err := d.cacheGate.LockContext(passCtx, writegate.ReadCache)
@@ -474,8 +501,8 @@ func TestPreparedReplacementDoesNotHoldCacheWriteGate(t *testing.T) {
 		t.Fatalf("worker blocked behind publication: %v", err)
 	}
 	markers, err := batchMarkers(t.Context(), d.DB)
-	if err != nil || !markers["output"] || markers["new-input"] {
-		t.Fatalf("prepared output lost or cache entered ahead of publisher: %v %v", markers, err)
+	if err != nil || !markers["output"] || !markers["new-input"] {
+		t.Fatalf("prepared output lost or cache stalled behind publication: %v %v", markers, err)
 	}
 	cancel()
 	if err := <-done; err == nil {
@@ -652,7 +679,7 @@ func TestReadCacheBudgetsAllSignalsAndReportsInventoryWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	markers, err := batchMarkers(t.Context(), d.DB)
-	if err != nil || len(markers) != 1 || !markers["log-only"] || written != 1 {
+	if err != nil || len(markers) != 1 || !markers["log-only"] || written != 2 {
 		t.Fatalf("all-signal budget/work: %v written=%d err=%v", markers, written, err)
 	}
 	if got := metricFamily(t, "fanout_read_cache_pending_batches").Metric[0].GetGauge().GetValue(); got != 3 {
@@ -663,7 +690,7 @@ func TestReadCacheBudgetsAllSignalsAndReportsInventoryWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	markers, err = batchMarkers(t.Context(), d.DB)
-	if err != nil || !markers["log-heavy-trace"] || markers["older-trace"] || written != 4 {
+	if err != nil || !markers["log-heavy-trace"] || markers["older-trace"] || written != 6 {
 		t.Fatalf("oversized mixed batch: %v written=%d err=%v", markers, written, err)
 	}
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {

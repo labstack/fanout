@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/queryrows"
 )
@@ -229,6 +230,9 @@ func convertDynamic(v any, kind string) any {
 	}
 	switch s := v.(type) {
 	case string:
+		if kind == "json" {
+			return engine.NormalizeJSON(s)
+		}
 		return s
 	case []byte:
 		return string(s)
@@ -257,4 +261,22 @@ type HealthFrame struct {
 	ServiceCount    int                        `json:"service_count"`
 	ErrorTrendTimes []int64                    `json:"error_trend_times"`
 	ErrorTrend      []float64                  `json:"error_trend"`
+}
+
+// A grouping-set total has no time bucket. Remove it from the visible series
+// while keeping the same public columns and the full-window aggregate.
+func extractGroupingTotals(f *Frame) {
+	for row := f.Rows - 1; row >= 0; row-- {
+		if f.Values[0][row] != nil {
+			continue
+		}
+		f.Totals = make([]any, len(f.Columns))
+		for col, c := range f.Columns {
+			if c.Role == "measure" {
+				f.Totals[col] = f.Values[col][row]
+			}
+			f.Values[col] = append(f.Values[col][:row], f.Values[col][row+1:]...)
+		}
+		f.Rows--
+	}
 }

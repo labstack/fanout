@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/fanout/internal/telemetry"
+	"golang.org/x/sync/errgroup"
 )
 
 // BatchIssue is one authoritative batch that startup cannot validate.
@@ -21,34 +24,62 @@ type BatchIssue struct {
 }
 
 // VerifyBatches validates every authoritative batch without opening a live
-// repository or changing the filesystem.
+// repository or changing the filesystem. Batches verify concurrently on one
+// two-thread engine per two CPUs, each with its own fixed memory limit, so a
+// large set uses the machine while no query grows with it; GOMAXPROCS bounds
+// both. Issues keep directory order.
 func VerifyBatches(root string) ([]BatchIssue, error) {
 	batchesDir := filepath.Join(root, "parquet", "batches")
 	entries, err := os.ReadDir(batchesDir)
 	if err != nil {
 		return nil, fmt.Errorf("read telemetry batches: %w", err)
 	}
-	verifier, err := telemetry.NewBatchVerifier(context.Background(), batchesDir)
-	if err != nil {
-		return nil, err
-	}
-	defer verifier.Close()
-	var issues []BatchIssue
+	var names []string
 	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == telemetry.SchemaBatch || !strings.HasSuffix(entry.Name(), telemetry.BatchSuffix) {
-			continue
+		if entry.IsDir() && entry.Name() != telemetry.SchemaBatch && strings.HasSuffix(entry.Name(), telemetry.BatchSuffix) {
+			names = append(names, entry.Name())
 		}
-		path := filepath.Join(batchesDir, entry.Name())
-		if err := verifier.Validate(context.Background(), path); err != nil {
-			if !telemetry.IsBatchCorrupt(err) {
-				return issues, fmt.Errorf("verify batch %s: %w", entry.Name(), err)
+	}
+	// Every engine opens before any batch is read, so a worker's failure
+	// cannot cancel a later open and hide its own error.
+	verifiers := make([]*telemetry.BatchVerifier, max(1, min(runtime.GOMAXPROCS(0)/2, len(names))))
+	for i := range verifiers {
+		if verifiers[i], err = telemetry.NewBatchVerifier(context.Background(), batchesDir); err != nil {
+			for _, v := range verifiers[:i] {
+				_ = v.Close()
 			}
+			return nil, err
+		}
+	}
+	group, ctx := errgroup.WithContext(context.Background())
+	results := make([]error, len(names))
+	var next atomic.Int64
+	for _, verifier := range verifiers {
+		group.Go(func() error {
+			defer verifier.Close()
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= len(names) {
+					return nil
+				}
+				err := verifier.Validate(ctx, filepath.Join(batchesDir, names[i]))
+				if err != nil && !telemetry.IsBatchCorrupt(err) {
+					return fmt.Errorf("verify batch %s: %w", names[i], err)
+				}
+				results[i] = err
+			}
+		})
+	}
+	err = group.Wait()
+	var issues []BatchIssue
+	for i, verifyErr := range results {
+		if verifyErr != nil {
 			issues = append(issues, BatchIssue{
-				ID: strings.TrimSuffix(entry.Name(), telemetry.BatchSuffix), Path: path, Err: err,
+				ID: strings.TrimSuffix(names[i], telemetry.BatchSuffix), Path: filepath.Join(batchesDir, names[i]), Err: verifyErr,
 			})
 		}
 	}
-	return issues, nil
+	return issues, err
 }
 
 // QuarantineBatch atomically sets aside one specifically named unreadable

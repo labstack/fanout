@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 )
@@ -62,13 +61,14 @@ func TestExemplarDeadlineAndCancel(t *testing.T) {
 
 func TestExemplarSafeErrors(t *testing.T) {
 	duck, _ := newTestEngine(t)
-	failure := fmt.Errorf("read '/private/telemetry/batch/logs.parquet': %w", engine.ErrParquetReadWait)
+	cause := errors.New("parquet read failed")
+	failure := fmt.Errorf("read '/private/telemetry/batch/logs.parquet': %w", cause)
 	probe := exemplarProbeEngine{Engine: duck, query: func(context.Context, string, ...any) (queryrows.Rows, error) { return nil, failure }}
 	e := NewExecutor(probe, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	_, err := e.Exemplars(t.Context(), exemplarRequest(exemplarDashboard("spans")))
 	err = PresentedError(err, ReadError)
-	if !errors.Is(err, engine.ErrParquetReadWait) || strings.Contains(err.Error(), "/private/telemetry") || err.Error() != ReadFailure {
+	if !errors.Is(err, cause) || strings.Contains(err.Error(), "/private/telemetry") || err.Error() != ReadFailure {
 		t.Fatalf("lost safe error chain: %v", err)
 	}
 }
@@ -79,7 +79,7 @@ func TestExemplarDimensionBindingAndProjection(t *testing.T) {
 	called := false
 	probe := exemplarProbeEngine{Engine: engine, query: func(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
 		called = true
-		if strings.Contains(text, value) || strings.Contains(text, sqlString(value)) || !slices.Contains(args, any(value)) {
+		if strings.Contains(text, value) || strings.Contains(text, sqlString(value)) || (strings.Contains(text, "LIMIT 65") && !slices.Contains(args, any(value))) {
 			t.Fatalf("dimension not bound: %s %+v", text, args)
 		}
 		if strings.Contains(text, "s.*") {
@@ -94,8 +94,8 @@ func TestExemplarDimensionBindingAndProjection(t *testing.T) {
 			entry := entry.(map[string]any)
 			if entry["key"] == "roots" {
 				root := entry["value"].(map[string]any)["query_node"].(map[string]any)
-				if got := len(root["select_list"].([]any)); got != 8 {
-					t.Fatalf("roots selects %d columns, want 8", got)
+				if got := len(root["select_list"].([]any)); got != 4 {
+					t.Fatalf("roots selects %d columns, want 4", got)
 				}
 			}
 		}
@@ -242,37 +242,37 @@ func TestExemplarClipsMatchingSpan(t *testing.T) {
 	}
 }
 
-func TestExemplarCandidateCapAndSlowest(t *testing.T) {
+func TestExemplarSlowestCandidates(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	var spans []telemetry.Span
 	for i := range 1005 {
 		spans = append(spans, telemetry.Span{Namespace: "n", TraceID: fmt.Sprintf("t%04d", i), SpanID: "root", ServiceName: "s", StartUnixNanos: n, EndUnixNanos: n + int64(i+1)*1000000, DurationMS: float64(i + 1), IngestedAt: n})
 	}
+	// Slower rows outside the selected service or time must not win.
+	spans = append(spans,
+		telemetry.Span{Namespace: "n", TraceID: "other-service", SpanID: "root", ServiceName: "other", StartUnixNanos: n, EndUnixNanos: n + int64(time.Second)*10, DurationMS: 10000, IngestedAt: n},
+		telemetry.Span{Namespace: "n", TraceID: "outside-time", SpanID: "root", ServiceName: "s", StartUnixNanos: n + int64(time.Minute)*2, EndUnixNanos: n + int64(time.Minute)*2 + int64(time.Second)*10, DurationMS: 10000, IngestedAt: n})
 	commit(t, repo, spans, nil)
-	e := NewExecutor(engine, 30)
+	probe := exemplarProbeEngine{Engine: engine, query: func(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
+		if strings.HasPrefix(text, "WITH roots AS") && len(args) != 130 {
+			return nil, fmt.Errorf("root probe has %d arguments, want 64 keys and two window bounds", len(args))
+		}
+		return engine.QueryContext(ctx, text, args...)
+	}}
+	e := NewExecutor(probe, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
-	got, err := e.Exemplars(t.Context(), exemplarRequest(exemplarDashboard("spans")))
-	if err != nil || len(got.Traces) != 20 || !got.Truncated || got.Traces[0].DurationMS != 1005 {
-		t.Fatalf("slowest: %+v %v", got, err)
+	req := exemplarRequest(exemplarDashboard("spans"))
+	req.To = fixtureStart.Add(time.Minute)
+	req.Dimensions = map[string]string{"service": "s"}
+	got, err := e.Exemplars(t.Context(), req)
+	if err != nil || len(got.Traces) != 20 || !got.Truncated {
+		t.Fatalf("sample: %+v %v", got, err)
 	}
-	p := Panel{Query: &Spec{From: "spans"}}
-	where, args, _ := selectionWhere(&p, nil, Scope{Start: fixtureStart, End: fixtureStart.Add(time.Hour)}, nil, nil)
-	args = append(args, fixtureStart, fixtureStart.Add(time.Hour))
-	rows, err := engine.QueryContext(t.Context(), checkedTraceSQL("spans", where, 2000, "duration_ms DESC,trace_id,namespace", "start_time::TIMESTAMP_NS"), args...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		count++
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if count != 1000 {
-		t.Fatalf("candidate cap: got %d", count)
+	for i, trace := range got.Traces {
+		if want := float64(1005 - i); trace.DurationMS != want {
+			t.Fatalf("trace %d duration = %v, want %v", i, trace.DurationMS, want)
+		}
 	}
 }
 
@@ -309,5 +309,102 @@ func TestExemplarLogCapWithoutRoots(t *testing.T) {
 	got, err := e.Exemplars(t.Context(), exemplarRequest(exemplarDashboard("logs")))
 	if err != nil || len(got.Traces) != 0 || !got.Truncated {
 		t.Fatalf("lost cap summary: %+v %v", got, err)
+	}
+}
+
+// Candidate files follow the selected bucket; root metadata may precede it.
+func TestExemplarBucketPruningAndRootWindow(t *testing.T) {
+	duck, repo := newTestEngine(t)
+	n := fixtureStart.UnixNano()
+	commit(t, repo, []telemetry.Span{
+		{Namespace: "n", TraceID: "t", SpanID: "root", ServiceName: "root", Name: "root", StartUnixNanos: n, EndUnixNanos: n + int64(time.Minute), DurationMS: 60000, IngestedAt: n},
+		{Namespace: "n", TraceID: "t", SpanID: "child", ParentSpanID: "root", ServiceName: "selected", StartUnixNanos: n + int64(30*time.Minute), EndUnixNanos: n + int64(30*time.Minute) + 1000000, DurationMS: 1, Attributes: map[string]any{"http.route": "/cart"}, IngestedAt: n},
+		{Namespace: "other", TraceID: "t", SpanID: "root", ServiceName: "wrong", StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, IngestedAt: n},
+	}, nil)
+	calls := 0
+	lo, hi := fixtureStart.Add(30*time.Minute), fixtureStart.Add(31*time.Minute)
+	probe := exemplarProbeEngine{Engine: duck, query: func(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
+		calls++
+		window, ok := queryrows.ReadWindow(ctx)
+		wantStart, wantEnd := lo, hi
+		if calls == 2 {
+			wantStart, wantEnd = fixtureStart, fixtureStart.Add(time.Hour)
+			if strings.Contains(text, "JOIN candidates") || strings.Contains(text, "OVER(") || !strings.Contains(text, "struct_pack(namespace := s.namespace, trace_id := s.trace_id) IN (") {
+				return nil, errors.New("roots must probe constant trace keys before windowing")
+			}
+		}
+		if !ok || !window.Start.Equal(wantStart) || !window.End.Equal(wantEnd) {
+			return nil, fmt.Errorf("scan %d window: %+v", calls, window)
+		}
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) > 10*time.Second {
+			return nil, errors.New("exemplar exceeds client budget")
+		}
+		if calls == 1 && (strings.Contains(text, "GROUP BY") || !strings.Contains(text, "ORDER BY duration_ms DESC LIMIT 65")) {
+			return nil, errors.New("candidate scan must use bounded duration ordering")
+		}
+		return duck.QueryContext(ctx, text, args...)
+	}}
+	e := NewExecutor(probe, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	d := exemplarDashboard("spans")
+	d.Panels[0].Query.By = []string{"attributes['http.route']"}
+	req := exemplarRequest(d)
+	req.From, req.To = lo, hi
+	req.Dimensions = map[string]string{"attributes['http.route']": "/cart"}
+	got, err := e.Exemplars(t.Context(), req)
+	if err != nil || calls != 2 || len(got.Traces) != 1 || got.Traces[0].Namespace != "n" || got.Traces[0].Service != "root" {
+		t.Fatalf("selection lineage: %+v calls=%d err=%v", got, calls, err)
+	}
+}
+
+func TestExemplarSampleKeepsRootOrderingAndTraceErrors(t *testing.T) {
+	duck, repo := newTestEngine(t)
+	n := fixtureStart.Add(time.Minute).UnixNano()
+	var spans []telemetry.Span
+	for i := range 600 {
+		status := ""
+		if i == 599 {
+			status = "STATUS_CODE_ERROR"
+		}
+		spans = append(spans, telemetry.Span{Namespace: "n", TraceID: "t", SpanID: fmt.Sprint("child-", i), ParentSpanID: "root", ServiceName: "selected", StartUnixNanos: n + int64(i), EndUnixNanos: n + int64(i) + 1000000, DurationMS: 1, StatusCode: status, IngestedAt: n})
+	}
+	rootTime := fixtureStart.Add(2 * time.Minute)
+	spans = append(spans, telemetry.Span{Namespace: "n", TraceID: "t", SpanID: "root", ServiceName: "root", Name: "late root", StartUnixNanos: rootTime.UnixNano(), EndUnixNanos: rootTime.UnixNano() + 900000000, DurationMS: 900, IngestedAt: n})
+	commit(t, repo, spans, nil)
+	e := NewExecutor(duck, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	req := exemplarRequest(exemplarDashboard("spans"))
+	req.From, req.To = fixtureStart.Add(time.Minute), fixtureStart.Add(2*time.Minute)
+	req.Dimensions = map[string]string{"service": "selected"}
+	got, err := e.Exemplars(t.Context(), req)
+	if err != nil || len(got.Traces) != 1 || !got.Truncated {
+		t.Fatalf("sample: %+v %v", got, err)
+	}
+	root := got.Traces[0]
+	if root.Service != "root" || root.Operation != "late root" || !root.Start.Equal(rootTime) || root.Status != "STATUS_CODE_ERROR" {
+		t.Fatalf("root metadata: %+v", root)
+	}
+}
+
+// Repeated matching spans can fill the candidate heap with only one trace.
+// The row beyond its capacity must still flag truncation.
+func TestExemplarCandidateTruncationBoundary(t *testing.T) {
+	for _, count := range []int{64, 65} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			duck, repo := newTestEngine(t)
+			n := fixtureStart.UnixNano()
+			var spans []telemetry.Span
+			for i := range count {
+				spans = append(spans, telemetry.Span{Namespace: "n", TraceID: "t", SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, IngestedAt: n})
+			}
+			commit(t, repo, spans, nil)
+			e := NewExecutor(duck, 30)
+			e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+			got, err := e.Exemplars(t.Context(), exemplarRequest(exemplarDashboard("spans")))
+			if err != nil || len(got.Traces) != 1 || got.Truncated != (count > 64) {
+				t.Fatalf("count %d: %+v %v", count, got, err)
+			}
+		})
 	}
 }

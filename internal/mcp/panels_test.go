@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -10,11 +11,13 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/querytest"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/query"
 	appstore "github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -62,20 +65,26 @@ func panelServerFixtureAt(t *testing.T, seed bool, now time.Time) *Server {
 		var logs []telemetry.Log
 		for i := range 30 {
 			n := at.Add(time.Duration(i) * time.Second).UnixNano()
-			route := "/cart"
+			route := map[string]any{"http.route": "/cart"}
 			if i == 0 {
-				route = ""
+				route = nil
 			}
-			spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: fmt.Sprintf("trace-%d", i), SpanID: fmt.Sprintf("span-%d", i), Name: "GET cart", Kind: "SPAN_KIND_SERVER", StartUnixNanos: n, EndUnixNanos: n + 100000000, DurationMS: 100, HTTPRoute: route, StatusCode: "STATUS_CODE_ERROR", IngestedAt: n})
+			spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: fmt.Sprintf("trace-%d", i), SpanID: fmt.Sprintf("span-%d", i), Name: "GET cart", Kind: "SPAN_KIND_SERVER", StartUnixNanos: n, EndUnixNanos: n + 100000000, DurationMS: 100, Attributes: route, StatusCode: "STATUS_CODE_ERROR", IngestedAt: n})
 			logs = append(logs, telemetry.Log{Namespace: "shop", ServiceName: "checkout", TimeUnixNanos: n, Severity: "ERROR", Body: "timeout", TraceID: fmt.Sprintf("trace-%d", i), IngestedAt: n})
 		}
 		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "fragment-seed", Spans: spans, Logs: logs}); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := duck.RefreshReadCaches(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if err := querytest.RefreshSpanRollup(duck.DB); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := duck.DB.Exec(`INSERT INTO service_rollup VALUES ('shop',?,'checkout',30,30,100,100,.1,30,0)`, at); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','payment',30,100,.1,'call')`, at); err != nil {
+		if _, err := duck.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) VALUES ('shop',?,'checkout','payment',30,100,.1,'call')`, at); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -111,8 +120,8 @@ func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS != nil || out.Panels[1].ElapsedMS != nil {
 		t.Fatalf("invalid/not_run timing = %+v", out)
 	}
-	_, out, err = s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}}})
-	if err != nil || out.Panels[0].Status != "empty" || out.Panels[0].Diagnosis == "" {
+	result, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}}})
+	if err != nil || out.Panels[0].Status != "ok" || out.Panels[0].Diagnosis == "" || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "requests counted nothing: No spans") {
 		t.Fatalf("empty store preview = %+v %v", out.Panels, err)
 	}
 }
@@ -202,5 +211,22 @@ func TestRankingGuide(t *testing.T) {
 func TestConfidenceGuide(t *testing.T) {
 	if !strings.Contains(specGuide, "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency)") {
 		t.Fatal("missing confidence semantics")
+	}
+}
+
+type busySchema struct{ panelExecutor }
+
+func (busySchema) Schema(context.Context, query.SchemaRequest) (*query.Schema, error) {
+	return nil, query.ErrSchemaBusy
+}
+
+// Busy discovery is retryable, like HTTP's 503, not a generic read failure.
+func TestTelemetrySchemaReportsBusy(t *testing.T) {
+	s := newPanelServer(t)
+	s.panels = busySchema{s.panels}
+	_, _, err := s.telemetrySchema(t.Context(), nil, SchemaInput{})
+	var failure toolerror.Result
+	if err == nil || json.Unmarshal([]byte(err.Error()), &failure) != nil || failure.Error == nil || failure.Error.Code != "schema_busy" || !strings.Contains(failure.Error.Message, "Try again") {
+		t.Fatalf("err=%v", err)
 	}
 }

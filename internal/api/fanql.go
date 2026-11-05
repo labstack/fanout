@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -47,16 +48,19 @@ func fanqlNotices(notices []fanql.Notice) []fanql.Notice {
 func (h *FanQLHandler) parse(c *echo.Context) error {
 	var req struct {
 		fanql.Options
-		Text    string `json:"text"`
-		Preview bool   `json:"preview,omitempty"`
+		Text      string `json:"text"`
+		Preview   bool   `json:"preview,omitempty"`
+		Window    string `json:"window,omitempty"`
+		Namespace string `json:"namespace,omitempty"`
 	}
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
 		return err
 	}
+	req.Schema, req.SchemaPartial = h.cachedSchema(c.Request().Context(), req.Window, req.Namespace)
 	compiled, problems := fanql.Compile(req.Text, req.Options)
 	if len(problems) != 0 {
 		failure := &fanqlFailure{apiError: newAPIError(http.StatusBadRequest, "invalid_fanql", "The query has problems.")}
-		failure.Problems = query.PresentProblems(problems)
+		failure.Problems = query.Diagnoses(problems)
 		if req.Preview {
 			failure.Preview = &fanqlPreview{Text: req.Text, Note: "not executable"}
 		}
@@ -80,6 +84,37 @@ func (h *FanQLHandler) parse(c *echo.Context) error {
 		}{Requested: req.Viz, Compatible: compiled.Compatible, Edits: compiled.Edits},
 		Notices: fanqlNotices(compiled.Notices),
 	})
+}
+
+// cachedSchema is a schema already cached, so parse can compare keys with
+// those seen without waiting for a discovery. One for the query's window, or
+// the widest, and its namespace covers the query; otherwise the recent
+// schema is partial.
+func (h *FanQLHandler) cachedSchema(ctx context.Context, window, namespace string) (*query.Schema, bool) {
+	if h.engine == nil {
+		return nil, false
+	}
+	cached := func(window, namespace string) (*query.Schema, error) {
+		return h.engine.Schema(ctx, query.SchemaRequest{Window: window, Namespace: namespace, Cached: true})
+	}
+	if window != "" {
+		// An invalid or longer window is an error other than not cached.
+		schema, err := cached(window, namespace)
+		if err == nil && schema != nil {
+			return schema, false
+		}
+		if errors.Is(err, query.ErrSchemaNotCached) {
+			if schema, err := cached("24h", namespace); err == nil && schema != nil {
+				return schema, false
+			}
+		}
+	}
+	for _, window := range []string{"1h", "24h"} {
+		if schema, err := cached(window, ""); err == nil && schema != nil {
+			return schema, true
+		}
+	}
+	return nil, false
 }
 
 func (h *FanQLHandler) format(c *echo.Context) error {
@@ -131,12 +166,16 @@ func (h *FanQLHandler) complete(c *echo.Context) error {
 	if req.Window != nil {
 		window = *req.Window
 	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), panelDeadline)
-	defer cancel()
-	out := h.completer.Complete(ctx, fanql.CompleteRequest{
+	creq := fanql.CompleteRequest{
 		Text: req.Text, Cursor: req.Cursor, Options: req.Options,
 		Window: window, From: req.From, To: req.To, Namespace: req.Namespace,
-	})
+	}
+	if err := fanql.CheckCompleteRequest(creq); err != nil {
+		return newAPIError(http.StatusBadRequest, "invalid_input", err.Error())
+	}
+	ctx, cancel := context.WithTimeout(c.Request().Context(), panelDeadline)
+	defer cancel()
+	out := h.completer.Complete(ctx, creq)
 	return c.JSON(http.StatusOK, out)
 }
 

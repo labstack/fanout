@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
@@ -20,18 +22,40 @@ import (
 	"github.com/labstack/fanout/internal/engine/writegate"
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/fanout/internal/readpressure"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
 type Duck struct {
+	readPressure     readpressure.Signal
+	cachePassStarted bool // protected by cacheGate
+	backgroundOnce   sync.Once
+	backgroundSlots  chan struct{}
+	// fatal carries the first error after which DuckDB refuses all work until
+	// the process restarts. The query cache is rebuildable from Parquet.
+	fatal           chan error
+	fatalOnce       sync.Once
 	cachePublishMu  sync.Mutex
 	cachePublishing map[string]bool
+	cacheTransfers  []*batchCacheTransfer
 	snapshotMu      sync.Mutex
 	snapshotQueries map[string]compiledSnapshot
 	// DB is the read pool. Reads scan immutable Parquet concurrently, so it is
 	// sized from the machine.
 	DB *sql.DB
+	// progress is when a read statement last returned, in Unix
+	// nanoseconds, and statements are those in flight; see Live.
+	progress   atomic.Int64
+	statements statements
+	// pings counts read connections pings hold; see held.
+	pings atomic.Int64
+	// abandoned counts read connections a panic left to abandonRead that
+	// have not come back; see held.
+	abandoned atomic.Int64
+	// publishing is when the running Parquet publication started, in Unix
+	// nanoseconds, or zero; see Stalled.
+	publishing atomic.Int64
 	// closeOnce makes Close idempotent. All handles come from one connector,
 	// and database/sql closes a connector that implements io.Closer — so a
 	// second Close would call duckdb_close twice on the same instance, which
@@ -47,6 +71,11 @@ type Duck struct {
 	// memoryDB has one borrowed connection so a blocked memory query cannot
 	// occupy a request or write slot. The read pool owns the shared instance.
 	memoryDB *sql.DB
+	// parseDB serves DuckDB's parser and renderer, which touch no telemetry.
+	// Spec checks call them several times per filter; on the read pool each
+	// call queued behind panel scans, so saving or running a spec could wait
+	// many seconds while a dashboard loaded.
+	parseDB *sql.DB
 	// writeDB has two connections: analytical rollups share writeGate, while
 	// completed-batch aggregates use cacheGate and disjoint tables. Both stay
 	// outside the read pool. Maintenance acquires both gates for checkpointing.
@@ -58,15 +87,20 @@ type Duck struct {
 	publicationBounds func() (horizon, published, minimum int64)
 	// Cached under writeGate so an idle pass executes no SQL at all.
 	rollupWatermarks map[string]int64
+	// serviceChunk narrows the service rollup's ingest window after it runs
+	// out of memory. Guarded by writeGate.
+	serviceChunk rollupChunk
+	// servicePending reports that the last service pass stopped short of
+	// the horizon, so a tick drains further passes.
+	servicePending bool
+	// snapshotWanted replaces the repository's retirement check in tests.
+	snapshotWanted func(telemetry.SnapshotPin) bool
 	// writeGate serializes writes to the rebuildable DuckDB rollup cache.
 	writeGate writegate.Gate
 	cacheGate writegate.Gate
 	// Protected by writeGate; controls periodic version-history retirement.
 	versionRollupPasses   uint64
 	versionRollupFailures map[string]versionRollupFailure
-	// parquetMu pins immutable files for active DuckDB readers. Its reader-first
-	// gate keeps a queued maintenance publish from stalling unrelated new reads.
-	parquetMu parquetReadGate
 	// maintHealthMu guards the maintenance health fields below, which the
 	// readiness probe reads while the maintenance pass writes them.
 	maintHealthMu       sync.Mutex
@@ -91,14 +125,10 @@ func (d *Duck) MaintenanceHealth() (lastOK, lastAt time.Time, consecutiveFailure
 }
 
 const (
-	// v3: service_rollup gained served_spans, and its p50/p95 stopped counting
-	// the calls a service waits on. ensureCacheTable drops the table when the
-	// new column is missing, but the watermark decides what gets rebuilt — left
-	// at v2 it would point past every historical bucket, so the dropped rows
-	// would never come back and the whole window would read as empty. A new key
-	// has no watermark, which is what makes the next pass a full backfill.
-	// Bump this whenever the table's shape or the meaning of its columns
-	// changes.
+	// Rollup progress keys in rollup_state. readCacheVersion drops that table
+	// with the rollups, so a version change also restarts their backfill; the
+	// keys need no version of their own.
+	rollup_schema_version         = 4
 	serviceRollupStateKey         = "service_rollup_v3"
 	edgeRollupStateKey            = "edge_rollup_v2"
 	edgeRollupSubCursorKey        = "edge_rollup_v2_substart"
@@ -110,20 +140,10 @@ const (
 	parquetMaintenancePhaseBudget = 10 * time.Minute
 )
 
-// parquetDrainBudget bounds how long a publisher waits for readers already
-// inside the snapshot to leave. parquetSwapBudget bounds the exclusive window
-// that follows — the renames and fsync of at most parquetMaintenanceBatchLimit
-// directories — which must be allowed to finish rather than be abandoned with
-// every reader already excluded.
-const (
-	parquetDrainBudget = 2 * defaultWriterGrace
-	parquetSwapBudget  = 30 * time.Second
-)
-
-// parquetStatsWait bounds the gauge refresh, which is the only Parquet reader
-// that runs on a loop goroutine rather than behind a request. It is a variable
-// so the internal lease can be exercised without a five-second test.
-var parquetStatsWait = 5 * time.Second
+// parquetSwapBudget bounds one publication's catalog swap: the publish gate
+// shared with ingest commits, one rename and one fsync. Readers never wait for
+// it; it only keeps a stuck filesystem from hanging maintenance.
+const parquetSwapBudget = 30 * time.Second
 
 // WriteGate returns the gate that serializes writes to DuckDB's rebuildable
 // rollup cache.
@@ -249,11 +269,12 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 		return nil, err
 	}
 
-	db, writeDB, memoryDB, err := openDuckDB(dsn, tempDir, duckDBPoolSize(cfg))
+	db, writeDB, memoryDB, parseDB, err := openDuckDB(dsn, tempDir, duckDBPoolSize(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("open DuckDB query cache: %w (the cache at %s is rebuildable from Parquet)", err, dbPath)
 	}
-	d := &Duck{DB: db, writeDB: writeDB, memoryDB: memoryDB, cfg: cfg, repository: repository, publicationBounds: repository.PublicationBounds}
+	d := &Duck{DB: db, writeDB: writeDB, memoryDB: memoryDB, parseDB: parseDB, cfg: cfg, repository: repository, publicationBounds: repository.PublicationBounds, fatal: make(chan error, 1)}
+	d.noteProgress()
 	// Reads are the pool that can starve, so it is the one worth watching.
 	d.releasePoolGauges = metrics.SetDuckDBPoolSource(db.Stats)
 	if cfg.DuckDBMemory == "" {
@@ -337,15 +358,15 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 	return nil
 }
 
-// openDuckDB returns the read pool, the two-connection write handle, and the
-// single-connection memory sampling handle.
+// openDuckDB returns the read pool, the two-connection write handle, the
+// single-connection memory sampling handle, and the parser handle.
 //
 // All come from one connector so they share one DuckDB instance and therefore
 // one catalog: a write committed on one handle is visible to the other, and
 // DDL run at boot applies to both. (A second connector to the same file would
 // also work — DuckDB keeps an instance cache — but two owners of one instance
 // is exactly the hazard the wrapper below exists to avoid.)
-func openDuckDB(dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, *sql.DB, error) {
+func openDuckDB(dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, *sql.DB, *sql.DB, error) {
 	// Every pooled connection must use UTC. DuckDB otherwise inherits the host
 	// timezone and casts TIMESTAMPTZ rollup buckets into local wall-clock
 	// TIMESTAMP values, while API windows arrive in UTC.
@@ -360,7 +381,7 @@ func openDuckDB(dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, *sql.DB, e
 
 	native, err := duckdb.NewConnector(dsn, nil)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	connector := &initializedConnector{Connector: native, init: func(ctx context.Context, execer driver.ExecerContext) error {
 		if _, err := execer.ExecContext(ctx, "SET TimeZone='UTC'", nil); err != nil {
@@ -405,7 +426,12 @@ func openDuckDB(dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, *sql.DB, e
 	memoryDB := sql.OpenDB(borrowedConnector{connector})
 	memoryDB.SetMaxOpenConns(1)
 	memoryDB.SetMaxIdleConns(1)
-	return db, writeDB, memoryDB, nil
+	// Parsing is short and CPU-only; two connections keep concurrent checks
+	// from queueing behind one another.
+	parseDB := sql.OpenDB(borrowedConnector{connector})
+	parseDB.SetMaxOpenConns(2)
+	parseDB.SetMaxIdleConns(2)
+	return db, writeDB, memoryDB, parseDB, nil
 }
 
 // borrowedConnector hands out connections from a connector it does not own.
@@ -430,8 +456,23 @@ func (c *initializedConnector) Connect(ctx context.Context) (driver.Conn, error)
 	return conn, nil
 }
 
+// errReadSetupAbandoned ends a statement whose read panicked. It is not
+// progress: the engine never answered.
+var errReadSetupAbandoned = errors.New("read setup abandoned")
+
+// sqlLiteral quotes v as a SQL string constant. The native driver receives
+// statement text as a C string, so a NUL byte would end the statement inside
+// the literal; NULs are spliced in with chr(0), which DuckDB folds back into
+// one constant.
 func sqlLiteral(v string) string {
-	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
+	parts := strings.Split(v, "\x00")
+	for i, part := range parts {
+		parts[i] = "'" + strings.ReplaceAll(part, "'", "''") + "'"
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return "(" + strings.Join(parts, "||chr(0)||") + ")"
 }
 
 func (d *Duck) Close() error {
@@ -473,6 +514,9 @@ func (d *Duck) closeHandles() error {
 	if d.memoryDB != nil {
 		errs = append(errs, d.memoryDB.Close())
 	}
+	if d.parseDB != nil {
+		errs = append(errs, d.parseDB.Close())
+	}
 	if d.writeDB != nil {
 		errs = append(errs, d.writeDB.Close())
 	}
@@ -481,6 +525,33 @@ func (d *Duck) closeHandles() error {
 		errs = append(errs, d.DB.Close())
 	}
 	return errors.Join(errs...)
+}
+
+// SetReadPressure connects foreground admission to bounded background yielding.
+func (d *Duck) SetReadPressure(pressure func() bool) { d.readPressure.Set(pressure) }
+
+// lockBackground is acquired under either write gate, before a connection.
+// It serializes background SQL without changing foreground pool admission.
+func (d *Duck) lockBackground(ctx context.Context) (func(), error) {
+	d.backgroundOnce.Do(func() { d.backgroundSlots = make(chan struct{}, 1) })
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case d.backgroundSlots <- struct{}{}:
+		return func() { <-d.backgroundSlots }, nil
+	}
+}
+
+// tryLockBackground leaves optional publication-cache transfers to the normal
+// refresh workers when a scan is already using the background SQL budget.
+func (d *Duck) tryLockBackground() func() {
+	d.backgroundOnce.Do(func() { d.backgroundSlots = make(chan struct{}, 1) })
+	select {
+	case d.backgroundSlots <- struct{}{}:
+		return func() { <-d.backgroundSlots }
+	default:
+		return nil
+	}
 }
 
 // writer returns the dedicated write handle initialized by NewDuck.
@@ -520,6 +591,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	rows, err := d.rollupOnce(ctx)
 	metrics.RecordRollup(rows, time.Since(start).Seconds(), err == nil)
 	if err != nil {
+		d.noteFailure(err)
 		slog.Error("startup rollup failed", "rows", rows, "err", err)
 	} else if rows > 0 {
 		slog.Info("startup rollup complete", "rows", rows, "duration", time.Since(start))
@@ -538,13 +610,6 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	}()
 	defer func() { <-readCacheDone }()
 
-	versionDone := make(chan struct{})
-	go func() {
-		defer close(versionDone)
-		d.runVersionRollupLoop(ctx)
-	}()
-	defer func() { <-versionDone }()
-
 	ticker := time.NewTicker(d.cfg.RollupInterval)
 	defer ticker.Stop()
 	for {
@@ -554,6 +619,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 			rows, err := d.rollupOnce(ctx)
 			metrics.RecordRollup(rows, time.Since(start).Seconds(), err == nil)
 			if err != nil {
+				d.noteFailure(err)
 				slog.Error("rollup failed", "component", "rollup", "rows", rows, "err", err)
 			}
 			d.updateParquetStats(ctx)
@@ -563,21 +629,10 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	}
 }
 
-// updateParquetStats refreshes the per-signal file-count and byte-size gauges.
-//
-// The wait for the snapshot is bounded. Every other reader carries a request
-// deadline, but this one runs on the rollup and maintenance loops under the
-// process context, so an unbounded wait here would park those loops for as
-// long as a publication stayed stuck. Gauges are refreshed again next tick;
-// skipping one refresh costs nothing that waiting would not cost more.
+// updateParquetStats refreshes the per-signal file-count and byte-size gauges
+// from the catalog. It opens no Parquet file, and a batch retired meanwhile is
+// skipped, so it needs no snapshot pin.
 func (d *Duck) updateParquetStats(ctx context.Context) {
-	statsCtx, cancel := context.WithTimeout(ctx, parquetStatsWait)
-	defer cancel()
-	if err := d.lockParquetRead(statsCtx, readerStats); err != nil {
-		slog.Warn("parquet stats skipped", "err", err)
-		return
-	}
-	defer d.parquetMu.RUnlock()
 	stats, err := d.repository.Parquet.Stats()
 	if err != nil {
 		slog.Warn("parquet stats failed", "err", err)
@@ -592,8 +647,14 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 	var errs []error
 	affected := int64(0)
 
-	if n, err := d.refreshServiceRollup(ctx); err != nil {
+	if n, err := d.RefreshDashboardRollups(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("service rollup: %w", err))
+	} else {
+		affected += n
+	}
+
+	if n, _, err := d.DrainVersionRollup(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("version rollup: %w", err))
 	} else {
 		affected += n
 	}
@@ -616,29 +677,38 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 // Completed-file caches do not inherit the minute-based analytical watermark.
 // Drain bounded transactions promptly, yielding to other writers between passes.
 func (d *Duck) runReadCacheLoop(ctx context.Context) {
-	delay := time.Second
-	for {
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		}
-		rows, err := d.RefreshReadCaches(ctx)
-		delay = time.Second
-		if err != nil && ctx.Err() == nil {
-			slog.Warn("completed batch read cache failed", "err", err)
-		} else if rows > 0 {
-			delay = 100 * time.Millisecond
-		}
-	}
+	runBackgroundLoop(ctx, func(ctx context.Context) (bool, error) {
+		_, backlog, err := d.refreshReadCaches(ctx)
+		return backlog, err
+	}, func(err error) {
+		d.noteFailure(err)
+		slog.Warn("completed batch read cache failed", "err", err)
+	})
 }
 
-// Version history uses the analytical gate and its own cadence. Its gate wait
-// must never delay complete-file caching on the independent cache gate.
-func (d *Duck) runVersionRollupLoop(ctx context.Context) {
+// Fatal delivers the first fatal engine error a background pass saw. DuckDB
+// has invalidated the database by then and fails every later statement, so
+// the process must restart; nothing in it can recover the instance.
+func (d *Duck) Fatal() <-chan error { return d.fatal }
+
+func (d *Duck) noteFailure(err error) {
+	var engineError *duckdb.Error
+	if !errors.As(err, &engineError) || engineError.Type != duckdb.ErrorTypeFatal {
+		return
+	}
+	d.fatalOnce.Do(func() { d.fatal <- err })
+}
+
+// runBackgroundLoop repeats a pass promptly while it reports a backlog its
+// budget could not finish, and each second otherwise. A pass that caught up
+// is not repeated at once: under steady ingest that ran a pass for every few
+// published files, and each pass pays per-file and per-table costs that a
+// second's worth of files amortizes. Consecutive failures double the wait up
+// to a minute: a pass that failed out of memory would otherwise reclaim the
+// memory limit every second and starve the queries that need it.
+func runBackgroundLoop(ctx context.Context, pass func(context.Context) (bool, error), failed func(error)) {
 	delay := time.Second
+	failures := 0
 	for {
 		timer := time.NewTimer(delay)
 		select {
@@ -647,10 +717,16 @@ func (d *Duck) runVersionRollupLoop(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
+		backlog, err := pass(ctx)
 		delay = time.Second
-		if batches, err := d.DrainVersionRollup(ctx); err != nil && ctx.Err() == nil {
-			slog.Warn("version rollup failed", "err", err)
-		} else if batches > 0 {
+		if err != nil && ctx.Err() == nil {
+			failed(err)
+			failures++
+			delay = min(time.Second<<min(failures-1, 6), time.Minute)
+			continue
+		}
+		failures = 0
+		if backlog {
 			delay = 100 * time.Millisecond
 		}
 	}
@@ -663,6 +739,7 @@ func (d *Duck) runMaintenanceLoop(ctx context.Context) {
 	}
 	run := func() {
 		if err := d.runRepositoryMaintenance(ctx); err != nil && ctx.Err() == nil {
+			d.noteFailure(err)
 			slog.Warn("telemetry maintenance failed", "err", err)
 		}
 		d.updateParquetStats(ctx)
@@ -707,15 +784,18 @@ func runMaintenanceSchedule(ctx context.Context, every time.Duration, run func()
 }
 
 func (d *Duck) runParquetCompactionCycle(ctx context.Context) (int, error) {
-	if d.repository == nil {
-		return 0, nil
-	}
 	started := time.Now()
 	if err := d.repository.RecoverParquet(ctx, d); err != nil {
 		metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, metrics.TelemetryError, time.Since(started).Seconds())
 		return 0, err
 	}
 	compacted, err := d.repository.CompactParquetPass(ctx, d, parquetMaintenanceBatchLimit, parquetCompactionCycleBudget)
+	// Retired inputs wait only for readers that captured them, which query
+	// deadlines bound, so each cycle deletes what earlier cycles retired.
+	if _, collectErr := d.repository.CollectRetiredParquet(); collectErr != nil {
+		err = errors.Join(err, fmt.Errorf("delete retired Parquet batches: %w", collectErr))
+	}
+	metrics.ParquetRetiringBatches.Set(float64(d.repository.Parquet.RetiringBatches()))
 	result := metrics.TelemetryNoop
 	if err != nil {
 		result = metrics.TelemetryError
@@ -728,28 +808,25 @@ func (d *Duck) runParquetCompactionCycle(ctx context.Context) (int, error) {
 
 func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	start := time.Now()
-	var pruneErr error
-	if d.repository != nil {
-		recoveryErr := d.repository.RecoverParquet(ctx, d)
-		compactStart := time.Now()
-		var cleanupErr, parquetErr, compactErr error
-		compacted := 0
-		if recoveryErr == nil {
-			cleanupErr = d.repository.CleanupParquet()
-			if d.cfg.RetentionDays > 0 {
-				_, parquetErr = d.repository.PruneParquetPass(ctx, d, time.Now().Add(-time.Duration(d.cfg.RetentionDays)*24*time.Hour).UnixNano(), parquetMaintenanceBatchLimit, parquetMaintenancePhaseBudget)
-			}
-			compacted, compactErr = d.repository.CompactParquetPass(ctx, d, parquetMaintenanceBatchLimit, parquetMaintenancePhaseBudget)
+	recoveryErr := d.repository.RecoverParquet(ctx, d)
+	compactStart := time.Now()
+	var cleanupErr, parquetErr, compactErr error
+	compacted := 0
+	if recoveryErr == nil {
+		cleanupErr = d.repository.CleanupParquet()
+		if d.cfg.RetentionDays > 0 {
+			_, parquetErr = d.repository.PruneParquetPass(ctx, d, time.Now().Add(-time.Duration(d.cfg.RetentionDays)*24*time.Hour).UnixNano(), parquetMaintenanceBatchLimit, parquetMaintenancePhaseBudget)
 		}
-		compactResult := metrics.TelemetryNoop
-		if recoveryErr != nil || compactErr != nil {
-			compactResult = metrics.TelemetryError
-		} else if compacted > 0 {
-			compactResult = metrics.TelemetrySuccess
-		}
-		metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, compactResult, time.Since(compactStart).Seconds())
-		pruneErr = errors.Join(pruneErr, recoveryErr, cleanupErr, parquetErr, compactErr)
+		compacted, compactErr = d.repository.CompactParquetPass(ctx, d, parquetMaintenanceBatchLimit, parquetMaintenancePhaseBudget)
 	}
+	compactResult := metrics.TelemetryNoop
+	if recoveryErr != nil || compactErr != nil {
+		compactResult = metrics.TelemetryError
+	} else if compacted > 0 {
+		compactResult = metrics.TelemetrySuccess
+	}
+	metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, compactResult, time.Since(compactStart).Seconds())
+	pruneErr := errors.Join(recoveryErr, cleanupErr, parquetErr, compactErr)
 	cacheErr := func() error {
 		unlock, err := d.writeGate.LockContext(ctx, writegate.Maintenance)
 		if err != nil {
@@ -761,10 +838,15 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 			return err
 		}
 		defer unlockCache()
+		background, err := d.lockBackground(ctx)
+		if err != nil {
+			return err
+		}
+		defer background()
 		var errs []error
 		if d.cfg.RetentionDays > 0 {
-			for _, table := range []string{"service_rollup", "edge_rollup"} {
-				if _, err := d.writer().ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < now() - INTERVAL %d DAY", table, d.cfg.RetentionDays)); err != nil {
+			for _, table := range []string{"service_rollup", "span_rollup", "log_rollup", "endpoint_rollup", "receiver_rollup", "resource_rollup", "receiver_entity_rollup", "edge_rollup"} {
+				if _, err := d.writer().ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < (now() - INTERVAL %d DAY)::TIMESTAMP_NS", table, d.cfg.RetentionDays)); err != nil {
 					errs = append(errs, fmt.Errorf("prune %s: %w", table, err))
 				}
 			}
@@ -794,9 +876,79 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	return err
 }
 
-func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
+// rollupChunkWins is how many committed passes in a row grow a narrowed
+// service rollup window.
+const rollupChunkWins = 3
+
+// A rollupChunk is the service rollup's ingest window. It halves after a
+// pass runs out of memory, down to a second, and doubles back towards the
+// full rollupChunkNanos (size zero) after rollupChunkWins committed passes
+// in a row. A backfill packs days of event time into minutes of ingest, and
+// every affected bucket is recomputed whole, so a full window failed on
+// every retry and the rollup never advanced. A pass that did no work leaves
+// it unchanged: growing on those made it halve, grow and fail again.
+type rollupChunk struct {
+	size int64
+	wins int
+}
+
+func (c *rollupChunk) next(committed bool, err error) {
+	var engineError *duckdb.Error
+	switch {
+	case err == nil && !committed:
+	case err == nil:
+		if c.size == 0 {
+			return
+		}
+		if c.wins++; c.wins < rollupChunkWins {
+			return
+		}
+		c.wins = 0
+		if c.size *= 2; c.size >= rollupChunkNanos {
+			c.size = 0
+		}
+	case errors.As(err, &engineError) && engineError.Type == duckdb.ErrorTypeOutOfMemory:
+		if c.size == 0 {
+			c.size = rollupChunkNanos
+		}
+		c.size = max(c.size/2, int64(time.Second))
+		c.wins = 0
+	default:
+		c.wins = 0
+	}
+}
+
+// RefreshDashboardRollups advances the analytical dashboard summaries. Each pass
+// commits a complete set of affected service-minutes and its ingest horizon.
+func (d *Duck) RefreshDashboardRollups(ctx context.Context) (int64, error) {
+	return d.drainServiceRollup(ctx, d.cfg.RollupInterval/2)
+}
+
+// drainServiceRollup repeats passes within a tick budget. An admitted pass
+// finishes its transaction; memory pressure narrows the next window.
+func (d *Duck) drainServiceRollup(ctx context.Context, budget time.Duration) (int64, error) {
+	deadline := time.Now().Add(budget)
+	var total int64
+	for {
+		before := d.serviceChunk.size
+		n, err := d.refreshServiceRollup(ctx)
+		total += n
+		retry := err != nil && d.serviceChunk.size != before
+		if err != nil && !retry || !retry && !d.servicePending || !time.Now().Before(deadline) {
+			return total, err
+		}
+	}
+}
+
+func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err error) {
+	d.servicePending = false
 	start := time.Now()
 	result := metrics.RollupError
+	defer func() {
+		if ctx.Err() == nil {
+			d.serviceChunk.next(result == metrics.RollupSuccess, err)
+		}
+	}()
 	var recordedRows int64
 	// Progress is reported even when the rollup fails. Otherwise the lag gauge
 	// freezes at its last healthy value during exactly the outage it exists to
@@ -814,14 +966,18 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	// consistent and deadlock-free.
 	unlock := d.writeGate.Lock(writegate.RollupService)
 	defer unlock()
+	ctx = readpressure.WithSignal(ctx, &d.readPressure)
+	background, err := d.lockBackground(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer background()
+
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	if !d.tryRollupParquetRead() {
-		result = metrics.RollupNoop
-		return 0, nil
-	}
-	defer d.parquetMu.RUnlock()
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
 	horizon, published, minimum := d.publicationBounds()
 	sourceMax = published
 	// Failed attempts advance the horizon without publishing rows. Until the
@@ -847,7 +1003,15 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	unbind, err := d.bindRollupSnapshot(ctx, tx)
+	if err != nil {
+		return 0, fmt.Errorf("service_rollup/snapshot: %w", err)
+	}
 	windowStart, windowEnd, _ := rollupWindow(lastWatermark, minimum, horizon)
+	if chunk := d.serviceChunk.size; chunk > 0 && windowEnd > windowStart+chunk {
+		windowEnd = windowStart + chunk
+	}
+	d.servicePending = windowEnd < horizon
 	newWatermark := windowEnd
 
 	args := []any{windowStart, windowEnd, windowStart, windowEnd, windowStart, windowEnd}
@@ -866,9 +1030,17 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 		if _, err := tx.ExecContext(ctx, serviceRollupDeleteSQL, lo, hi); err != nil {
 			return 0, fmt.Errorf("service_rollup/delete: %w", err)
 		}
-		res, err := tx.ExecContext(ctx, serviceRollupInsertSQL, lo, hi, lo, hi, lo, hi)
+		for _, table := range []string{"span_rollup", "log_rollup", "endpoint_rollup", "receiver_rollup", "resource_rollup", "receiver_entity_rollup"} {
+			if _, err := tx.ExecContext(ctx, strings.ReplaceAll(strings.ReplaceAll(serviceRollupDeleteSQL, "service_rollup", table), "?::TIMESTAMP_NS::TIMESTAMPTZ_NS", "?::TIMESTAMP_NS"), lo, hi); err != nil {
+				return 0, fmt.Errorf("%s/delete: %w", table, err)
+			}
+		}
+		res, err := insertServiceRollup(ctx, tx, lo, hi)
 		if err != nil {
 			return 0, fmt.Errorf("service_rollup/insert: %w", err)
+		}
+		if err := insertDashboardRollups(ctx, tx, lo, hi); err != nil {
+			return 0, fmt.Errorf("dashboard_rollup/insert: %w", err)
 		}
 		rows, err = res.RowsAffected()
 		if err != nil {
@@ -881,6 +1053,9 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 
 	if err := storeRollupWatermark(ctx, tx, serviceRollupStateKey, newWatermark); err != nil {
 		return 0, err
+	}
+	if err := unbind(); err != nil {
+		return 0, fmt.Errorf("service_rollup/snapshot: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
@@ -927,14 +1102,18 @@ func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 	}()
 	unlock := d.writeGate.Lock(writegate.RollupEdge)
 	defer unlock()
+	ctx = readpressure.WithSignal(ctx, &d.readPressure)
+	background, err := d.lockBackground(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	defer background()
+
 	if err := ctx.Err(); err != nil {
 		return 0, false, err
 	}
-	if !d.tryRollupParquetRead() {
-		result = metrics.RollupNoop
-		return 0, false, nil
-	}
-	defer d.parquetMu.RUnlock()
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
 	horizon, published, minimum := d.publicationBounds()
 	sourceMax = published
 	// Failed attempts advance the horizon without publishing rows. Until the
@@ -960,6 +1139,10 @@ func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 		return 0, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	unbind, err := d.bindRollupSnapshot(ctx, tx)
+	if err != nil {
+		return 0, false, fmt.Errorf("edge_rollup/snapshot: %w", err)
+	}
 
 	// A previous pass that ran out of sub-window budget recorded where to
 	// resume and left the ingested watermark untouched. Reuse that window
@@ -991,7 +1174,7 @@ func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM read_edge_buckets"); err != nil {
 			return 0, false, err
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO read_edge_buckets "+edgePassBucketsSelectSQL, windowStart, windowEnd); err != nil {
+		if _, err := insertEdgeBuckets(ctx, tx, windowStart, windowEnd); err != nil {
 			return 0, false, err
 		}
 	}
@@ -1025,10 +1208,10 @@ FROM edge_pass_buckets`).Scan(&minStartT, &maxStartT)
 		maxT := maxStartT.Time
 		processed := 0
 		for !subLo.After(maxT) {
-			// Release the snapshot at a resumable boundary as soon as a
-			// publisher waits. Always finish the first sub-window so a busy
+			// Release the snapshot at a resumable boundary as soon as retired
+			// files wait for it. Always finish the first sub-window so a busy
 			// compaction cycle cannot starve the rollup.
-			if processed == maxEdgeSubWindowsPerPass || (processed > 0 && d.parquetMu.publisherWaiting()) {
+			if processed == maxEdgeSubWindowsPerPass || (processed > 0 && d.retirementWaiting(pin)) {
 				completed = false
 				nextCursor = subLo.UnixNano()
 				break
@@ -1080,6 +1263,9 @@ FROM edge_pass_buckets`).Scan(&minStartT, &maxStartT)
 	}
 	if _, err := tx.ExecContext(ctx, "DROP VIEW edge_pass_buckets"); err != nil {
 		return 0, false, err
+	}
+	if err := unbind(); err != nil {
+		return 0, false, fmt.Errorf("edge_rollup/snapshot: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, false, err
@@ -1318,7 +1504,6 @@ CREATE OR REPLACE TEMP TABLE service_pass_affected AS
     AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
     AND service IS NOT NULL
-    AND service != ''
   UNION
   SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM logs
@@ -1326,15 +1511,13 @@ CREATE OR REPLACE TEMP TABLE service_pass_affected AS
     AND ingested_unix_nano <= ?
     AND time IS NOT NULL
     AND service IS NOT NULL
-    AND service != ''
   UNION
   SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
     AND time IS NOT NULL
-    AND service IS NOT NULL
-    AND service != '';`
+    AND service IS NOT NULL;`
 
 const serviceRollupDeleteSQL = `
 DELETE FROM service_rollup
@@ -1347,7 +1530,122 @@ WHERE bucket >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
       AND a.service = service_rollup.service
 );`
 
-var serviceRollupInsertSQL = `
+// Aggregate each bounded signal scan before the final affected-bucket joins.
+// Schema-first Parquet scans can have a zero cardinality estimate in DuckDB 2;
+// joining raw events to the affected table can then build a hash table of every
+// event. Logs and metrics aggregate before joining. Spans must be filtered to
+// the affected keys first: each unaffected service-minute otherwise allocates
+// its own t-digest states. A semi-join against service_pass_affected reverses
+// into a build of every raw span, so the keys are bound as constants instead.
+func insertServiceRollup(ctx context.Context, tx rollupSQL, lo, hi time.Time) (sql.Result, error) {
+	// Materialize only bounded span aggregates. Logs, metrics and the final
+	// affected-key join run once, preserving empty and NULL-key output rows.
+	_, err := tx.ExecContext(ctx, `CREATE OR REPLACE TEMP TABLE service_pass_spans (
+ namespace VARCHAR, bucket TIMESTAMP_NS, service VARCHAR, spans BIGINT, served_spans BIGINT,
+ p50_ms DOUBLE, p95_ms DOUBLE, error_rate DOUBLE)`)
+	if err != nil {
+		return nil, err
+	}
+	err = forAffectedKeys(ctx, tx,
+		`SELECT DISTINCT namespace, epoch_ns(bucket), service FROM service_pass_affected
+ WHERE namespace IS NOT NULL AND bucket IS NOT NULL AND service IS NOT NULL`, nil,
+		`struct_pack(namespace := s.namespace, bucket := date_trunc('minute', s.start_time::TIMESTAMP_NS), service := s.service)`,
+		`struct_pack(namespace := ?::VARCHAR, bucket := make_timestamp_ns(?::BIGINT), service := ?::VARCHAR)`,
+		func(keys string, args []any) error {
+			_, err := tx.ExecContext(ctx, "INSERT INTO service_pass_spans "+serviceRollupSpanSQL(keys)+" SELECT * FROM span_agg", append(args, lo, hi)...)
+			if err != nil {
+				return err
+			}
+			_, err = tx.ExecContext(ctx, spanRollupInsertSQL(keys), append(args, lo, hi)...)
+			return err
+		})
+	if err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx, "WITH span_agg AS (SELECT * FROM service_pass_spans)"+serviceRollupJoinSQL, lo, hi, lo, hi)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "DROP TABLE service_pass_spans"); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// rollupSQL is a rollup pass's transaction, or a test's database.
+type rollupSQL interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+// affectedKeyChunkSize bounds statement preparation and constant-list planning.
+// Larger lists consume disproportionate planner memory; keep each raw scan a
+// probe of a small constant MARK join even during a large catch-up pass.
+// At 60k keys, 1k/4k/10k chunks used roughly 185/387/798 MiB
+// peak RSS for the service pass, with no consistent gain from larger chunks.
+const affectedKeyChunkSize = 1000
+
+// Read and close the cursor before issuing statements on the same transaction.
+// Keys are distinct so aggregates and child rows belong to exactly one chunk.
+func forAffectedKeys(ctx context.Context, tx rollupSQL, query string, queryArgs []any, column, key string, run func(string, []any) error) error {
+	rows, err := tx.QueryContext(ctx, query, queryArgs...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	width := strings.Count(key, "?")
+	var args []any
+	for rows.Next() {
+		values := make([]any, width)
+		dest := make([]any, width)
+		for i := range values {
+			dest[i] = &values[i]
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return err
+		}
+		args = append(args, values...)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	first := true
+	for len(args) > 0 {
+		if !first {
+			if err := readpressure.Yield(ctx); err != nil {
+				return err
+			}
+		}
+		first = false
+		n := min(len(args)/width, affectedKeyChunkSize)
+		predicate := column + " IN (" + strings.TrimSuffix(strings.Repeat(key+",", n), ",") + ")"
+		if err := run(predicate, args[:n*width:n*width]); err != nil {
+			return err
+		}
+		args = args[n*width:]
+	}
+	return nil
+}
+
+// Aggregate after probing the constant affected-key list, never by hashing raw
+// spans into a join against service_pass_affected. The histogram is O(buckets).
+func spanRollupInsertSQL(keys string) string {
+	return `INSERT INTO span_rollup
+ SELECT s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service,
+   coalesce(s.kind, ''), coalesce(s.status, ''), count(*),
+   sum(s.duration_ms), min(s.duration_ms), max(s.duration_ms),
+   histogram(CASE WHEN s.duration_ms > 0 THEN coalesce(try_cast(ceil(log2(s.duration_ms)*8) AS INTEGER),2147483647) ELSE ` + fmt.Sprint(spanHistogramZero) + ` END)
+ FROM spans s WHERE ` + keys + `
+   AND s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+   AND s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service, coalesce(s.kind, ''), coalesce(s.status, '')`
+}
+
+func serviceRollupSpanSQL(keys string) string {
+	return `
 WITH span_agg AS (
   SELECT
     s.namespace,
@@ -1370,21 +1668,21 @@ WITH span_agg AS (
     ` + serviceRollupP95SQL("s") + `,
     avg(CASE WHEN s.status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate
   FROM spans s
-  JOIN service_pass_affected a
-    ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
-   AND a.service = s.service
+  WHERE ` + keys + `
   -- Bound the scan to the affected bucket range so Telemetry prunes parquet by
-  -- start_time stats instead of scanning all history (the join on a computed
-  -- date_trunc bucket alone does not prune). The range is a provable superset
+  -- start_time stats instead of scanning all history. The final join on a
+  -- computed bucket alone does not prune. The range is a provable superset
   -- of the affected buckets — every row in an affected bucket has start_time in
   -- [MIN(bucket), MAX(bucket)+1min) — so it drops no rows. A late span with an
   -- old start_time widens the range (and this scan) only for the pass that
   -- ingests it, same trade-off as the edge rollup's parent bound.
-  WHERE s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service
-),
+)`
+}
+
+const serviceRollupJoinSQL = `,
 log_agg AS (
   SELECT
     l.namespace,
@@ -1392,10 +1690,6 @@ log_agg AS (
     l.service,
     COUNT(*) AS log_count
   FROM logs l
-  JOIN service_pass_affected a
-    ON a.namespace = l.namespace
-   AND a.bucket = date_trunc('minute', l.time::TIMESTAMP_NS)
-   AND a.service = l.service
   WHERE l.time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND l.time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   GROUP BY l.namespace, date_trunc('minute', l.time::TIMESTAMP_NS), l.service
@@ -1407,10 +1701,6 @@ metric_agg AS (
     m.service,
     COUNT(DISTINCT m.name) AS metric_count
   FROM metrics m
-  JOIN service_pass_affected a
-    ON a.namespace = m.namespace
-   AND a.bucket = date_trunc('minute', m.time::TIMESTAMP_NS)
-   AND a.service = m.service
   WHERE m.time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND m.time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   GROUP BY m.namespace, date_trunc('minute', m.time::TIMESTAMP_NS), m.service
@@ -1441,7 +1731,10 @@ SELECT
 FROM service_pass_affected a
 LEFT JOIN span_agg s USING (namespace, bucket, service)
 LEFT JOIN log_agg l USING (namespace, bucket, service)
-LEFT JOIN metric_agg m USING (namespace, bucket, service);`
+LEFT JOIN metric_agg m USING (namespace, bucket, service)
+-- Keep service health's existing nonempty-service population. Span panels also
+-- count spans whose resource omitted service.name.
+WHERE a.service != '';`
 
 // edgeArrivalGap bounds recent-arrival repair behind the completed ingest
 // watermark. Older relationships are not guaranteed to be repaired.
@@ -1454,20 +1747,26 @@ var createEdgePassBucketsSQL = "CREATE TEMP TABLE edge_pass_buckets AS " + edgeP
 
 var edgePassBucketsSelectSQL = fmt.Sprintf(`
 WITH incoming AS MATERIALIZED (
-  SELECT namespace, trace_id, span_id, start_time, kind,
-         messaging_destination, messaging_system
+  SELECT namespace, trace_id, span_id, parent_span_id, start_time, kind
   FROM spans
   WHERE ingested_unix_nano > $1::BIGINT
     AND ingested_unix_nano <= $2::BIGINT
     AND start_time IS NOT NULL
 ),
 recent AS MATERIALIZED (
-  SELECT namespace, trace_id, parent_span_id, start_time, kind,
-         messaging_destination, messaging_system
+  SELECT namespace, trace_id, span_id, parent_span_id, start_time, kind
   FROM spans
-  WHERE ingested_unix_nano > ($1::BIGINT - %d)
+  WHERE ingested_unix_nano > ($1::BIGINT - %[1]d)
     AND ingested_unix_nano <= $1::BIGINT
     AND start_time IS NOT NULL
+),
+-- Decode messaging attributes only for messaging spans. Materializing them in
+-- the relationship CTEs decodes VARIANT values for every client/server span.
+incoming_messages AS MATERIALIZED (
+`+edgeIncomingMessagesSQL+`
+),
+recent_messages AS MATERIALIZED (
+`+edgeRecentMessagesSQL+`
 ),
 affected_spans AS (
   SELECT namespace, start_time FROM incoming
@@ -1479,9 +1778,18 @@ affected_spans AS (
    AND child.trace_id = parent.trace_id
    AND child.parent_span_id = parent.span_id
   UNION ALL
+  -- A late child retracts its earlier client's provisional peer edge.
+  SELECT parent.namespace, parent.start_time
+  FROM recent parent
+  SEMI JOIN incoming child
+    ON parent.namespace = child.namespace
+   AND parent.trace_id = child.trace_id
+   AND parent.span_id = child.parent_span_id
+  WHERE parent.kind = 'SPAN_KIND_CLIENT'
+  UNION ALL
   SELECT r.namespace, r.start_time
-  FROM recent r
-  SEMI JOIN incoming i
+  FROM recent_messages r
+  SEMI JOIN incoming_messages i
     ON r.namespace = i.namespace
    AND date_trunc('minute', r.start_time::TIMESTAMP_NS) = date_trunc('minute', i.start_time::TIMESTAMP_NS)
    AND r.messaging_destination = i.messaging_destination
@@ -1515,6 +1823,36 @@ WHERE EXISTS (
     AND affected.bucket = edge_rollup.bucket
 );`
 
+// Materialize the narrow affected child window before planning parent joins.
+// Schema-first Parquet scans estimate zero rows; the resulting table has real
+// statistics. Bind the small key list as constants: a scalar subquery or
+// semi-join can itself reverse into a build of all raw children.
+func createEdgeChildren(ctx context.Context, tx rollupSQL, lo, hi time.Time) error {
+	const selectChildren = `SELECT child.namespace, child.trace_id, child.parent_span_id, child.service,
+        child.start_time, child.duration_ms, child.status
+ FROM spans child
+ WHERE %s
+   AND child.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+   AND child.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+   AND child.service IS NOT NULL AND child.service != ''`
+	// Declare the schema directly: a CTAS with WHERE false can retain empty
+	// scan statistics after inserts and cause downstream joins to discard rows.
+	if _, err := tx.ExecContext(ctx, `CREATE OR REPLACE TEMP TABLE edge_pass_children (
+ namespace VARCHAR, trace_id VARCHAR, parent_span_id VARCHAR, service VARCHAR,
+ start_time TIMESTAMPTZ_NS, duration_ms DOUBLE, status VARCHAR)`); err != nil {
+		return err
+	}
+	return forAffectedKeys(ctx, tx, `SELECT DISTINCT namespace, epoch_ns(bucket) FROM edge_pass_buckets
+ WHERE namespace IS NOT NULL AND bucket >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ AND bucket < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS`, []any{lo, hi},
+		`struct_pack(namespace := child.namespace, bucket := date_trunc('minute', child.start_time::TIMESTAMP_NS))`,
+		`struct_pack(namespace := ?::VARCHAR, bucket := make_timestamp_ns(?::BIGINT))`,
+		func(keys string, args []any) error {
+			_, err := tx.ExecContext(ctx, "INSERT INTO edge_pass_children "+fmt.Sprintf(selectChildren, keys), append(args, lo, hi)...)
+			return err
+		})
+}
+
 const edgeChildTracesSQL = edgeAffectedBucketsSQL + `,
 -- Compute the affected bucket range once for the child and parent filters.
 bounds AS (
@@ -1525,10 +1863,7 @@ bounds AS (
 -- building the parent side. Namespace is part of the trace identity.
 child_traces AS (
   SELECT DISTINCT child.namespace, child.trace_id
-  FROM spans child
-  JOIN affected a
-    ON a.namespace = child.namespace
-   AND a.bucket = date_trunc('minute', child.start_time::TIMESTAMP_NS)
+  FROM edge_pass_children child
   CROSS JOIN bounds
   WHERE child.service IS NOT NULL
     AND child.service != ''
@@ -1540,6 +1875,10 @@ child_traces AS (
 // The wide scan is issued only after an explicit unmatched-trace check.
 // The result reports whether that scan ran.
 func prepareEdgeParents(ctx context.Context, tx *sql.Tx, lo, hi time.Time) (bool, error) {
+	if err := createEdgeChildren(ctx, tx, lo, hi); err != nil {
+		return false, err
+	}
+
 	if _, err := tx.ExecContext(ctx, createEdgeParentsSQL, lo, hi); err != nil {
 		return false, err
 	}
@@ -1568,24 +1907,50 @@ func insertEdgeRollup(ctx context.Context, tx *sql.Tx, lo, hi time.Time) (sql.Re
 	if _, err := prepareEdgeParents(ctx, tx, lo, hi); err != nil {
 		return nil, err
 	}
-	res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, lo, hi)
+	havePeers, err := prepareEdgePeerCandidates(ctx, tx, lo, hi)
+	if err != nil {
+		return nil, err
+	}
+	statement := edgeRollupPreparedInsertSQL
+	if !havePeers {
+		statement = edgeRollupNoPeersInsertSQL
+	}
+	var haveMessaging bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM spans WHERE kind IN ('SPAN_KIND_PRODUCER','SPAN_KIND_CONSUMER') AND start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND service IS NOT NULL AND service != '')`, lo, hi).Scan(&haveMessaging); err != nil {
+		return nil, err
+	}
+	if !haveMessaging {
+		statement = withoutEdgeMessaging(statement)
+	}
+	res, err := tx.ExecContext(ctx, statement, lo, hi)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, "DROP TABLE edge_pass_parents"); err != nil {
 		return nil, err
 	}
+	if _, err := tx.ExecContext(ctx, "DROP TABLE edge_pass_children"); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "DROP TABLE edge_pass_peer_candidates"); err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 
+// Keep the membership predicate as a MARK join. IS TRUE prevents DuckDB from
+// rewriting it to a reversible semi-join: schema-first Parquet estimates zero
+// rows and would put the entire parent history on the hash build side. Filter
+// NULL keys so row-value membership preserves the original equality semantics.
 const createEdgeParentsSQL = `CREATE TEMP TABLE edge_pass_parents AS ` + edgeChildTracesSQL + `
 SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
 FROM spans parent
-SEMI JOIN child_traces child
-  ON parent.namespace = child.namespace
- AND parent.trace_id = child.trace_id
 CROSS JOIN bounds
-WHERE parent.start_time >= (bounds.lo - INTERVAL 5 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+WHERE ((parent.namespace, parent.trace_id) IN (
+  SELECT (child.namespace, child.trace_id) FROM child_traces child
+  WHERE child.namespace IS NOT NULL AND child.trace_id IS NOT NULL
+)) IS TRUE
+  AND parent.start_time >= (bounds.lo - INTERVAL 5 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND parent.start_time <= (bounds.hi + INTERVAL 5 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND parent.service IS NOT NULL
   AND parent.service != ''`
@@ -1595,10 +1960,7 @@ bounds AS (
   SELECT MIN(bucket) AS lo, MAX(bucket) AS hi FROM affected
 )
 SELECT DISTINCT child.namespace, child.trace_id
-FROM spans child
-JOIN affected a
-  ON a.namespace = child.namespace
- AND a.bucket = date_trunc('minute', child.start_time::TIMESTAMP_NS)
+FROM edge_pass_children child
 ANTI JOIN edge_pass_parents parent
   ON parent.namespace = child.namespace
  AND parent.trace_id = child.trace_id
@@ -1626,11 +1988,12 @@ bounds AS (
 INSERT INTO edge_pass_parents
 SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
 FROM spans parent
-SEMI JOIN edge_pass_unmatched child
-  ON parent.namespace = child.namespace
- AND parent.trace_id = child.trace_id
 CROSS JOIN bounds
-WHERE parent.start_time >= (bounds.lo - INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+WHERE ((parent.namespace, parent.trace_id) IN (
+  SELECT (child.namespace, child.trace_id) FROM edge_pass_unmatched child
+  WHERE child.namespace IS NOT NULL AND child.trace_id IS NOT NULL
+)) IS TRUE
+  AND parent.start_time >= (bounds.lo - INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND parent.start_time <= (bounds.hi + INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND parent.service IS NOT NULL
   AND parent.service != ''`
@@ -1652,14 +2015,11 @@ call_edges AS (
     AVG(child.duration_ms) AS avg_ms,
     AVG(CASE WHEN child.status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate,
     'call' AS edge_type
-  FROM spans child
+  FROM edge_pass_children child
   JOIN parent_scope parent
     ON child.parent_span_id = parent.span_id
    AND child.trace_id = parent.trace_id
    AND child.namespace = parent.namespace
-  JOIN affected a
-    ON a.namespace = child.namespace
-   AND a.bucket = date_trunc('minute', child.start_time::TIMESTAMP_NS)
   -- Keep bounds as an explicit CROSS JOIN after the keyed joins, so the
   -- planner can fold its single row into the child filters. The plan test
   -- guards against Cartesian or correlated span-to-span joins.
@@ -1677,45 +2037,34 @@ call_edges AS (
 -- span count. calls = consumed messages on the destination, attributed to
 -- each producer service publishing to it (a message consumed once appears on
 -- every producer's edge).
+producer_agg AS (
+` + edgeProducerAggSQL + `
+),
+consumer_agg AS (
+` + edgeConsumerAggSQL + `
+),
 producers AS (
-  SELECT DISTINCT
-    s.namespace,
-    date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
-    s.service,
-    s.messaging_destination AS destination,
-    s.messaging_system AS msg_system
-  FROM spans s
-  JOIN affected a
-    ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
-  WHERE s.kind = 'SPAN_KIND_PRODUCER'
-    AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND s.start_time < ((SELECT hi FROM bounds) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND s.service IS NOT NULL
-    AND s.service != ''
-    AND s.messaging_destination IS NOT NULL
+  SELECT p.* FROM producer_agg p
+  SEMI JOIN affected a USING (namespace, bucket)
 ),
 consumers AS (
-  SELECT
-    s.namespace,
-    date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
-    s.service,
-    s.messaging_destination AS destination,
-    s.messaging_system AS msg_system,
-    COUNT(*) AS calls
-  FROM spans s
-  JOIN affected a
-    ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
-  WHERE s.kind = 'SPAN_KIND_CONSUMER'
-    AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND s.start_time < ((SELECT hi FROM bounds) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND s.service IS NOT NULL
-    AND s.service != ''
-    AND s.messaging_destination IS NOT NULL
-  GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service,
-    s.messaging_destination,
-    s.messaging_system
+  SELECT c.* FROM consumer_agg c
+  SEMI JOIN affected a USING (namespace, bucket)
+),
+peer_candidates AS MATERIALIZED (
+` + edgePeerCandidatesSQL + `
+),
+peer_children AS MATERIALIZED (
+` + edgePeerChildrenSQL + `
+),
+peer_edges AS (
+ SELECT p.namespace,p.bucket,p.service AS caller,p.peer_service AS callee,
+ count(*) AS calls,avg(p.duration_ms) AS avg_ms,
+ avg(CASE WHEN p.status='STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate,
+ quantile_cont(p.duration_ms,.5) AS p50_ms,quantile_cont(p.duration_ms,.95) AS p95_ms
+ FROM peer_candidates p ANTI JOIN peer_children c
+ ON c.namespace=p.namespace AND c.trace_id=p.trace_id AND c.parent_span_id=p.span_id AND c.service<>p.service
+ GROUP BY p.namespace,p.bucket,p.service,p.peer_service
 ),
 messaging_edges AS (
   SELECT
@@ -1744,13 +2093,15 @@ INSERT INTO edge_rollup (
   calls,
   avg_ms,
   error_rate,
-  edge_type
+  edge_type, p50_ms, p95_ms
 )
-SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
+SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type, 0.0, 0.0
 FROM call_edges
 UNION ALL
-SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
-FROM messaging_edges;`
+SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type, 0.0, 0.0
+FROM messaging_edges
+UNION ALL
+SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, 'peer', p50_ms, p95_ms FROM peer_edges;`
 
 // ---- Read query helpers ----
 
@@ -1761,54 +2112,141 @@ func (d *Duck) acquireRead(ctx context.Context) (*sql.Conn, error) {
 	return d.DB.Conn(ctx)
 }
 
+// readConn takes a read-pool connection and then pins the Parquet catalog.
+// Neither waits on publication: a publisher swaps the catalog atomically and
+// defers deleting what it replaced until pinned readers leave. Pinning after
+// the pool wait keeps a queued reader from holding retired files. The caller
+// closes conn, then releases the pin with unpinParquet.
+func (d *Duck) readConn(ctx context.Context) (*sql.Conn, telemetry.SnapshotPin, error) {
+	conn, err := d.acquireRead(ctx)
+	if err != nil {
+		return nil, telemetry.SnapshotPin{}, err
+	}
+	return conn, d.pinParquet(), nil
+}
+
+// pinParquet admits a reader to the current catalog. Files of every batch it
+// captures afterwards stay in place until unpinParquet. A Duck without a
+// repository, as package tests build over a bare handle, has nothing to pin.
+func (d *Duck) pinParquet() telemetry.SnapshotPin {
+	if d.repository == nil || d.repository.Parquet == nil {
+		return telemetry.SnapshotPin{}
+	}
+	return d.repository.Parquet.Pin()
+}
+
+func (d *Duck) unpinParquet(pin telemetry.SnapshotPin) {
+	if d.repository != nil && d.repository.Parquet != nil {
+		d.repository.Parquet.Unpin(pin)
+	}
+}
+
+// retirementWaiting reports whether retired files wait for pin's reader.
+func (d *Duck) retirementWaiting(pin telemetry.SnapshotPin) bool {
+	if d.snapshotWanted != nil {
+		return d.snapshotWanted(pin)
+	}
+	return d.repository != nil && d.repository.Parquet != nil && d.repository.Parquet.RetirementWaiting(pin)
+}
+
+// allTime is the read window for statements that carry none. It selects every
+// batch, so binding such a statement to the catalog keeps its result and only
+// removes the files of uncommitted outputs and retired inputs from its scan.
+var allTime = queryrows.Window{Start: time.Unix(0, math.MinInt64).UTC(), End: time.Unix(0, math.MaxInt64).UTC()}
+
+// unboundTelemetry is a cheap filter before parsing a statement that carries
+// no read window: only text naming resource_inventory can reference it, and
+// only text naming a signal can need binding to the captured catalog.
+func (d *Duck) unboundTelemetry(query string) bool {
+	lower := strings.ToLower(query)
+	if strings.Contains(lower, "resource_inventory") {
+		return true
+	}
+	for _, s := range telemetry.Signals {
+		if strings.Contains(lower, s.Name) {
+			return d.repository != nil && d.repository.Parquet != nil
+		}
+	}
+	return false
+}
+
 // QueryContext executes a read against immutable Parquet files and DuckDB's
 // local rollup cache.
 func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error) {
-	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
-		return nil, err
-	}
-	// The connection is taken first and timed separately: DB.QueryContext would
-	// fold the wait for a free connection into the statement's duration, and
-	// telling queueing from execution is the whole reason this is measured.
-	conn, err := d.acquireRead(ctx)
+	// The connection is taken explicitly and timed separately: DB.QueryContext
+	// would fold the wait for a free connection into the statement's duration,
+	// and telling queueing from execution is the whole reason this is measured.
+	conn, pin, err := d.readConn(ctx)
 	if err != nil {
-		d.parquetMu.RUnlock()
 		return nil, err
 	}
 	var tx *sql.Tx
+	var rows *sql.Rows
+	var done func(error)
+	// Setup owns its resources until lockedRows takes over, including on
+	// panic: rows close before the statement is unregistered, and both before
+	// the connection and pin are released.
+	setup := true
+	defer func() {
+		if !setup {
+			return
+		}
+		if rows != nil {
+			_ = rows.Close()
+		}
+		if done != nil {
+			done(errReadSetupAbandoned)
+		}
+		if r := recover(); r != nil {
+			d.unpinParquet(pin)
+			d.abandonRead(conn, tx)
+			panic(r)
+		}
+		endRead(conn, tx)
+		d.unpinParquet(pin)
+	}()
 	var db snapshotSQL = conn
-	if window, ok := queryrows.ReadWindow(ctx); ok && d.repository != nil {
+	window, windowed := queryrows.ReadWindow(ctx)
+	if !windowed && d.unboundTelemetry(query) {
+		// The empty validation descriptor must never become a reader. Inspect
+		// actual references (a literal or unrelated CTE is harmless). Any other
+		// telemetry relation reads the whole captured catalog.
+		compiled, compileErr := d.compileSnapshot(ctx, conn, query)
+		if compileErr == nil {
+			if _, inventory := compiled.names["resource_inventory"]; inventory {
+				compileErr = fmt.Errorf("resource_inventory requires a logical panel window")
+			}
+		}
+		if compileErr != nil {
+			return nil, compileErr
+		}
+		for _, s := range telemetry.Signals {
+			_, raw := compiled.names["telemetry."+s.Name]
+			_, clean := compiled.names[s.Name]
+			if raw || clean {
+				window, windowed = allTime, true
+				break
+			}
+		}
+	}
+	if windowed {
 		tx, err = beginRead(ctx, conn)
 		if err == nil {
 			db = tx
 			query, err = d.bindSnapshot(ctx, tx, query, window)
 		}
 		if err != nil {
-			endRead(conn, tx)
-			d.parquetMu.RUnlock()
 			return nil, err
-		}
-	} else if strings.Contains(strings.ToLower(query), "resource_inventory") {
-		// The empty validation descriptor must never become a reader. Inspect
-		// actual references (a literal or unrelated CTE is harmless).
-		compiled, compileErr := d.compileSnapshot(ctx, conn, query)
-		if compileErr == nil {
-			if _, inventory := compiled.names["resource_inventory"]; inventory {
-				compileErr = fmt.Errorf("resource_inventory requires a repository and logical panel window")
-			}
-		}
-		if compileErr != nil {
-			endRead(conn, nil)
-			d.parquetMu.RUnlock()
-			return nil, compileErr
 		}
 	}
 	started := time.Now()
-	rows, err := db.QueryContext(ctx, query, args...)
+	// Tracked while the engine runs the statement; rows a caller then holds
+	// are its own time.
+	done = d.begin(ctx, query)
+	rows, err = db.QueryContext(ctx, query, args...)
+	done(err)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
 	if err != nil {
-		endRead(conn, tx)
-		d.parquetMu.RUnlock()
 		return nil, err
 	}
 	release := func() {
@@ -1821,9 +2259,12 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		// one is the caller's until it says otherwise. Every call site closes
 		// on every path; this is what it costs if one stops.
 		endRead(conn, tx)
-		d.parquetMu.RUnlock()
+		d.unpinParquet(pin)
+		d.answered(ctx, rows.Err())
 	}
-	return &lockedRows{Rows: rows, unlock: release}, nil
+	owned := &lockedRows{Rows: rows, unlock: release}
+	setup = false
+	return owned, nil
 }
 
 // beginRead opens a read transaction that only its owner ends. A transaction
@@ -1838,6 +2279,19 @@ func beginRead(ctx context.Context, conn *sql.Conn) (*sql.Tx, error) {
 		discardConn(conn)
 	}
 	return tx, err
+}
+
+// abandonRead releases a read a panic interrupted. A panic inside a
+// database/sql call leaves that connection's close lock held, so closing it
+// on the panicking goroutine would block forever instead of propagating the
+// panic. The release runs in the background and completes whenever the lock
+// is free; a connection that never comes back is not counted as held.
+func (d *Duck) abandonRead(conn *sql.Conn, tx *sql.Tx) {
+	d.abandoned.Add(1)
+	go func() {
+		defer d.abandoned.Add(-1)
+		endRead(conn, tx)
+	}()
 }
 
 // endRead rolls back tx, if any, and returns conn to the pool. A connection
@@ -1880,7 +2334,7 @@ func (r *lockedRows) release() { r.unlockOnce.Do(r.unlock) }
 // QueryRowScan executes a single-row query against immutable Parquet files and
 // DuckDB's local rollup cache.
 func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args ...any) error {
-	if _, ok := queryrows.ReadWindow(ctx); ok && d.repository != nil {
+	if _, ok := queryrows.ReadWindow(ctx); ok || d.unboundTelemetry(query) {
 		rows, err := d.QueryContext(ctx, query, args...)
 		if err != nil {
 			return err
@@ -1895,95 +2349,67 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 		return sql.ErrNoRows
 	}
 
-	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
-		return err
-	}
-	defer d.parquetMu.RUnlock()
 	conn, err := d.acquireRead(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
+	var done func(error)
+	defer func() {
+		if r := recover(); r != nil {
+			if done != nil {
+				done(errReadSetupAbandoned)
+			}
+			d.abandonRead(conn, nil)
+			panic(r)
+		}
+		_ = conn.Close()
+	}()
 	// This one covers the scan as well as the statement: a single row cannot
 	// be fetched separately from being read. Both are DuckDB's time rather
 	// than the pool's, which is the distinction the histogram is drawing.
 	started := time.Now()
 	defer func() { metrics.DuckDBStatement.Observe(time.Since(started).Seconds()) }()
-	return conn.QueryRowContext(ctx, query, args...).Scan(dest...)
+	done = d.begin(ctx, query)
+	err = conn.QueryRowContext(ctx, query, args...).Scan(dest...)
+	done(err)
+	return err
 }
 
 // Trace pins the immutable Parquet snapshot for the full indexed-file read.
 func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemetry.IndexedSpan, telemetry.TraceTotals, error) {
-	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
-		return nil, telemetry.TraceTotals{}, err
-	}
-	defer d.parquetMu.RUnlock()
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
 	return d.repository.Parquet.Trace(ctx, query)
 }
 
-// PublishParquet limits reader exclusion to the atomic directory swap.
-//
-// The drain and the swap get separate budgets. Sharing one deadline meant a
-// publisher that spent most of it waiting for readers entered the exclusive
-// window with almost nothing left, cancelled its own renames, and failed the
-// pass — having already paid the full cost of excluding every reader. The swap
-// is renames plus fsync against a bounded batch count, so it is budgeted for
-// what that work costs rather than for whatever the drain happened to leave.
+// PublishParquet runs one catalog swap. Readers are never excluded or waited
+// for: the swap is atomic under the catalog lock, and what it replaces stays
+// on disk until no pinned reader can open it. The budget only bounds the
+// swap's own publish gate, rename and fsync.
 func (d *Duck) PublishParquet(ctx context.Context, publish func(context.Context) error) error {
-	drainCtx, cancelDrain := context.WithTimeout(ctx, parquetDrainBudget)
-	defer cancelDrain()
-	metrics.ParquetPublishWaiters.Inc()
-	waitStarted := time.Now()
-	err := d.parquetMu.LockContext(drainCtx)
-	metrics.ParquetPublishWaiters.Dec()
-	metrics.ParquetPublishWait.Observe(time.Since(waitStarted).Seconds())
-	if err != nil {
-		metrics.ParquetPublishTimeouts.Inc()
-		return fmt.Errorf("wait for Parquet readers: %w", err)
-	}
-	defer d.parquetMu.Unlock()
 	swapStarted := time.Now()
+	d.publishing.Store(swapStarted.UnixNano())
+	defer d.publishing.Store(0)
 	defer func() { metrics.ParquetPublishHold.Observe(time.Since(swapStarted).Seconds()) }()
 	swapCtx, cancelSwap := context.WithTimeout(ctx, parquetSwapBudget)
 	defer cancelSwap()
 	return publish(swapCtx)
 }
 
-// Reader classes for the snapshot-wait metric. A query that waits and a rollup
-// that waits are different problems with the same symptom, and the whole point
-// of measuring here is to tell them apart.
-const (
-	readerQuery  = "query"
-	readerRollup = "rollup"
-	readerStats  = "stats"
-)
-
-// lockParquetRead records snapshot admission waits. Only ordinary queries use
-// the publisher's grace; rollups and stats wait behind queued publishers.
-func (d *Duck) lockParquetRead(ctx context.Context, reader string) error {
-	start := time.Now()
-	mode := parquetReadBackground
-	if reader == readerQuery {
-		mode = parquetReadQuery
-	}
-	if err := d.parquetMu.RLockContext(ctx, mode); err != nil {
-		metrics.RecordParquetRead(reader, time.Since(start).Seconds(), false)
-		return errors.Join(ErrParquetReadWait, err)
-	}
-	metrics.RecordParquetRead(reader, time.Since(start).Seconds(), true)
-	return nil
-}
-
-// Keep gate-first lock ordering, but never park the analytical writer gate
-// behind a publication. The owning loop retries skipped work on its cadence.
-func (d *Duck) tryRollupParquetRead() bool {
-	start := time.Now()
-	admitted := d.parquetMu.TryRLock(parquetReadBackground)
-	metrics.RecordParquetRead(readerRollup, time.Since(start).Seconds(), admitted)
-	return admitted
-}
-
 // ---- Queries for API ----
+
+// RollupWatermark is the ingest horizon shared by service_rollup and span_rollup.
+// Read persisted state instead of the writer-owned in-memory cursor.
+func (d *Duck) RollupWatermark(ctx context.Context) (time.Time, error) {
+	var stamp int64
+	if err := d.QueryRowScan(ctx, []any{&stamp}, `SELECT coalesce((SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key=?),0)`, serviceRollupStateKey); err != nil {
+		return time.Time{}, err
+	}
+	if stamp == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(0, stamp).UTC(), nil
+}
 
 // CompletedServiceRollupMinute is the exclusive end of detector input. The
 // minute containing the ingest watermark may still be incomplete.
@@ -1996,222 +2422,6 @@ func (d *Duck) CompletedServiceRollupMinute(ctx context.Context) (time.Time, err
 		return time.Time{}, nil
 	}
 	return time.Unix(0, stamp).UTC().Truncate(time.Minute), nil
-}
-
-type LatencyRow struct {
-	ServiceName string  `json:"service_name"`
-	P95Ms       float64 `json:"p95_ms"`
-	ErrorRate   float64 `json:"error_rate"`
-	Spans       int64   `json:"spans"`
-}
-
-func (d *Duck) LatencyOverview(ctx context.Context, windowMinutes int) ([]LatencyRow, error) {
-	namespace := d.DefaultNamespace()
-	q := fmt.Sprintf(`
-SELECT
-  service as service_name,
-  AVG(CASE WHEN spans > 0 THEN p95_ms END) as p95_ms,
-  AVG(CASE WHEN spans > 0 THEN error_rate END) as error_rate,
-  SUM(spans)::BIGINT as spans
-FROM service_rollup
-WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND (? = '' OR namespace = ?)
-GROUP BY service
-HAVING SUM(spans) > 0
-ORDER BY p95_ms DESC
-LIMIT 100;
-`, windowMinutes)
-	rows, err := d.QueryContext(ctx, q, namespace, namespace)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []LatencyRow{}
-	for rows.Next() {
-		var r LatencyRow
-		if err := rows.Scan(&r.ServiceName, &r.P95Ms, &r.ErrorRate, &r.Spans); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-type LogsSample struct {
-	TS   string `json:"ts"`
-	Body string `json:"body"`
-	Svc  string `json:"service_name"`
-	Sev  string `json:"severity"`
-}
-
-func (d *Duck) LogsSamples(ctx context.Context, windowMinutes, limit int, pattern string) ([]LogsSample, error) {
-	namespace := d.DefaultNamespace()
-	q := fmt.Sprintf(`
-SELECT
-  strftime(time::TIMESTAMP_NS, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
-  body,
-  service AS service_name,
-  severity
-FROM logs
-WHERE time >= (now() - INTERVAL %d MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
-  AND (? = '' OR namespace = ?)
-  AND body ~ ?
-ORDER BY time DESC
-LIMIT %d;
-`, windowMinutes, limit)
-	rows, err := d.QueryContext(ctx, q, namespace, namespace, pattern)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []LogsSample{}
-	for rows.Next() {
-		var r LogsSample
-		if err := rows.Scan(&r.TS, &r.Body, &r.Svc, &r.Sev); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-type ThroughputRow struct {
-	Bucket string `json:"bucket"`
-	Spans  int64  `json:"spans"`
-}
-
-func (d *Duck) Throughput(ctx context.Context, windowMinutes int) ([]ThroughputRow, error) {
-	namespace := d.DefaultNamespace()
-	q := fmt.Sprintf(`
-SELECT strftime(bucket, '%%Y-%%m-%%dT%%H:%%M:00Z') AS bucket,
-  (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0))) AS spans
-FROM service_rollup
-WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND (? = '' OR namespace = ?)
-GROUP BY bucket
-ORDER BY bucket ASC;
-`, windowMinutes)
-	rows, err := d.QueryContext(ctx, q, namespace, namespace)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []ThroughputRow{}
-	for rows.Next() {
-		var r ThroughputRow
-		if err := rows.Scan(&r.Bucket, &r.Spans); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-type ServiceThroughputRow struct {
-	Service        string `json:"service"`
-	SpansPerMinute int64  `json:"spans_per_minute"`
-}
-
-func (d *Duck) ServiceThroughput(ctx context.Context, windowMinutes int) ([]ServiceThroughputRow, error) {
-	namespace := d.DefaultNamespace()
-	q := fmt.Sprintf(`
-SELECT service, ROUND((SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0)))::DOUBLE / %d)::BIGINT AS spans_per_minute
-FROM service_rollup
-WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND (? = '' OR namespace = ?)
-GROUP BY service
-ORDER BY spans_per_minute DESC
-LIMIT 20;
-`, windowMinutes, windowMinutes)
-	rows, err := d.QueryContext(ctx, q, namespace, namespace)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []ServiceThroughputRow{}
-	for rows.Next() {
-		var r ServiceThroughputRow
-		if err := rows.Scan(&r.Service, &r.SpansPerMinute); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-type ErrorRoute struct {
-	Route string `json:"route"`
-	Count int64  `json:"count"`
-}
-
-func (d *Duck) ErrorRoutes(ctx context.Context, windowMinutes, limit int) ([]ErrorRoute, error) {
-	namespace := d.DefaultNamespace()
-	q := fmt.Sprintf(`
-SELECT body AS route, COUNT(*) AS count
-FROM logs
-WHERE time >= (now() - INTERVAL %d MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
-  AND (? = '' OR namespace = ?)
-  AND severity IN ('ERROR', 'ERR', 'WARN')
-GROUP BY body
-ORDER BY count DESC
-LIMIT %d;
-`, windowMinutes, limit)
-	rows, err := d.QueryContext(ctx, q, namespace, namespace)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []ErrorRoute{}
-	for rows.Next() {
-		var r ErrorRoute
-		if err := rows.Scan(&r.Route, &r.Count); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-type ErrorRouteRow struct {
-	ServiceName string  `json:"service_name"`
-	Name        string  `json:"name"`
-	Errors      int64   `json:"errors"`
-	ErrorRate   float64 `json:"error_rate"`
-}
-
-func (d *Duck) ErrorRouteDetails(ctx context.Context, windowMinutes, limit int) ([]ErrorRouteRow, error) {
-	namespace := d.DefaultNamespace()
-	q := fmt.Sprintf(`
-WITH spans_with_errors AS (
-  SELECT service AS service_name, operation AS name, status AS status_code
-  FROM spans
-  WHERE start_time >= (now() - INTERVAL %d MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND (? = '' OR namespace = ?)
-)
-SELECT service_name,
-       name,
-       SUM(CASE WHEN status_code = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) AS errors,
-       AVG(CASE WHEN status_code = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate
-FROM spans_with_errors
-GROUP BY service_name, name
-HAVING errors > 0
-ORDER BY errors DESC
-LIMIT %d;
-`, windowMinutes, limit)
-	rows, err := d.QueryContext(ctx, q, namespace, namespace)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []ErrorRouteRow{}
-	for rows.Next() {
-		var r ErrorRouteRow
-		if err := rows.Scan(&r.ServiceName, &r.Name, &r.Errors, &r.ErrorRate); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
 }
 
 // WithReadTransaction keeps derived annotation rows and completeness flags in
@@ -2227,4 +2437,17 @@ func (d *Duck) WithReadTransaction(ctx context.Context, read func(queryrows.Quer
 		return err
 	}
 	return read(queryrows.SQLAdapter{DB: tx})
+}
+
+// ReadConnections is the size of the read pool, so a caller can admit no more
+// concurrent readers than there are connections.
+func (d *Duck) ReadConnections() int { return duckDBPoolSize(d.cfg) }
+
+// parser is the handle for DuckDB's parser and renderer. A Duck built over an
+// existing handle, as package tests do, parses on that handle.
+func (d *Duck) parser() *sql.DB {
+	if d.parseDB == nil {
+		return d.DB
+	}
+	return d.parseDB
 }

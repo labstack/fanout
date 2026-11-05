@@ -16,7 +16,7 @@ func TestItemsExecute(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
 	d.Panels = []Panel{
-		{ID: "scatter", Title: "Mean and tail latency", Viz: "scatter", Query: &Spec{From: "spans", Measures: []string{"avg(duration_ms)", "p95(duration_ms)"}, By: []string{"http_route", "service"}}, Options: &Options{XScale: "log", YScale: "linear"}},
+		{ID: "scatter", Title: "Mean and tail latency", Viz: "scatter", Query: &Spec{From: "spans", Measures: []string{"avg(duration_ms)", "p95(duration_ms)"}, By: []string{"attributes['http.route']", "service"}}, Options: &Options{XScale: "log", YScale: "linear"}},
 		{ID: "states", Title: "Latency states", Viz: "state_timeline", Query: &Spec{From: "spans", Measures: []string{"p95(duration_ms)"}, By: []string{"service"}, Bucket: "5m"}, Thresholds: []Threshold{{Value: 500, Status: "bad"}}},
 	}
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})

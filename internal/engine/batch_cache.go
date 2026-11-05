@@ -12,19 +12,32 @@ import (
 	"github.com/labstack/fanout/internal/engine/writegate"
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/fanout/internal/readpressure"
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-// readCacheVersion covers both schema and aggregation semantics. These tables
-// are disposable; a mismatch rebuilds them together from immutable Parquet.
-const readCacheVersion = 6
+// readCacheVersion covers the schema and semantics of DuckDB's read caches:
+// the rollups and their progress, version history, and the per-batch read
+// caches. They are derived from immutable Parquet, so a mismatch drops them
+// together and they rebuild. Bump it whenever one's shape or the meaning of
+// its rows changes.
+//
+// anomaly_log is not one of them: it holds detector output that nothing can
+// rebuild, so the drop keeps it. Its table is created once; any change to its
+// schema must be a separate, explicit migration step.
+const readCacheVersion = 17
 
 const (
 	readCacheBatchLimit = 64
-	readCacheRowBudget  = 64000
+	// Amortize candidate maintenance and bounded pressure pauses without
+	// allowing a pass to grow with retained history. File count stays capped.
+	readCacheRowBudget = 256000
 )
 
-func createBatchCaches(db *sql.DB) error {
+// CreateCacheTables creates DuckDB's tables: the rebuildable read caches and
+// the anomaly history. The telemetry rows themselves live in immutable Parquet
+// batches.
+func CreateCacheTables(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -39,7 +52,7 @@ func createBatchCaches(db *sql.DB) error {
 		return err
 	}
 	if version != readCacheVersion {
-		rows, err := tx.Query(`SELECT table_name FROM duckdb_tables() WHERE schema_name='main' AND starts_with(table_name,'read_') AND table_name<>'read_cache_version'`)
+		rows, err := tx.Query(`SELECT table_name FROM duckdb_tables() WHERE database_name=current_database() AND schema_name='main' AND NOT temporary AND table_name NOT IN ('read_cache_version','anomaly_log')`)
 		if err != nil {
 			return err
 		}
@@ -62,12 +75,6 @@ func createBatchCaches(db *sql.DB) error {
 				return err
 			}
 		}
-		// Bucket counts and the unfinished edge window are one disposable
-		// unit. Restart that window from its unchanged ingestion watermark
-		// when upgrading from a cache without these counts (or new semantics).
-		if _, err := tx.Exec(`DELETE FROM rollup_state WHERE cache_key IN (?, ?)`, edgeRollupSubCursorKey, edgeRollupSubWindowKey); err != nil {
-			return err
-		}
 		if _, err := tx.Exec(`DELETE FROM read_cache_version`); err != nil {
 			return err
 		}
@@ -76,15 +83,47 @@ func createBatchCaches(db *sql.DB) error {
 		}
 	}
 	for _, stmt := range []string{
+		createServiceRollupTable,
+		createSpanRollupTable, createLogRollupTable, createEndpointRollupTable, createReceiverRollupTable, createResourceRollupTable, createReceiverEntityRollupTable,
+		createEdgeRollupTable,
+		createRollupStateTable,
+		createVersionRollupTable,
+		createVersionBatchesTable,
+		createAnomalyLogTable,
 		`CREATE TABLE IF NOT EXISTS read_edge_buckets (namespace VARCHAR, bucket TIMESTAMPTZ_NS, spans BIGINT)`,
+		`CREATE TABLE IF NOT EXISTS read_metric_names (batch_id VARCHAR,name VARCHAR)`,
 		`CREATE TABLE IF NOT EXISTS read_batches (batch_id VARCHAR PRIMARY KEY,replacement_id VARCHAR)`,
+		`CREATE TABLE IF NOT EXISTS read_resource_seconds (batch_id VARCHAR,signal VARCHAR,namespace VARCHAR,service VARCHAR,resource VARIANT,bucket TIMESTAMP_NS,first_seen TIMESTAMPTZ_NS,last_seen TIMESTAMPTZ_NS)`,
 		`CREATE TABLE IF NOT EXISTS read_resource_inventory (batch_id VARCHAR,signal VARCHAR,namespace VARCHAR,service VARCHAR,resource VARIANT,first_seen TIMESTAMPTZ_NS,last_seen TIMESTAMPTZ_NS)`,
-		`CREATE TABLE IF NOT EXISTS read_trace_candidates (trace_id VARCHAR PRIMARY KEY,namespace VARCHAR,service VARCHAR,min_start BIGINT,max_start BIGINT,max_end BIGINT,has_error INTEGER)`,
+		`CREATE TABLE IF NOT EXISTS read_trace_candidates (trace_id VARCHAR,namespace VARCHAR,service VARCHAR,min_start BIGINT,max_start BIGINT,max_end BIGINT,has_error INTEGER)`,
 		`CREATE TABLE IF NOT EXISTS read_trace_parts (batch_id VARCHAR, namespace VARCHAR, service VARCHAR, trace_id VARCHAR, min_start BIGINT, max_start BIGINT, max_end BIGINT, has_error INTEGER)`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS rollup_schema_version (version INTEGER)`); err != nil {
+		return err
+	}
+	var rollupVersion int
+	if err := tx.QueryRow(`SELECT coalesce(max(version),0) FROM rollup_schema_version`).Scan(&rollupVersion); err != nil {
+		return err
+	}
+	if rollupVersion != rollup_schema_version {
+		for _, stmt := range []string{`DROP TABLE service_rollup`, `DROP TABLE span_rollup`, `DROP TABLE log_rollup`, `DROP TABLE endpoint_rollup`, `DROP TABLE edge_rollup`, `DROP TABLE receiver_rollup`, `DROP TABLE resource_rollup`, `DROP TABLE receiver_entity_rollup`, createEdgeRollupTable, createServiceRollupTable, createSpanRollupTable, createLogRollupTable, createEndpointRollupTable, createReceiverRollupTable, createResourceRollupTable, createReceiverEntityRollupTable,
+			`DELETE FROM rollup_state WHERE cache_key = '` + serviceRollupStateKey + `'`,
+			`DELETE FROM rollup_state WHERE cache_key IN ('` + edgeRollupStateKey + `','` + edgeRollupSubCursorKey + `','` + edgeRollupSubWindowKey + `')`,
+			`DELETE FROM rollup_schema_version`} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO rollup_schema_version VALUES (?)`, rollup_schema_version); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(createReceiverPointsView); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -118,7 +157,14 @@ func idsSQL(ids []string) string {
 // RefreshReadCaches acknowledges complete immutable files, not an ingest-time
 // watermark. A pass only aggregates its selected batches: it never rebuilds a
 // retained-history index. Contributions and acknowledgements commit together.
-func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
+func (d *Duck) RefreshReadCaches(ctx context.Context) (int64, error) {
+	rows, _, err := d.refreshReadCaches(ctx)
+	return rows, err
+}
+
+// refreshReadCaches also reports whether pending files remain beyond the
+// pass's budget, so the worker repeats at once only while it is behind.
+func (d *Duck) refreshReadCaches(ctx context.Context) (rows int64, backlog bool, err error) {
 	started := time.Now()
 	didWork := false
 	defer func() {
@@ -131,26 +177,26 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 		metrics.RecordRollupComponent(metrics.RollupReadCache, result, rows, time.Since(started).Seconds())
 	}()
 
-	if d.repository == nil {
-		return 0, nil
-	}
 	unlock, err := d.cacheGate.LockContext(ctx, writegate.ReadCache)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer unlock()
-	// Cache retries are frequent. A queued publication must not park the cache
-	// gate for the analytical rollup's much longer admission lease.
-	admitted := d.parquetMu.TryRLock(parquetReadBackground)
-	metrics.RecordParquetRead(readerRollup, 0, admitted)
-	if !admitted {
-		return 0, nil
+	ctx = readpressure.WithSignal(ctx, &d.readPressure)
+	background, err := d.lockBackground(ctx)
+	if err != nil {
+		return 0, false, err
 	}
-	defer d.parquetMu.RUnlock()
+	defer background()
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
+	if err := d.applyCacheTransfers(ctx); err != nil {
+		return 0, true, err
+	}
 	batches := d.repository.Parquet.BatchMetadata()
 	markers, err := batchMarkers(ctx, d.writer())
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	active := map[string]bool{}
 	for _, b := range batches {
@@ -159,9 +205,7 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	stale := []string{}
 	for id := range markers {
 		if !active[id] {
-			d.cachePublishMu.Lock()
-			publishing := d.cachePublishing[id]
-			d.cachePublishMu.Unlock()
+			publishing := d.pendingCacheTransfer(id, false)
 			if !publishing {
 				stale = append(stale, id)
 			}
@@ -176,9 +220,9 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	}
 	metrics.ReadCachePendingBatches.Set(float64(pendingCount))
 	pending := []telemetry.BatchMetadata{}
-	pendingRows := 0
+	pendingRows, selected := 0, 0
 	for i := len(batches) - 1; i >= 0; i-- {
-		if !markers[batches[i].ID] {
+		if !markers[batches[i].ID] && !d.pendingCacheTransfer(batches[i].ID, true) {
 			rows := batches[i].Spans + batches[i].Logs + batches[i].Metrics
 			// A complete file is indivisible. Admit one oversized file to make
 			// progress, otherwise bound new work by rows as well as file count.
@@ -187,20 +231,34 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 			}
 			pending = append(pending, batches[i])
 			pendingRows += rows
+			if rows > 0 {
+				selected++
+			}
 			if len(pending) == readCacheBatchLimit {
 				break
 			}
 		}
 	}
 	if len(pending) == 0 && len(stale) == 0 {
-		return 0, nil
+		return 0, false, nil
 	}
 	didWork = true
 	changed, err := changedRetiredBatches(ctx, d.writer(), markers, active, stale)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return d.cacheBatches(ctx, pending, stale, changed)
+	// Keep the bounded multi-file SQL kernel: per-file transactions spend
+	// more time preparing statements than aggregating rows under steady ingest.
+	// Yield between these cache batches, never before the first unit of work.
+	if d.cachePassStarted {
+		if err := d.readPressure.Yield(ctx); err != nil {
+			return 0, true, err
+		}
+	}
+	d.cachePassStarted = true
+	rows, err = d.cacheBatches(ctx, pending, stale, changed)
+
+	return rows, err == nil && selected < pendingCount, err
 }
 
 func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetadata, stale, changed []string) (int64, error) {
@@ -212,7 +270,7 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 	var written int64
 	exec := func(stmt string) error {
 		result, err := tx.ExecContext(ctx, stmt)
-		if err == nil && strings.HasPrefix(stmt, "INSERT INTO read_") && !strings.HasPrefix(stmt, "INSERT INTO read_batches") {
+		if err == nil && (strings.HasPrefix(stmt, "INSERT INTO read_") && !strings.HasPrefix(stmt, "INSERT INTO read_batches") || strings.HasPrefix(stmt, "MERGE INTO read_")) {
 			n, e := result.RowsAffected()
 			if e != nil {
 				return e
@@ -227,7 +285,7 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		}
 	}
 	if len(stale) > 0 {
-		for _, table := range []string{"read_resource_inventory", "read_trace_parts", "read_batches"} {
+		for _, table := range []string{"read_resource_inventory", "read_resource_seconds", "read_metric_names", "read_trace_parts", "read_batches"} {
 			if err := exec("DELETE FROM " + table + " WHERE batch_id IN (" + idsSQL(stale) + ")"); err != nil {
 				return 0, err
 			}
@@ -239,7 +297,9 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		if err := exec(`DELETE FROM read_trace_candidates WHERE trace_id IN (SELECT trace_id FROM cache_retired_traces) AND trace_id NOT IN (SELECT trace_id FROM read_trace_parts)`); err != nil {
 			return 0, err
 		}
-		if err := exec(`INSERT INTO read_trace_candidates ` + traceCandidateSelect + ` FROM read_trace_parts WHERE trace_id IN (SELECT trace_id FROM cache_retired_traces) GROUP BY trace_id ON CONFLICT (trace_id) DO UPDATE SET namespace=excluded.namespace,service=excluded.service,min_start=excluded.min_start,max_start=excluded.max_start,max_end=excluded.max_end,has_error=excluded.has_error`); err != nil {
+		if err := exec(`MERGE INTO read_trace_candidates c USING (` + traceCandidateSelect + ` FROM read_trace_parts WHERE trace_id IN (SELECT trace_id FROM cache_retired_traces) GROUP BY trace_id) AS excluded ON c.trace_id=excluded.trace_id
+   WHEN MATCHED THEN UPDATE SET namespace=excluded.namespace,service=excluded.service,min_start=excluded.min_start,max_start=excluded.max_start,max_end=excluded.max_end,has_error=excluded.has_error
+   WHEN NOT MATCHED THEN INSERT ` + traceCandidateColumns); err != nil {
 			return 0, err
 		}
 		if err := exec(`DROP TABLE cache_retired_traces`); err != nil {
@@ -265,15 +325,29 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		physical := strings.Replace(d.physicalSource(signal, selected), "SELECT ", "SELECT filename AS __fanout_filename,", 1)
 		return strings.Replace(cleanSource(signal, physical), "SELECT\n", "SELECT "+d.batchIDColumn(signal, "__fanout_filename")+" AS batch_id,\n", 1)
 	}
-	for _, signal := range []string{"spans", "logs", "metrics"} {
-		if rows := source(signal); rows != "" {
-			clock := "time"
-			if signal == "spans" {
-				clock = "start_time"
-			}
-			if err := exec(`INSERT INTO read_resource_inventory SELECT batch_id,` + sqlLiteral(signal) + `,namespace,service,resource,min(` + clock + `),max(` + clock + `) FROM (` + rows + `) GROUP BY batch_id,namespace,service,resource`); err != nil {
+	for _, s := range telemetry.Signals {
+		if rows := source(s.Name); rows != "" {
+			clock := s.Clock()
+			// Materialize only this pass's resource-seconds once. Inventory can
+			// fold their exact extrema without decoding every raw point again.
+			// The temporary table avoids scanning retained cache contributions.
+			if err := exec(`CREATE OR REPLACE TEMP TABLE cache_new_resource_seconds AS SELECT batch_id,` + sqlLiteral(s.Name) + ` AS signal,namespace,service,resource,date_trunc('second',` + clock + `::TIMESTAMP_NS) AS bucket,min(` + clock + `) AS first_seen,max(` + clock + `) AS last_seen FROM (` + rows + `) GROUP BY ALL`); err != nil {
 				return 0, err
 			}
+			if err := exec(`INSERT INTO read_resource_seconds SELECT * FROM cache_new_resource_seconds`); err != nil {
+				return 0, err
+			}
+			if err := exec(`INSERT INTO read_resource_inventory SELECT batch_id,signal,namespace,service,resource,min(first_seen),max(last_seen) FROM cache_new_resource_seconds GROUP BY ALL`); err != nil {
+				return 0, err
+			}
+			if err := exec(`DROP TABLE cache_new_resource_seconds`); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if metrics := source("metrics"); metrics != "" {
+		if err := exec(`INSERT INTO read_metric_names SELECT DISTINCT batch_id,name FROM (` + metrics + `)`); err != nil {
+			return 0, err
 		}
 	}
 	if spans := source("spans"); spans != "" {
@@ -286,13 +360,15 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 			return 0, err
 		}
 		candidates := traceCandidateSelect + ` FROM cache_new_trace_parts GROUP BY trace_id`
-		if err := exec(`INSERT INTO read_trace_candidates ` + candidates + ` ON CONFLICT (trace_id) DO UPDATE SET
-   namespace=CASE WHEN read_trace_candidates.namespace=excluded.namespace THEN excluded.namespace END,
-   service=CASE WHEN read_trace_candidates.service=excluded.service THEN excluded.service END,
-   min_start=least(read_trace_candidates.min_start,excluded.min_start),
-   max_start=greatest(read_trace_candidates.max_start,excluded.max_start),
-   max_end=greatest(read_trace_candidates.max_end,excluded.max_end),
-   has_error=greatest(read_trace_candidates.has_error,excluded.has_error)`); err != nil {
+		if err := exec(`MERGE INTO read_trace_candidates c USING (` + candidates + `) AS excluded ON c.trace_id=excluded.trace_id
+   WHEN MATCHED THEN UPDATE SET
+   namespace=CASE WHEN c.namespace=excluded.namespace THEN excluded.namespace END,
+   service=CASE WHEN c.service=excluded.service THEN excluded.service END,
+   min_start=least(c.min_start,excluded.min_start),
+   max_start=greatest(c.max_start,excluded.max_start),
+   max_end=greatest(c.max_end,excluded.max_end),
+   has_error=greatest(c.has_error,excluded.has_error)
+   WHEN NOT MATCHED THEN INSERT ` + traceCandidateColumns); err != nil {
 			return 0, err
 		}
 		if err := exec(`DROP TABLE cache_new_trace_parts`); err != nil {
@@ -329,6 +405,22 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 		if !ok {
 			return fmt.Errorf("resource_inventory requires a logical panel window")
 		}
+		// Markers and contributions come from the same MVCC snapshot. A hole
+		// limits the ingest horizon even when newer batches are already cached.
+		fresh := time.Now()
+		for _, b := range batches {
+			if markers[b.ID] || window.RetainedInventory {
+				continue
+			}
+			for _, signal := range telemetry.Signals {
+				bounds, count := batchTime(b, signal.Name)
+				if count > 0 && (overlapping(b, signal.Name, window) && bounds.Known && bounds.MinNanos >= window.Start.UnixNano() && bounds.MaxNanos < window.End.UnixNano()) {
+					fresh = minTime(fresh, time.Unix(0, b.MinIngestedNanos).Add(-time.Nanosecond))
+					break
+				}
+			}
+		}
+		queryrows.RecordCoverage(ctx, fresh)
 		sources["resource_inventory"] = d.resourceInventorySource(batches, markers, window)
 	}
 	if w.Kind == queryrows.RawRead {
@@ -393,8 +485,8 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 
 func newestBatchEvent(b telemetry.BatchMetadata) int64 {
 	newest := int64(-1 << 63)
-	for _, signal := range []string{"spans", "logs", "metrics"} {
-		bounds, count := batchTime(b, signal)
+	for _, s := range telemetry.Signals {
+		bounds, count := batchTime(b, s.Name)
 		if count > 0 {
 			if !bounds.Known {
 				return b.MaxIngestedNanos
@@ -405,18 +497,31 @@ func newestBatchEvent(b telemetry.BatchMetadata) int64 {
 	return newest
 }
 
-// PublishParquetReplacement derives the output cache from complete inputs before
-// the namespace swap. The pending publication set protects still-inactive
-// output contributions without holding the write gate during reader drain.
-// Readers use active IDs, so either namespace sees exactly one set of contributions. After
-// a crash, an absent output marker simply causes a rebuild from the output file.
+// PublishParquetReplacement reuses complete input caches when the SQL leases
+// are idle. Busy leases defer the transfer to the refresh worker, without
+// delaying the catalog swap or decoding the output again.
 func (d *Duck) PublishParquetReplacement(ctx context.Context, output telemetry.BatchMetadata, inputs []string, publish func(context.Context) error) error {
 	if len(inputs) == 0 {
 		return d.PublishParquet(ctx, publish)
 	}
-	unlock, err := d.cacheGate.LockContext(ctx, writegate.ReadCache)
-	if err != nil {
+	transfer := &batchCacheTransfer{output: output.ID, inputs: append([]string(nil), inputs...)}
+	d.cachePublishMu.Lock()
+	d.cacheTransfers = append(d.cacheTransfers, transfer)
+	d.cachePublishMu.Unlock()
+	swap := func() error {
+		err := d.PublishParquet(ctx, publish)
+		d.cachePublishMu.Lock()
+		if err == nil {
+			transfer.published = true
+		} else {
+			d.removeCacheTransfer(transfer)
+		}
+		d.cachePublishMu.Unlock()
 		return err
+	}
+	unlock := d.cacheGate.TryLock(writegate.ReadCache)
+	if unlock == nil {
+		return swap()
 	}
 	d.cachePublishMu.Lock()
 	if d.cachePublishing == nil {
@@ -426,16 +531,29 @@ func (d *Duck) PublishParquetReplacement(ctx context.Context, output telemetry.B
 	d.cachePublishMu.Unlock()
 	defer func() { d.cachePublishMu.Lock(); delete(d.cachePublishing, output.ID); d.cachePublishMu.Unlock() }()
 	if err := d.transferBatchCache(ctx, output.ID, inputs); err != nil {
+		d.cachePublishMu.Lock()
+		d.removeCacheTransfer(transfer)
+		d.cachePublishMu.Unlock()
 		slog.Warn("compaction cache transfer failed; output will be cached from Parquet", "err", err)
 	}
 	unlock()
 	if err := d.transferVersionMarker(ctx, output, inputs); err != nil {
 		slog.Warn("compaction version marker transfer failed; output will be read", "err", err)
 	}
-	return d.PublishParquet(ctx, publish)
+	return swap()
 }
 
 func (d *Duck) transferBatchCache(ctx context.Context, output string, inputs []string) error {
+	background := d.tryLockBackground()
+	if background == nil {
+		return nil
+	}
+	defer background()
+	return d.transferBatchCacheLocked(ctx, output, inputs)
+}
+
+// Caller holds cacheGate and the background SQL lease.
+func (d *Duck) transferBatchCacheLocked(ctx context.Context, output string, inputs []string) error {
 	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -458,6 +576,8 @@ func (d *Duck) transferBatchCache(ctx context.Context, output string, inputs []s
 	where := " WHERE batch_id IN (" + idsSQL(inputs) + ")"
 	for _, stmt := range []string{
 		`INSERT INTO read_resource_inventory SELECT ` + sqlLiteral(output) + `,signal,namespace,service,resource,min(first_seen),max(last_seen) FROM read_resource_inventory` + where + ` GROUP BY signal,namespace,service,resource`,
+		`INSERT INTO read_resource_seconds SELECT ` + sqlLiteral(output) + `,signal,namespace,service,resource,bucket,min(first_seen),max(last_seen) FROM read_resource_seconds` + where + ` GROUP BY signal,namespace,service,resource,bucket`,
+		`INSERT INTO read_metric_names SELECT DISTINCT ` + sqlLiteral(output) + `,name FROM read_metric_names` + where,
 		`INSERT INTO read_trace_parts SELECT ` + sqlLiteral(output) + `,namespace,service,trace_id,min(min_start),max(max_start),max(max_end),max(has_error) FROM read_trace_parts` + where + ` GROUP BY 2,3,4`,
 		`INSERT INTO read_batches(batch_id) VALUES (` + sqlLiteral(output) + `)`,
 		`UPDATE read_batches SET replacement_id=` + sqlLiteral(output) + where,
@@ -468,6 +588,11 @@ func (d *Duck) transferBatchCache(ctx context.Context, output string, inputs []s
 	}
 	return tx.Commit()
 }
+
+// MERGE joins against the candidates instead of probing a key: an index on
+// every retained trace is loaded whole to upsert or checkpoint, and at a few
+// million traces that alone outgrew a 1 GB memory limit.
+const traceCandidateColumns = `VALUES (excluded.trace_id,excluded.namespace,excluded.service,excluded.min_start,excluded.max_start,excluded.max_end,excluded.has_error)`
 
 // One candidate row per trace is sufficient while the requested namespace and
 // service are unambiguous. Mixed scopes are NULL and use exact batch parts.
@@ -573,4 +698,11 @@ func (d *Duck) traceCandidateSource(ctx context.Context, db snapshotSQL, batches
 	}
 	scope := "batch_id IN (" + idsSQL(cachedIDs) + ") AND " + strings.Join(exact, " AND ")
 	return result + ` UNION ALL SELECT trace_id,min(min_start),max(max_start),max(max_end),max(has_error) FROM read_trace_parts WHERE ` + scope + ` AND trace_id IN (` + mixed + `) GROUP BY trace_id`, nil
+}
+
+func minTime(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
 }

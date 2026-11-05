@@ -69,3 +69,5 @@ func TestSharedListenerCredentialBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func (discardExport) Admit(context.Context, int) error { return nil }

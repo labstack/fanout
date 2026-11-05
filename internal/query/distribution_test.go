@@ -34,7 +34,7 @@ func TestDistributionCounts(t *testing.T) {
 	}
 	engine, repo := newTestEngine(t)
 	at := fixtureStart.UnixNano()
-	err = repo.Commit(t.Context(), telemetrystore.Batch{ID: "hist-metric", Metrics: []telemetry.Metric{{Namespace: "shop", ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "delta", TimeUnixNanos: at, EventUnixNanos: at, IngestedAt: at, HistBoundsJSON: "[10,20]", HistCountsJSON: "[2,3,5]", HistCount: 10}}})
+	err = repo.Commit(t.Context(), telemetrystore.Batch{ID: "hist-metric", Metrics: []telemetry.Metric{{Namespace: "shop", ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "delta", TimeUnixNanos: at, EventUnixNanos: at, IngestedAt: at, Histogram: telemetry.Histogram{Bounds: []float64{10, 20}, Counts: []uint64{2, 3, 5}, Count: 10}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,13 +54,13 @@ func TestDistributionCounts(t *testing.T) {
 func TestMetricHistogramTemporality(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	metrics := []telemetry.Metric{}
-	for scrape, counts := range []string{"[10,20,30]", "[12,23,34]", "[15,27,40]"} {
+	for scrape, counts := range [][]uint64{{10, 20, 30}, {12, 23, 34}, {15, 27, 40}} {
 		n := fixtureStart.Add(time.Duration(scrape) * time.Minute).UnixNano()
-		metrics = append(metrics, telemetry.Metric{Namespace: "shop", ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", Unit: "ms", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: n, HistBoundsJSON: "[10,20]", HistCountsJSON: counts, HistCount: []int64{60, 69, 82}[scrape], Attributes: map[string]any{"series": "a"}})
+		metrics = append(metrics, telemetry.Metric{Namespace: "shop", ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", Unit: "ms", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: n, Histogram: telemetry.Histogram{Bounds: []float64{10, 20}, Counts: counts, Count: []uint64{60, 69, 82}[scrape]}, Attributes: map[string]any{"series": "a"}})
 	}
-	for scrape, counts := range []string{"[100,100,100]", "[101,101,101]", "[102,102,102]"} {
+	for scrape, counts := range [][]uint64{{100, 100, 100}, {101, 101, 101}, {102, 102, 102}} {
 		n := fixtureStart.Add(time.Duration(scrape) * time.Minute).UnixNano()
-		metrics = append(metrics, telemetry.Metric{Namespace: "shop", ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", Unit: "ms", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: n, HistBoundsJSON: "[10,20]", HistCountsJSON: counts, HistCount: []int64{300, 303, 306}[scrape], Attributes: map[string]any{"series": "b"}})
+		metrics = append(metrics, telemetry.Metric{Namespace: "shop", ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", Unit: "ms", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: n, Histogram: telemetry.Histogram{Bounds: []float64{10, 20}, Counts: counts, Count: []uint64{300, 303, 306}[scrape]}, Attributes: map[string]any{"series": "b"}})
 	}
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "scrapes", Metrics: metricSeriesIDs(metrics)}); err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestMetricHistogramTemporality(t *testing.T) {
 	}
 	// A resetting series contributes current counts on every channel.
 	n := fixtureStart.UnixNano()
-	reset := []telemetry.Metric{{ServiceName: "reset", Name: "reset", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n, IngestedAt: n, HistBoundsJSON: "[10]", HistCountsJSON: "[20,30]", HistCount: 50}, {ServiceName: "reset", Name: "reset", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n + int64(time.Minute), IngestedAt: n + 1, HistBoundsJSON: "[10]", HistCountsJSON: "[1,2]", HistCount: 3}}
+	reset := []telemetry.Metric{{ServiceName: "reset", Name: "reset", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n, IngestedAt: n, Histogram: telemetry.Histogram{Bounds: []float64{10}, Counts: []uint64{20, 30}, Count: 50}}, {ServiceName: "reset", Name: "reset", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n + int64(time.Minute), IngestedAt: n + 1, Histogram: telemetry.Histogram{Bounds: []float64{10}, Counts: []uint64{1, 2}, Count: 3}}}
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "reset", Metrics: metricSeriesIDs(reset)}); err != nil {
 		t.Fatal(err)
 	}
@@ -196,20 +196,21 @@ func TestDistributionValidation(t *testing.T) {
 }
 
 func TestDistributionMalformedHistogram(t *testing.T) {
-	for _, tc := range []struct{ name, bounds, counts string }{
-		{"invalid_bounds", "not json", "[100,200]"},
-		{"invalid_counts", "[10]", "not json"},
-		{"null_bounds", "null", "[100,200]"},
-		{"null_counts", "[10]", "null"},
-		{"mismatched_lengths", "[10,20]", "[100,200]"},
+	for _, tc := range []struct {
+		name   string
+		bounds []float64
+		counts []uint64
+	}{
+		{"no_counts", []float64{10}, []uint64{}},
+		{"mismatched_lengths", []float64{10, 20}, []uint64{100, 200}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine, repo := newTestEngine(t)
 			at := fixtureStart.UnixNano()
 			base := telemetry.Metric{ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "delta", EventUnixNanos: at, IngestedAt: at}
 			bad, good := base, base
-			bad.HistBoundsJSON, bad.HistCountsJSON = tc.bounds, tc.counts
-			good.HistBoundsJSON, good.HistCountsJSON = "[10]", "[2,3]"
+			bad.Bounds, bad.Counts = tc.bounds, tc.counts
+			good.Bounds, good.Counts = []float64{10}, []uint64{2, 3}
 			if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "malformed", Metrics: []telemetry.Metric{bad, good}}); err != nil {
 				t.Fatal(err)
 			}
@@ -298,10 +299,10 @@ func TestDistributionSchemaDescriptions(t *testing.T) {
 func TestMetricHistogramHeatmap(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	var metrics []telemetry.Metric
-	for i, counts := range []string{"[10,20]", "[12,24]", "[15,30]", "[18,36]"} {
+	for i, counts := range [][]uint64{{10, 20}, {12, 24}, {15, 30}, {18, 36}} {
 		minute := []int{0, 1, 5, 6}[i]
 		n := fixtureStart.Add(time.Duration(minute) * time.Minute).UnixNano()
-		metrics = append(metrics, telemetry.Metric{ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n, IngestedAt: n, HistBoundsJSON: "[10]", HistCountsJSON: counts, HistCount: []int64{30, 36, 45, 54}[i]})
+		metrics = append(metrics, telemetry.Metric{ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n, IngestedAt: n, Histogram: telemetry.Histogram{Bounds: []float64{10}, Counts: counts, Count: []uint64{30, 36, 45, 54}[i]}})
 	}
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "heat-scrapes", Metrics: metricSeriesIDs(metrics)}); err != nil {
 		t.Fatal(err)
@@ -352,7 +353,7 @@ func TestMetricHistogramHeatmap(t *testing.T) {
 
 func TestMetricHistogramSeriesIdentity(t *testing.T) {
 	engine, repo := newTestEngine(t)
-	base := telemetry.Metric{Namespace: "shop", ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", Unit: "ms", HistBoundsJSON: "[10]"}
+	base := telemetry.Metric{Namespace: "shop", ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", Unit: "ms", Histogram: telemetry.Histogram{Bounds: []float64{10}}}
 	series := []telemetry.Metric{base, base, base, base, base, base, base, base}
 	series[1].Namespace = "other"
 	series[2].ServiceName = "other"
@@ -363,11 +364,11 @@ func TestMetricHistogramSeriesIdentity(t *testing.T) {
 	series[7].Resource = map[string]any{"identity": true}
 	var metrics []telemetry.Metric
 	for _, metric := range series {
-		for scrape, counts := range []string{"[10,20]", "[11,22]"} {
+		for scrape, counts := range [][]uint64{{10, 20}, {11, 22}} {
 			m := metric
 			n := fixtureStart.Add(time.Duration(scrape) * time.Minute).UnixNano()
-			m.EventUnixNanos, m.IngestedAt, m.HistCountsJSON = n, n, counts
-			m.HistCount = []int64{30, 33}[scrape]
+			m.EventUnixNanos, m.IngestedAt, m.Counts = n, n, counts
+			m.Count = []uint64{30, 33}[scrape]
 			metrics = append(metrics, m)
 		}
 	}
@@ -446,24 +447,19 @@ func TestMetricDistributionMixedKinds(t *testing.T) {
 		insertMetrics(t, db, m)
 	}
 	// 419,996 scalar rows plus four histogram points: exactly 420,000 rows.
-	// Generate locally in SQL so fixture setup does not dominate the query.
-	if _, err := db.Exec(`INSERT INTO telemetry.metrics
-		SELECT * EXCLUDE (i) REPLACE (
-		  metric_time + (i % 60) * INTERVAL '1 minute' AS metric_time,
-		  time_unix_nano + (i % 60) * 60000000000 AS time_unix_nano,
-		  ingested_at + (i % 60) * INTERVAL '1 minute' AS ingested_at,
-		  ingested_unix_nano + (i % 60) * 60000000000 AS ingested_unix_nano,
-		  'svc' || (i // 60)::VARCHAR AS service,
-		  value + i AS value)
-		FROM telemetry.metrics, range(1,209998) AS r(i)`); err != nil {
-		t.Fatal(err)
+	for i := 1; i < 209998; i++ {
+		for _, kind := range []string{"gauge", "sum"} {
+			m := metricCounter(fixtureStart.Add(time.Duration(i%60)*time.Minute), float64(100+i))
+			m.Type, m.Name, m.ServiceName = kind, kind, fmt.Sprintf("svc%d", i/60)
+			insertMetrics(t, db, m)
+		}
 	}
 	for _, series := range []string{"a", "b"} {
 		insertMetrics(t, db, metricHistogram(fixtureStart, "[10,20]", "[10,20,30]", 60, 100, series))
 		insertMetrics(t, db, metricHistogram(fixtureStart.Add(time.Minute), "[10,20]", "[12,23,35]", 70, 130, series))
 	}
 	var rows int
-	if err := db.QueryRow("SELECT count(*) FROM metrics").Scan(&rows); err != nil || rows != 420000 {
+	if err := db.db().QueryRow("SELECT count(*) FROM metrics").Scan(&rows); err != nil || rows != 420000 {
 		t.Fatalf("rows=%d err=%v", rows, err)
 	}
 	for _, viz := range []string{"histogram", "heatmap"} {

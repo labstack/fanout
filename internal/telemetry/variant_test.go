@@ -1,22 +1,19 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/parquet-go/parquet-go"
 )
 
 func TestVariantRoundTripAcrossRowGroupsAndCompaction(t *testing.T) {
-	rows := make([]logParquetRow, parquetRowGroupRows+257)
+	rows := make([]Log, parquetRowGroupRows+257)
 	for i := range rows {
 		// Churn past the bounded shared metadata dictionary, with conflicting
 		// types in shredded fields and row boundaries in the middle of a chunk.
@@ -25,23 +22,23 @@ func TestVariantRoundTripAcrossRowGroupsAndCompaction(t *testing.T) {
 		if i%3 == 0 {
 			system = int64(i)
 		}
-		rows[i] = logParquetRow{LogTime: int64(i), Attributes: map[string]any{
+		rows[i] = Log{EventUnixNanos: int64(i + 1), Attributes: map[string]any{
 			"messaging.system": system, key: int64(math.MaxInt64), "zero": int64(0), "false": false,
 			"null": nil, "bytes": []byte{0, 255}, "nested": []any{int64(i), map[string]any{"ok": true}},
 		}, Resource: map[string]any{"service.name": "test", "service.namespace": int64(i), key: int64(math.MaxInt64), "bytes": []byte{0, 255}, "nested": []any{false, map[string]any{"zero": int64(0)}}, "null": nil}}
 	}
 	dir := t.TempDir()
 	first := filepath.Join(dir, "first.parquet")
-	if err := writeTypedParquet(first, rows, parquetPageSize); err != nil {
+	if err := writeParquet(first, Logs, rows, parquetPageSize); err != nil {
 		t.Fatal(err)
 	}
 	checkVariantRows(t, first, rows)
 	second := filepath.Join(dir, "second.parquet")
-	if err := writeTypedParquet(second, rows[:3], parquetPageSize); err != nil {
+	if err := writeParquet(second, Logs, rows[:3], parquetPageSize); err != nil {
 		t.Fatal(err)
 	}
 	merged := filepath.Join(dir, "merged.parquet")
-	if err := mergeTypedParquet[logParquetRow](context.Background(), []string{first, second}, merged, false, &ParquetMergeStats{}); err != nil {
+	if err := mergeParquet(context.Background(), Logs, []string{first, second}, merged, &ParquetMergeStats{}); err != nil {
 		t.Fatal(err)
 	}
 	checkVariantRows(t, merged, append(rows, rows[:3]...))
@@ -53,9 +50,9 @@ func TestSharedResourceCellsPreserveInterleavedRows(t *testing.T) {
 	for i := range objects {
 		objects[i] = map[string]any{"service.name": fmt.Sprint(i), "integer": int64(i)}
 	}
-	rows := make([]logParquetRow, parquetRowGroupRows+257)
+	rows := make([]Log, parquetRowGroupRows+257)
 	for i := range rows {
-		var resource any
+		var resource map[string]any
 		switch i % 5 {
 		case 0:
 			resource = shared
@@ -63,50 +60,111 @@ func TestSharedResourceCellsPreserveInterleavedRows(t *testing.T) {
 			resource = map[string]any{"unique": int64(i), "bytes": []byte{byte(i)}}
 		case 2:
 			resource = objects[(i/5)%len(objects)]
-		case 3:
+		case 3, 4:
 			resource = nil
-		case 4:
-			resource = map[string]any(nil)
 		}
-		rows[i] = logParquetRow{LogTime: int64(i), Resource: resource}
+		rows[i] = Log{EventUnixNanos: int64(i + 1), Resource: resource}
 	}
 	path := filepath.Join(t.TempDir(), "interleaved.parquet")
-	if err := writeTypedParquet(path, rows, parquetPageSize); err != nil {
+	if err := writeParquet(path, Logs, rows, parquetPageSize); err != nil {
 		t.Fatal(err)
 	}
-	// Both forms of an absent canonical resource are SQL NULL, not VARIANT null.
-	for i := range rows {
-		if m, ok := rows[i].Resource.(map[string]any); ok && m == nil {
-			rows[i].Resource = nil
-		}
-	}
+	// An absent canonical resource is SQL NULL, not VARIANT null.
 	checkVariantRows(t, path, rows)
 }
 
-func checkVariantRows(t *testing.T, path string, want []logParquetRow) {
-	t.Helper()
-	file, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
+// Go randomizes map order, and variant metadata interns names in first-use
+// order. Equal rows must still encode to equal files.
+func TestVariantEncodingIsDeterministic(t *testing.T) {
+	shared := map[string]any{"service.name": "shared", "host.name": "one", "k8s.pod.name": "pod", "cloud.region": "eu"}
+	rows := make([]Log, 600)
+	for i := range rows {
+		resource := shared
+		if i%3 == 0 {
+			resource = map[string]any{"service.name": "own", "zone": fmt.Sprint(i % 7), "rack": "r1", "row": "a"}
+		}
+		rows[i] = Log{EventUnixNanos: int64(i + 1), Resource: resource, Attributes: map[string]any{
+			"alpha": int64(i), "beta": "b", "gamma": true, "delta": 1.5, "epsilon": "e", "zeta": nil,
+			"nested": map[string]any{"z": int64(1), "y": []any{map[string]any{"b": "1", "a": "2"}}, "x": "3"},
+		}}
 	}
-	defer file.Close()
-	reader := parquet.NewGenericReader[logParquetRow](file, telemetrySchema[logParquetRow]())
-	defer reader.Close()
-	buffer := make([]logParquetRow, 256)
-	for offset := 0; offset < len(want); {
-		n, err := reader.Read(buffer[:min(len(buffer), len(want)-offset)])
-		if err != nil && !errors.Is(err, io.EOF) {
+	dir := t.TempDir()
+	var files [][]byte
+	for i := range 4 {
+		path := filepath.Join(dir, fmt.Sprintf("%d.parquet", i))
+		if err := writeParquet(path, Logs, rows, parquetPageSize); err != nil {
 			t.Fatal(err)
 		}
-		if n == 0 {
-			t.Fatal("reader made no progress")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
 		}
-		for i, got := range buffer[:n] {
-			if !reflect.DeepEqual(got, want[offset+i]) {
-				t.Fatalf("row %d changed: %#v", offset+i, got)
-			}
+		files = append(files, data)
+	}
+	for i := 1; i < len(files); i++ {
+		if !bytes.Equal(files[0], files[i]) {
+			t.Fatalf("write %d differs from write 0 for the same rows", i)
 		}
-		offset += n
+	}
+}
+
+// checkVariantRows compares a file with rows in the signal's order.
+func checkVariantRows(t *testing.T, path string, want []Log) {
+	t.Helper()
+	want = inOrder(Logs, want)
+	got := fileRows(t, path, Logs)
+	if len(got) != len(want) {
+		t.Fatalf("read %d rows, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if row := wantRow(Logs, &want[i]); !reflect.DeepEqual(got[i], row) {
+			t.Fatalf("row %d changed: %#v", i, got[i])
+		}
+	}
+}
+
+// Shredded resource cells are kept across files by their encoded bytes. A
+// resource seen again in a later file, as a new map, must write the same
+// cells, and the cache must stay bounded under resource churn.
+func TestShreddedResourcesAreSharedAcrossFilesAndBounded(t *testing.T) {
+	rows := func(n int, resource func(int) map[string]any) []Log {
+		out := make([]Log, n)
+		for i := range out {
+			out[i] = Log{EventUnixNanos: int64(i + 1), ServiceName: "svc", Resource: resource(i), Attributes: map[string]any{"i": int64(i)}}
+		}
+		return out
+	}
+	// Two rows per resource make it shared, so the cells go through the cache.
+	same := func(i int) map[string]any {
+		return map[string]any{"service.name": "svc", "service.namespace": "ns", "host.name": fmt.Sprint("host-", i/2%8)}
+	}
+	dir := t.TempDir()
+	var files [][]byte
+	for i := range 2 {
+		path := filepath.Join(dir, fmt.Sprintf("%d.parquet", i))
+		if err := writeParquet(path, Logs, rows(64, same), parquetPageSize); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, data)
+	}
+	if !bytes.Equal(files[0], files[1]) {
+		t.Fatal("a file written from cached resource cells differs from the first")
+	}
+	churn := func(i int) map[string]any {
+		return map[string]any{"service.name": "svc", "k8s.pod.name": fmt.Sprint("pod-", i/2)}
+	}
+	if err := writeParquet(filepath.Join(dir, "churn.parquet"), Logs, rows(2*(maxShreddedResources+100), churn), parquetPageSize); err != nil {
+		t.Fatal(err)
+	}
+	shreddedResources.Lock()
+	cached := len(shreddedResources.rows)
+	shreddedResources.Unlock()
+	if cached > maxShreddedResources {
+		t.Fatalf("%d shredded resources cached, limit %d", cached, maxShreddedResources)
 	}
 }
 
@@ -164,4 +222,14 @@ func testUnsupportedFormatLeavesStoreUntouched(t *testing.T, suffix string) {
 			t.Fatalf("startup changed %s: %v", path, err)
 		}
 	}
+}
+
+// inOrder returns rows in the signal's order, ties in input order.
+func inOrder[R any](s *Signal, rows []R) []R {
+	perm, _ := sortRows(s, rows)
+	out := make([]R, len(rows))
+	for i, row := range perm {
+		out[i] = rows[row]
+	}
+	return out
 }

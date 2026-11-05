@@ -1,6 +1,7 @@
 package query
 
 import (
+	"github.com/labstack/fanout/internal/telemetry"
 	"math"
 	"reflect"
 	"strings"
@@ -90,9 +91,7 @@ func TestMetricRateSumsPerSeriesAndIgnoresMissingElapsed(t *testing.T) {
 	if got := metricValues(t, r, "rate"); !reflect.DeepEqual(got, []any{want}) {
 		t.Fatalf("rates=%v", got)
 	}
-	if _, err := db.Exec("DELETE FROM telemetry.metrics"); err != nil {
-		t.Fatal(err)
-	}
+	db.clear()
 	for i := range 2 {
 		m := metricCounter(fixtureStart.Add(time.Duration(i)*time.Minute), 12)
 		m.Temporality = "delta"
@@ -118,10 +117,12 @@ func TestMetricMeasuresRespectKindsAndSeriesWeight(t *testing.T) {
 				if kind == "gauge" || kind == "summary" {
 					m.Type = kind
 					m.Temporality = ""
-					m.Monotonic = false
+				}
+				if kind == "summary" {
+					m.Quantiles, m.QuantileValues = []float64{}, []float64{}
 				}
 				if kind == "updown" {
-					m.Monotonic = false
+					m.Type = kind
 				}
 				m.Attributes = map[string]any{"series": p.id}
 				insertMetrics(t, db, m)
@@ -161,18 +162,17 @@ func TestMetricNonValueFieldsKeepPerPointAggregates(t *testing.T) {
 			e, db := metricFixture(t)
 			for i, value := range []float64{10, 30, 100} {
 				m := metricCounter(fixtureStart.Add(time.Duration(i)*time.Second), 999)
-				if kind == "updown" {
-					m.Monotonic = false
-				}
-				if kind != "updown" && kind != "counter" {
-					m.Type = kind
-					m.Monotonic = false
-				}
+				m.Type = kind
 				if kind == "gauge" || kind == "summary" {
 					m.Temporality = ""
 				}
-				m.HistCount, m.HistSum = int64(value), value
-				m.HistBoundsJSON, m.HistCountsJSON = "[10]", "[1,0]"
+				m.Histogram = telemetry.Histogram{Count: uint64(value), Sum: value, HasSum: true}
+				if kind == "histogram" {
+					m.Bounds, m.Counts = []float64{10}, []uint64{1, 0}
+				}
+				if kind == "summary" {
+					m.Quantiles, m.QuantileValues = []float64{}, []float64{}
+				}
 				series := "a"
 				if i == 2 {
 					series = "b"
@@ -182,7 +182,12 @@ func TestMetricNonValueFieldsKeepPerPointAggregates(t *testing.T) {
 			}
 			total, points := 140.0, 3.0
 			wantAverage := total / points
-			for _, field := range []string{"hist_count", "hist_sum", "attributes['value']"} {
+			fields := []string{"attributes['value']"}
+			if kind == "histogram" || kind == "summary" {
+				// Only histogram and summary points carry a count and sum.
+				fields = append(fields, "hist_count", "hist_sum")
+			}
+			for _, field := range fields {
 				for _, tc := range []struct {
 					fn   string
 					want float64
@@ -356,7 +361,7 @@ func TestMetricOtherRecomputesSeriesMeansPercentilesAndDistinctUnion(t *testing.
 				}
 				for i := range n {
 					m := metricCounter(fixtureStart.Add(time.Duration(i)*time.Second), value)
-					m.Type, m.Temporality, m.Monotonic = "gauge", "", false
+					m.Type, m.Temporality = "gauge", ""
 					m.ServiceName = service
 					id := "one"
 					if service == "b" && i > 0 {
@@ -393,8 +398,8 @@ func TestMetricOtherRecomputesSeriesMeansPercentilesAndDistinctUnion(t *testing.
 func TestMetricUndefinedValueKeepsNullWithCompatiblePointMeasure(t *testing.T) {
 	e, db := metricFixture(t)
 	m := metricCounter(fixtureStart, 0)
-	m.Type, m.Monotonic = "histogram", false
-	m.HistBoundsJSON, m.HistCountsJSON = "broken", "broken"
+	m.Type = "histogram"
+	m.Histogram = telemetry.Histogram{Count: 1, Bounds: []float64{10}, Counts: []uint64{1, 0}}
 	insertMetrics(t, db, m)
 	r := runMetricMeasure(t, e, []string{"sum(value)", "count()"}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
 	if r.Status != StatusOK || metricValues(t, r, "sum")[0] != nil || metricValues(t, r, "count")[0] != 1.0 {
@@ -410,7 +415,7 @@ func TestMetricNonValueLastIgnoresLaterInvalidSample(t *testing.T) {
 	e, db := metricFixture(t)
 	for i, v := range []float64{10, 30, math.NaN()} {
 		m := metricCounter(fixtureStart.Add(time.Duration(i)*time.Second), v)
-		m.HistSum = v
+		m.Sum, m.HasSum = v, true
 		m.ServiceName = "a"
 		if i == 1 {
 			m.ServiceName = "b"
@@ -434,7 +439,7 @@ func TestMetricKindsAreSelectedBeforeSeriesWindows(t *testing.T) {
 	} {
 		m := metricCounter(fixtureStart.Add(time.Duration(p.seconds)*time.Second), p.value)
 		if p.gauge {
-			m.Type, m.Monotonic, m.Temporality = "gauge", false, ""
+			m.Type, m.Temporality = "gauge", ""
 		}
 		insertMetrics(t, db, m)
 	}
@@ -447,7 +452,7 @@ func TestMetricKindsAreSelectedBeforeSeriesWindows(t *testing.T) {
 func TestMetricEmptyNumericListsReturnNull(t *testing.T) {
 	e, db := metricFixture(t)
 	m := metricCounter(fixtureStart, 1)
-	m.HistSum = math.NaN()
+	m.Sum, m.HasSum = math.NaN(), true
 	insertMetrics(t, db, m)
 	for _, measure := range []string{"avg(hist_sum)", "sum(hist_sum)", "min(hist_sum)", "max(hist_sum)", "p95(hist_sum)", "last(hist_sum)"} {
 		r := runMetricMeasure(t, e, []string{measure}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
@@ -476,7 +481,7 @@ func TestMetricTableTrendShareUsesCompleteScopeBeforeDisplayedTuples(t *testing.
 	for i, service := range []string{"a", "a", "b"} {
 		m := metricCounter(fixtureStart.Add(time.Duration(i)*time.Second), 10)
 		m.ServiceName = service
-		m.Type, m.Monotonic, m.Temporality = "gauge", false, ""
+		m.Type, m.Temporality = "gauge", ""
 		insertMetrics(t, db, m)
 	}
 	r := runMetricPanel(t, e, Panel{Viz: "table", Options: &Options{Columns: []ColumnFormat{{Field: "portion", Format: "sparkline"}}}, Query: &Spec{
@@ -550,7 +555,7 @@ func TestMetricPointOnlyMeasuresSkipLookback(t *testing.T) {
 		value  float64
 	}{{-time.Nanosecond, 9999}, {0, 10}, {30 * time.Second, 30}} {
 		m := metricCounter(fixtureStart.Add(p.offset), p.value)
-		m.Type, m.Monotonic, m.Temporality = "gauge", false, ""
+		m.Type, m.Temporality = "gauge", ""
 		insertMetrics(t, db, m)
 	}
 	r := runMetricMeasure(t, e, []string{"sum(value)", "avg(value)", "min(value)", "max(value)", "p95(value)"}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
@@ -572,13 +577,13 @@ func TestMetricMultiDayBucketsAndTableTrendsUseEpochOrigin(t *testing.T) {
 	e, db := metricFixture(t)
 	for i, value := range []float64{10, 20, 30} {
 		m := metricCounter(fixtureStart.Add(time.Duration(i)*48*time.Hour), value)
-		m.Type, m.Monotonic, m.Temporality = "gauge", false, ""
+		m.Type, m.Temporality = "gauge", ""
 		insertMetrics(t, db, m)
 	}
 	p := Panel{ID: "m", Title: "Metric", Viz: "table", Query: &Spec{From: "metrics", Where: []string{"name='net'"}, By: []string{"service"}, Measures: []string{"avg(value)"}}, Options: &Options{Columns: []ColumnFormat{{Field: "avg", Format: "sparkline"}}}}
 	d := Dashboard{Name: "Metrics", Panels: []Panel{p}}
 	Normalize(&d)
-	checked, problems, err := Check(t.Context(), e.engine, &d)
+	checked, problems, err := checkWith(t.Context(), e.engine, &d, nil)
 	if err != nil || len(problems) > 0 {
 		t.Fatalf("check: %v %v", err, problems)
 	}

@@ -15,8 +15,8 @@ import (
 //
 // It was written once, on the first boot into an empty data directory, and
 // never revisited. Every deployment since has been reading the column list of
-// whichever build happened to create the directory. Adding a column to
-// spanParquetRow would have shipped a binary whose views cannot bind it --
+// whichever build happened to create the directory. Adding a span column
+// would have shipped a binary whose views cannot bind it --
 // CreateViews fails, NewDuck returns an error, the process does not start, and
 // restarting does not help because the stale file is still there.
 //
@@ -46,7 +46,7 @@ func TestSchemaBatchTracksTheRunningBinary(t *testing.T) {
 	if err := os.Remove(spansFile); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeTypedParquet(spansFile, []oldSpanRow{}, parquetPageSize); err != nil {
+	if err := parquet.WriteFile(spansFile, []oldSpanRow{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := parquetColumns(t, spansFile); len(got) != 3 {

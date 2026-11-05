@@ -13,9 +13,10 @@ Everything Fanout persists lives under `FANOUT_DATA_DIR` (`./data` by default,
 
 | Path | Holds |
 |---|---|
-| `telemetry/parquet/batches/*.batch/` | Authoritative atomic batches containing `metadata.json`, present signal Parquet files, and `trace.fidx` when spans are present |
+| `telemetry/parquet/batches/*.batch/` | Authoritative atomic batches containing `metadata.json`, present signal Parquet files, and `trace.fidx` when spans are present. A compacted batch also lists the inputs it replaced in `replaces.json`; those inputs are no longer authoritative and keep their directories only until readers that captured them finish |
 | `telemetry/parquet/batches/_schema.batch/` | Empty schema anchors that keep every DuckDB view queryable |
-| `telemetry/parquet/batches/*.retired-*/` | Compaction inputs retained temporarily for crash rollback; a live marker protects its own set |
+| `telemetry/parquet/batches/*.retired/` | Replaced or expired batches being deleted; startup removes any left by a crash |
+| `telemetry/parquet/batches/*.retired-*/` | Compaction inputs from releases before deferred deletion; a live marker protects its own set |
 | `telemetry/parquet/batches/*.quarantined-*/` | Unreadable batches explicitly set aside by `fanout repair quarantine`; preserved but not queryable |
 | `telemetry/parquet/staging/` | Unacknowledged writes being prepared for atomic publication |
 | `telemetry/compaction/` | Prepared replacement batches during compaction |
@@ -56,7 +57,8 @@ disk causes the query to fail.
 ## Sizing
 
 `FANOUT_RETENTION_DAYS` controls retention, with expiry applied on
-the maintenance cycle rather than the moment you change it. File count matters
+the maintenance cycle rather than the moment you change it. Expiry removes whole
+files, so data can stay up to one day past the retention period. File count matters
 as much as byte count for query latency, which is what the compaction pass exists to
 bound. [Tune retention](/docs/guides/retention) covers both.
 

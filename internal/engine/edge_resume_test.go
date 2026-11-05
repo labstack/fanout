@@ -46,7 +46,7 @@ func TestEdgeResumeSetupIsLinearAcrossRestart(t *testing.T) {
 			}
 			// Only discovery uses ingestion stamps. Count actual source-row
 			// evaluations there, rather than timing the drain or inspecting SQL.
-			view := strings.Replace(viewSpans, "  ingested_unix_nano,", "  CASE WHEN nextval('edge_setup_reads')>0 THEN ingested_unix_nano END AS ingested_unix_nano,", 1)
+			view := strings.Replace(createView("spans"), "  ingested_unix_nano,", "  CASE WHEN nextval('edge_setup_reads')>0 THEN ingested_unix_nano END AS ingested_unix_nano,", 1)
 			if _, err := db.Exec(view); err != nil {
 				t.Fatal(err)
 			}

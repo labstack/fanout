@@ -17,7 +17,7 @@ The release packages include the browser assets and embedded databases.
   <TabItem label="Docker">
 
 ```sh
-docker run -d --name fanout \
+docker run -d --name fanout --restart unless-stopped \
   -p 7520:7520 \
   -v fanout-data:/var/lib/fanout/data \
   -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \

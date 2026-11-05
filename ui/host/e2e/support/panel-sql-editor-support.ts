@@ -30,8 +30,8 @@ export async function openSqlDashboard(page: Page, request: APIRequestContext, i
 
 export async function openSqlEditor(page: Page) {
   await page.locator('.mantine-Paper-root[data-panel="sql_count"]').getByRole("button", { name: "SQL requests menu", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Edit SQL", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Edit SQL · SQL requests" });
+  await page.getByRole("menuitem", { name: "Edit panel", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Edit panel · SQL requests" });
   await expect(dialog.getByRole("textbox", { name: "Panel SQL" })).toBeVisible();
   return dialog;
 }

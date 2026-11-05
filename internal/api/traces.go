@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/observability"
+	"github.com/labstack/fanout/internal/query"
 	"net/http"
 	"strconv"
 	"strings"
@@ -44,16 +45,18 @@ func (h *TraceHandler) get(c *echo.Context) error {
 			return bad()
 		}
 	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(resultContext(c), 20*time.Second)
 	defer cancel()
 	out, err := h.queries.Trace(ctx, observability.Scope{Start: from.UTC(), End: to.UTC(), Namespace: namespace}, id, "", limit)
 	if err != nil {
-		return traceError(err)
+		return traceError(c, err)
 	}
 	return c.JSON(http.StatusOK, out)
 }
-func traceError(err error) error {
+func traceError(c *echo.Context, err error) error {
 	switch {
+	case errors.Is(err, query.ErrBusy):
+		return busyError(c)
 	case errors.Is(err, observability.ErrInvalidScope), errors.Is(err, observability.ErrInvalidLimit):
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid trace scope").Wrap(err)
 	case errors.Is(err, context.DeadlineExceeded):

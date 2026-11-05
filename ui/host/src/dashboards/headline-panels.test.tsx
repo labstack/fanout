@@ -59,11 +59,11 @@ describe("headline panel views", () => {
   });
   it.each([
     [{ ...panel, viz: "bar", click: { set_variable: "route" }, drill: undefined }, "click to filter by route"],
-    [{ ...panel, viz: "table", sql: "SELECT 1", query: undefined }, "click to open trace"],
+    [{ ...panel, viz: "table", sql: "SELECT 1", query: undefined }, "click for exemplar traces"],
     [{ ...panel, viz: "logs", query: { from: "logs" }, drill: undefined }, ""],
   ] as [Panel, string][])("uses the interaction hint for %s", async (p, hint) => {
     const host = await render(p); expect(host.querySelector('[data-panel-hint]')).toBeNull(); if(hint) expect(host.querySelector('[data-panel-subtitle]')?.textContent).toContain(hint);
-    if (p.sql) expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("table · click to open trace");
+    if (p.sql) expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("table · click for exemplar traces");
   });
 });
 

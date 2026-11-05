@@ -122,7 +122,7 @@ func (e *Executor) attachTableTrends(ctx context.Context, p *Panel, checked *Che
 		text = "WITH _trend_scope AS (SELECT * FROM " + structuredSource(sig.name) + " WHERE " + originalWhere + "), _trend_totals AS (SELECT " + bucket + " AS _trend_bucket,count(*) AS _trend_total FROM _trend_scope GROUP BY 1) SELECT " + strings.Join(selects, ",") + " FROM _trend_scope JOIN _trend_totals ON " + bucket + "=_trend_bucket WHERE " + tupleWhere + " GROUP BY " + strings.Join(groups, ",") + fmt.Sprintf(" ORDER BY _t DESC LIMIT %d", limit+1)
 	}
 
-	if sig.name == "metrics" {
+	if sig.name == "metrics" || scope.Rollup {
 		clone, query := *p, *p.Query
 		clone.Query = &query
 		query.Measures = nil
@@ -135,7 +135,8 @@ func (e *Executor) attachTableTrends(ctx context.Context, p *Panel, checked *Che
 		}
 		trendScope := scope
 		trendScope.Interval = interval
-		compiled, err := compileMetricQuery(&clone, selected, checked.Filters[p.ID], trendScope)
+		trendScope.NoTop = true
+		compiled, err := compileQuery(&clone, selected, checked.Filters[p.ID], trendScope)
 		if err != nil {
 			return err
 		}

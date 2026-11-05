@@ -37,16 +37,16 @@ var lowerFixtures = []struct{ text, sql string }{
 	{`spans where a:1 or c:3`, `(attributes['a'] = 1 OR attributes['c'] = 3)`},
 	{`spans where (a:1 b:2) or c:3`, `((attributes['a'] = 1 AND attributes['b'] = 2) OR attributes['c'] = 3)`},
 	{`spans where (a:1 b:2)`, `(attributes['a'] = 1 AND attributes['b'] = 2)`},
-	{`spans where -http_status_code>=500`, `NOT coalesce((TRY_CAST(http_status_code AS INTEGER) >= 500), FALSE)`},
-	{`spans where -starts_with(http_route, "/api")`, `NOT coalesce((starts_with(http_route, '/api')), FALSE)`},
+	{`spans where -http.response.status_code>=500`, `NOT coalesce((attributes['http.response.status_code'] >= 500), FALSE)`},
+	{`spans where -starts_with(operation, "/api")`, `NOT coalesce((starts_with(operation, '/api')), FALSE)`},
 	{"logs where -`coalesce(body, '') = ''`", `NOT coalesce((coalesce(body, '') = ''), FALSE)`},
 	{"logs where `coalesce(body, '``') = ''`", "coalesce(body, '`') = ''"},
 	{`spans where HTTP.Target:x`, `attributes['HTTP.Target'] = 'x'`},
 	{`logs where length(body) > 1000`, `length(body) > 1000`},
 	{`spans where k:*`, `attributes['k'] IS NOT NULL`},
 	{`spans where -user.id:*`, `attributes['user.id'] IS NULL`},
-	{`spans where http_status_code>=500`, `TRY_CAST(http_status_code AS INTEGER) >= 500`},
-	{`spans where http_status_code:500`, `http_status_code = '500'`},
+	{`spans where http.response.status_code>=500`, `attributes['http.response.status_code'] >= 500`},
+	{`spans where operation:500`, `operation = '500'`},
 	{`spans where start_time>"2026-10-29T10:00:00Z"`, `start_time > '2026-10-29T10:00:00Z'::TIMESTAMPTZ_NS`},
 	{`logs where severity>=warn`, `severity IN ('WARN', 'ERROR', 'FATAL')`},
 	{`logs where severity<error`, `severity IN ('TRACE', 'DEBUG', 'INFO', 'WARN')`},
@@ -54,10 +54,10 @@ var lowerFixtures = []struct{ text, sql string }{
 	{`logs where severity:warning`, `severity = 'WARN'`},
 	{`logs where severity:"error"`, `severity = 'error'`},
 	{`logs where severity_number>=14`, `severity_number >= 14`},
-	{`spans where -http_status_code between 400 and 599`, `NOT coalesce((TRY_CAST(http_status_code AS INTEGER) BETWEEN 400 AND 599), FALSE)`},
-	{`spans where http_status_code not between 400 and 599`, `TRY_CAST(http_status_code AS INTEGER) NOT BETWEEN 400 AND 599`},
-	{`spans where -http_status_code not between 400 and 599`, `NOT coalesce((TRY_CAST(http_status_code AS INTEGER) NOT BETWEEN 400 AND 599), FALSE)`},
-	{`spans where -http_status_code:500`, `(http_status_code IS NULL OR http_status_code != '500')`},
+	{`spans where -http.response.status_code between 400 and 599`, `NOT coalesce((attributes['http.response.status_code'] BETWEEN 400 AND 599), FALSE)`},
+	{`spans where http.response.status_code not between 400 and 599`, `attributes['http.response.status_code'] NOT BETWEEN 400 AND 599`},
+	{`spans where -http.response.status_code not between 400 and 599`, `NOT coalesce((attributes['http.response.status_code'] NOT BETWEEN 400 AND 599), FALSE)`},
+	{`spans where -http.response.status_code:500`, `(attributes['http.response.status_code'] IS NULL OR attributes['http.response.status_code'] != 500)`},
 	{`spans where -service not in (a, b)`, `(service IS NULL OR service IN ('a', 'b'))`},
 	{`spans where -service!=api`, `(service IS NULL OR service = 'api')`},
 	{`logs where -body not like "GET %"`, `(body IS NULL OR body ~~ 'GET %')`},
@@ -165,11 +165,11 @@ func TestLowerPositiveFixtures(t *testing.T) {
 var glanceExamples = []string{
 	`spans where kind:server | error_rate() by service every 1m`,
 	`spans where service:checkout duration>500ms sort duration limit 50`,
-	`spans where service:$service (status:error or status:unset) | count() by http_route`,
-	`spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route`,
+	`spans where service:$service (status:error or status:unset) | count() by http.route`,
+	`spans where kind:server | count_if(http.response.status_code>=500) / count() * 100 as pct_5xx by http.route`,
 	`spans where kind:server | (count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex`,
 	`spans | histogram(duration) by service`,
-	`spans where service:checkout status:error -http.target:/healthz | count() by http_route`,
+	`spans where service:checkout status:error -url.path:/healthz | count() by http.route`,
 	`spans where user.id:* | count_distinct(user.id) by service`,
 	`logs where service:api severity:error timeout sort time limit 200`,
 	`logs where severity>=warn | count() by body_template sort count limit 10`,
@@ -242,7 +242,7 @@ func TestLowerCanonicalWhereIsIrrelevantToMeaning(t *testing.T) {
 	}
 }
 func TestCompileReturnsNoQueryOnProblems(t *testing.T) {
-	c, ps := Compile("spans where a:1 b:2 or c:3 | p99(duration) by http_route every 1m", Options{})
+	c, ps := Compile("spans where a:1 b:2 or c:3 | p99(duration) by http.route every 1m", Options{})
 	if c != nil || len(ps) != 1 {
 		t.Fatal(c, ps)
 	}

@@ -45,8 +45,8 @@ func TestEdgeRollupPlanUsesHashJoins(t *testing.T) {
 			t.Errorf("edge rollup plans a %s; the span joins must stay hash joins:\n%s", bad, shippedPlan)
 		}
 	}
-	if !strings.Contains(strings.ToUpper(parentPlan), "SEMI") {
-		t.Errorf("edge rollup lost the child-trace semi-join:\n%s", parentPlan)
+	if !strings.Contains(strings.ToUpper(parentPlan), "MARK") {
+		t.Errorf("edge rollup lost the child-trace mark join:\n%s", parentPlan)
 	}
 	if !strings.Contains(shippedPlan, "Hash Join") {
 		t.Errorf("edge rollup plans no HASH_JOIN at all:\n%s", shippedPlan)
@@ -129,6 +129,7 @@ func seedEdgeRollupFixture(t *testing.T, db *sql.DB) {
 		namespace TEXT, trace_id TEXT, span_id TEXT, parent_span_id TEXT,
 		service TEXT, kind TEXT, status TEXT, duration_ms DOUBLE,
 		start_time TIMESTAMP, ingested_unix_nano BIGINT, attributes VARIANT,
+ peer_service VARCHAR GENERATED ALWAYS AS (TRY_CAST(attributes['peer.service'] AS VARCHAR)),
  messaging_system VARCHAR GENERATED ALWAYS AS (TRY_CAST(attributes['messaging.system'] AS VARCHAR)),
  messaging_destination VARCHAR GENERATED ALWAYS AS (TRY_CAST(attributes['messaging.destination.name'] AS VARCHAR))
 	)`); err != nil {
@@ -196,7 +197,7 @@ func TestEdgeRollupParentTraceScope(t *testing.T) {
 	}
 	if _, err := db.Exec(`CREATE TABLE spans AS
  SELECT namespace,trace_id,span_id,parent_span_id,service,kind,status,duration_ms,
- start_time::TIMESTAMPTZ_NS start_time,ingested_unix_nano,NULL::VARCHAR messaging_system,NULL::VARCHAR messaging_destination
+ start_time::TIMESTAMPTZ_NS start_time,ingested_unix_nano,NULL::VARCHAR peer_service,NULL::VARCHAR messaging_system,NULL::VARCHAR messaging_destination
  FROM (VALUES
  ('shop','trace','parent','','upstream','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:30:00',1),
  ('other','trace','parent','','wrong-namespace','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:30:00',1),
@@ -289,7 +290,7 @@ func TestEdgeRollupDistantParentPreservesNearParentMultiplicity(t *testing.T) {
 	}
 	if _, err := db.Exec(`CREATE TABLE spans AS
  SELECT namespace,trace_id,span_id,parent_span_id,service,kind,status,duration_ms,
- start_time::TIMESTAMPTZ_NS start_time,ingested_unix_nano,NULL::VARCHAR messaging_system,NULL::VARCHAR messaging_destination
+ start_time::TIMESTAMPTZ_NS start_time,ingested_unix_nano,NULL::VARCHAR peer_service,NULL::VARCHAR messaging_system,NULL::VARCHAR messaging_destination
  FROM (VALUES
  ('ns','trace','far','','upstream','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:30:00',1),
  ('ns','trace','near','','upstream','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:55:00',1),

@@ -34,7 +34,7 @@ func TestConfidenceRankingEngine(t *testing.T) {
 				status = "STATUS_CODE_ERROR"
 			}
 			id := fmt.Sprintf("%s-%s-%d", route, service, i)
-			spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: service, TraceID: id, SpanID: id, HTTPRoute: route, Kind: "SPAN_KIND_SERVER", StatusCode: status, StartUnixNanos: fixtureStart.UnixNano(), EndUnixNanos: fixtureStart.UnixNano() + int64(latency*1e6), DurationMS: latency})
+			spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: service, TraceID: id, SpanID: id, Attributes: map[string]any{"http.route": route}, Kind: "SPAN_KIND_SERVER", StatusCode: status, StartUnixNanos: fixtureStart.UnixNano(), EndUnixNanos: fixtureStart.UnixNano() + int64(latency*1e6), DurationMS: latency})
 		}
 	}
 	add("/rates", "A", 2, 1, 1)
@@ -55,11 +55,11 @@ func TestConfidenceRankingEngine(t *testing.T) {
 	// Twenty rows with only three actual numeric samples remain ineligible.
 	add("/nullable", "outlier", 20, 0, 10000)
 	for i := len(spans) - 20; i < len(spans)-17; i++ {
-		spans[i].Attributes = map[string]any{"latency": 10000.0}
+		spans[i].Attributes["latency"] = 10000.0
 	}
 	add("/nullable", "eligible", 20, 0, 100)
 	for i := len(spans) - 20; i < len(spans); i++ {
-		spans[i].Attributes = map[string]any{"latency": 100.0}
+		spans[i].Attributes["latency"] = 100.0
 	}
 	commit(t, repo, spans, nil)
 	counter := &confidenceCounter{Engine: duck}
@@ -70,23 +70,23 @@ func TestConfidenceRankingEngine(t *testing.T) {
 		top                          int
 		kept                         []string
 	}{
-		{"tiny rate folded", "error_rate()", "http_route = '/rates'", "", 3, []string{"B", "C", "D"}},
-		{"low volume real failure", "error_rate()", "http_route IN ('/low', '/rates') AND service NOT IN ('A','B','C')", "", 1, []string{"low"}},
-		{"Wilson beats raw fraction", "error_rate()", "http_route = '/wilson'", "", 1, []string{"busy"}},
-		{"volume unchanged", "count()", "http_route = '/rates'", "higher", 3, []string{"B", "D", "E"}},
-		{"rate unchanged", "rate()", "http_route = '/rates'", "", 3, []string{"B", "D", "E"}},
-		{"share unchanged", "share()", "http_route = '/rates'", "higher", 3, []string{"B", "D", "E"}},
-		{"sum unchanged", "sum(duration_ms)", "http_route = '/rates'", "higher", 3, []string{"B", "D", "E"}},
-		{"ineligible ordered by samples", "p95(duration_ms)", "http_route = '/latency' AND service IN ('nineteen','outlier')", "", 1, []string{"nineteen"}},
-		{"nullable samples", "avg(attributes['latency'])", "http_route = '/nullable'", "", 1, []string{"eligible"}},
-		{"higher better preserved", "avg(duration_ms)", "http_route = '/latency'", "higher", 1, []string{"eligible-d"}},
+		{"tiny rate folded", "error_rate()", "attributes['http.route'] = '/rates'", "", 3, []string{"B", "C", "D"}},
+		{"low volume real failure", "error_rate()", "attributes['http.route'] IN ('/low', '/rates') AND service NOT IN ('A','B','C')", "", 1, []string{"low"}},
+		{"Wilson beats raw fraction", "error_rate()", "attributes['http.route'] = '/wilson'", "", 1, []string{"busy"}},
+		{"volume unchanged", "count()", "attributes['http.route'] = '/rates'", "higher", 3, []string{"B", "D", "E"}},
+		{"rate unchanged", "rate()", "attributes['http.route'] = '/rates'", "", 3, []string{"B", "D", "E"}},
+		{"share unchanged", "share()", "attributes['http.route'] = '/rates'", "higher", 3, []string{"B", "D", "E"}},
+		{"sum unchanged", "sum(duration_ms)", "attributes['http.route'] = '/rates'", "higher", 3, []string{"B", "D", "E"}},
+		{"ineligible ordered by samples", "p95(duration_ms)", "attributes['http.route'] = '/latency' AND service IN ('nineteen','outlier')", "", 1, []string{"nineteen"}},
+		{"nullable samples", "avg(attributes['latency'])", "attributes['http.route'] = '/nullable'", "", 1, []string{"eligible"}},
+		{"higher better preserved", "avg(duration_ms)", "attributes['http.route'] = '/latency'", "higher", 1, []string{"eligible-d"}},
 	}
 	for _, measure := range []string{"p50(duration_ms)", "p75(duration_ms)", "p90(duration_ms)", "p95(duration_ms)", "p99(duration_ms)", "quantile(duration_ms, 0.999)", "avg(duration_ms)", "max(duration_ms)", "min(duration_ms)"} {
 		cases = append(cases, struct {
 			name, measure, where, better string
 			top                          int
 			kept                         []string
-		}{measure, measure, "http_route = '/latency'", "", 3, []string{"eligible-a", "eligible-b", "eligible-c"}})
+		}{measure, measure, "attributes['http.route'] = '/latency'", "", 3, []string{"eligible-a", "eligible-b", "eligible-c"}})
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

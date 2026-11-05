@@ -97,9 +97,9 @@ func TestLiftStoredSQLShapes(t *testing.T) {
 		{"logs", `body !~~ 'x%'`, `body not like "x%"`, "exact"},
 		{"spans", `service NOT IN ('a', 'b')`, `service not in (a, b)`, "exact"},
 		{"spans", `NOT coalesce((attributes['k'] = 'v'), FALSE)`, "`NOT coalesce((attributes['k'] = 'v'), FALSE)`", "exact"},
-		{"spans", `NOT coalesce((TRY_CAST(http_status_code AS INTEGER) BETWEEN 400 AND 599), FALSE)`, `-http_status_code between 400 and 599`, "exact"},
+		{"spans", `NOT coalesce((attributes['http.response.status_code'] BETWEEN 400 AND 599), FALSE)`, `-http.response.status_code between 400 and 599`, "exact"},
 		{"spans", `(service IS NULL OR service IN ('a', 'b'))`, `-service not in (a, b)`, "exact"},
-		{"spans", `TRY_CAST(http_status_code AS INTEGER) >= 500`, `http_status_code>=500`, "exact"},
+		{"spans", `attributes['http.response.status_code'] >= 500`, `http.response.status_code>=500`, "exact"},
 		{"logs", `severity IN ('WARN', 'ERROR', 'FATAL')`, `severity>=warn`, "exact"},
 		{"logs", `severity IN ('INFO', 'ERROR')`, `severity in (info, error)`, "exact"},
 		{"logs", `severity IN ('INFO', 'WARN', 'ERROR')`, `severity between info and error`, "exact"},
@@ -109,7 +109,7 @@ func TestLiftStoredSQLShapes(t *testing.T) {
 		{"spans", `service IN $svcs`, `service in $svcs`, "exact"},
 		{"spans", `service = $service`, `service:$service`, "exact"},
 		{"spans", `lower(operation) = 'v'`, "`lower(operation) = 'v'`", "exact"},
-		{"spans", `starts_with(http_route, '/api')`, `starts_with(http_route, "/api")`, "exact"},
+		{"spans", `starts_with(operation, '/api')`, `starts_with(operation, "/api")`, "exact"},
 		{"logs", `length(body) > 1000`, `length(body)>1000`, "exact"},
 		{"spans", `service = $service AND status = 'STATUS_CODE_ERROR'`, `(service:$service status:error)`, "normalized"},
 	} {
@@ -148,6 +148,12 @@ func TestLiftStoredSQLShapes(t *testing.T) {
 	f, ps, err := Format(t.Context(), d, q, Options{})
 	if err != nil || len(ps) > 0 || f.Text != `spans where (attributes['a']:1 or attributes['b']:2) service:api` {
 		t.Fatalf("entry grouping: %+v %+v %v", f, ps, err)
+	}
+	// The notice quotes the entry as the text shows it, parentheses included.
+	q = query.Spec{From: "spans", Where: []string{`service='a' OR service='b'`, `status = 'STATUS_CODE_ERROR'`}}
+	f, ps, err = Format(t.Context(), d, q, Options{})
+	if err != nil || len(ps) > 0 || len(f.Notices) != 1 || f.Notices[0].Message != `where[0] is shown as (service:a or service:b); stored text is "service='a' OR service='b'"` {
+		t.Fatalf("grouped notice: %+v %+v %v", f, ps, err)
 	}
 }
 
@@ -359,7 +365,7 @@ func TestFormatOwnLiteralSpellingsAreFixedPoints(t *testing.T) {
 		`logs where severity:"error"`,
 		`metrics where type:COUNTER | count()`,
 		`metrics where type:"counter" | count()`,
-		`spans where http_status_code:2e3`,
+		`spans where operation:2e3`,
 		`logs where service:"TRUE"`,
 		`spans | count(*)`,
 		`logs where severity:14`,
@@ -429,5 +435,19 @@ func TestCompileAndFormatReturnNonNilEmptyNotices(t *testing.T) {
 	f, ps, err := Format(t.Context(), &countingParser{fail: true}, c.Query, Options{})
 	if err != nil || len(ps) != 0 || f == nil || f.Notices == nil || len(f.Notices) != 0 {
 		t.Fatalf("format notices: %+v, %+v, %v", f, ps, err)
+	}
+}
+
+func TestFormatLabelsEachEntryAsFanQL(t *testing.T) {
+	stored := query.Spec{From: "spans", Where: []string{`contains(lower(operation), lower('se'))`, `status = 'STATUS_CODE_ERROR'`, `duration_ms > 100`}, Measures: []string{`count_if(status = 'STATUS_CODE_ERROR')`, `count()`}}
+	f, problems, err := Format(t.Context(), &countingParser{fail: true}, stored, Options{})
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("format: %+v %v", problems, err)
+	}
+	if want := []string{`se`, `status:error`, `duration>100ms`}; !reflect.DeepEqual(f.Where, want) {
+		t.Fatalf("where = %q, want %q", f.Where, want)
+	}
+	if want := []string{`count_if(status:error)`, `count()`}; !reflect.DeepEqual(f.Measures, want) {
+		t.Fatalf("measures = %q, want %q", f.Measures, want)
 	}
 }

@@ -41,22 +41,22 @@ func TestEventBoundsUsePhysicalNanosecondsAfterReopen(t *testing.T) {
 	if err := json.Unmarshal(metadata, &fields); err != nil {
 		t.Fatal(err)
 	}
-	if fields["version"] != float64(4) || fields["SpanTime"] != nil {
+	if fields["version"] != float64(5) || fields["SpanTime"] != nil {
 		t.Fatalf("format changed: %s", metadata)
 	}
 }
 func TestEventBoundsRequireCompleteRowGroupStatistics(t *testing.T) {
-	rows := make([]logParquetRow, parquetRowGroupRows+1)
+	rows := make([]Span, parquetRowGroupRows+1)
 	for i := range rows {
-		rows[i].LogTime = int64(i) - 25000
+		rows[i].StartUnixNanos = int64(i) - 25000
 	}
 	for _, missing := range []bool{false, true} {
-		path := filepath.Join(t.TempDir(), "logs.parquet")
+		path := filepath.Join(t.TempDir(), "spans.parquet")
 		options := []parquet.WriterOption{}
 		if missing {
-			options = append(options, parquet.SkipPageBounds("log_time"))
+			options = append(options, parquet.SkipPageBounds("start_time"))
 		}
-		if err := writeTypedParquet(path, rows, parquetPageSize, options...); err != nil {
+		if err := writeParquet(path, Spans, rows, parquetPageSize, options...); err != nil {
 			t.Fatal(err)
 		}
 		f, err := os.Open(path)
@@ -68,7 +68,7 @@ func TestEventBoundsRequireCompleteRowGroupStatistics(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bounds := parquetTimeRange(file, "log_time")
+		bounds := parquetTimeRange(file, "start_time")
 		f.Close()
 		if missing {
 			if bounds.Known {

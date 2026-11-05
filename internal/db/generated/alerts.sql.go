@@ -68,6 +68,8 @@ func (q *Queries) DeleteAlertsByRuleIDAndState(ctx context.Context, arg DeleteAl
 
 const getAlert = `-- name: GetAlert :one
 SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at FROM alerts WHERE rule_id = ? AND service = ?
+ORDER BY state IN ('pending', 'firing') DESC, created_at DESC
+LIMIT 1
 `
 
 type GetAlertParams struct {
@@ -77,6 +79,30 @@ type GetAlertParams struct {
 
 func (q *Queries) GetAlert(ctx context.Context, arg GetAlertParams) (Alert, error) {
 	row := q.db.QueryRowContext(ctx, getAlert, arg.RuleID, arg.Service)
+	var i Alert
+	err := row.Scan(
+		&i.ID,
+		&i.RuleID,
+		&i.Service,
+		&i.State,
+		&i.Value,
+		&i.FiredAt,
+		&i.ResolvedAt,
+		&i.RepeatedAt,
+		&i.LastEvaluatedAt,
+		&i.LastDeliveryStatus,
+		&i.LastDeliveryAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAlertByID = `-- name: GetAlertByID :one
+SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at FROM alerts WHERE id = ?
+`
+
+func (q *Queries) GetAlertByID(ctx context.Context, id string) (Alert, error) {
+	row := q.db.QueryRowContext(ctx, getAlertByID, id)
 	var i Alert
 	err := row.Scan(
 		&i.ID,
@@ -256,7 +282,7 @@ func (q *Queries) ListAlertsByState(ctx context.Context, state string) ([]Alert,
 }
 
 const pruneResolved = `-- name: PruneResolved :execresult
-DELETE FROM alerts WHERE state = 'resolved' AND resolved_at < datetime('now', ? || ' days')
+DELETE FROM alerts WHERE state = 'resolved' AND datetime(resolved_at) < datetime('now', ? || ' days')
 `
 
 func (q *Queries) PruneResolved(ctx context.Context, dollar_1 sql.NullString) (sql.Result, error) {
@@ -265,32 +291,26 @@ func (q *Queries) PruneResolved(ctx context.Context, dollar_1 sql.NullString) (s
 
 const updateDeliveryStatus = `-- name: UpdateDeliveryStatus :exec
 UPDATE alerts SET last_delivery_status = ?, last_delivery_at = ?
-WHERE rule_id = ? AND service = ?
+WHERE id = ?
 `
 
 type UpdateDeliveryStatusParams struct {
 	LastDeliveryStatus sql.NullString `json:"last_delivery_status"`
 	LastDeliveryAt     sql.NullString `json:"last_delivery_at"`
-	RuleID             string         `json:"rule_id"`
-	Service            string         `json:"service"`
+	ID                 string         `json:"id"`
 }
 
 func (q *Queries) UpdateDeliveryStatus(ctx context.Context, arg UpdateDeliveryStatusParams) error {
-	_, err := q.db.ExecContext(ctx, updateDeliveryStatus,
-		arg.LastDeliveryStatus,
-		arg.LastDeliveryAt,
-		arg.RuleID,
-		arg.Service,
-	)
+	_, err := q.db.ExecContext(ctx, updateDeliveryStatus, arg.LastDeliveryStatus, arg.LastDeliveryAt, arg.ID)
 	return err
 }
 
 const upsertAlert = `-- name: UpsertAlert :one
 INSERT INTO alerts (
     id, rule_id, service, state, value, fired_at, resolved_at,
-    repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(rule_id, service) DO UPDATE SET
+    repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
     state = excluded.state,
     value = excluded.value,
     fired_at = excluded.fired_at,
@@ -298,7 +318,8 @@ ON CONFLICT(rule_id, service) DO UPDATE SET
     repeated_at = excluded.repeated_at,
     last_evaluated_at = excluded.last_evaluated_at,
     last_delivery_status = excluded.last_delivery_status,
-    last_delivery_at = excluded.last_delivery_at
+    last_delivery_at = excluded.last_delivery_at,
+    created_at = COALESCE(NULLIF(excluded.created_at, ''), alerts.created_at)
 RETURNING id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at
 `
 
@@ -314,6 +335,7 @@ type UpsertAlertParams struct {
 	LastEvaluatedAt    sql.NullString  `json:"last_evaluated_at"`
 	LastDeliveryStatus sql.NullString  `json:"last_delivery_status"`
 	LastDeliveryAt     sql.NullString  `json:"last_delivery_at"`
+	CreatedAt          string          `json:"created_at"`
 }
 
 func (q *Queries) UpsertAlert(ctx context.Context, arg UpsertAlertParams) (Alert, error) {
@@ -329,6 +351,7 @@ func (q *Queries) UpsertAlert(ctx context.Context, arg UpsertAlertParams) (Alert
 		arg.LastEvaluatedAt,
 		arg.LastDeliveryStatus,
 		arg.LastDeliveryAt,
+		arg.CreatedAt,
 	)
 	var i Alert
 	err := row.Scan(

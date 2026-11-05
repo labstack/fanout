@@ -1,7 +1,7 @@
-import { Anchor, Badge, Box, Table, Text, UnstyledButton, useComputedColorScheme } from "@mantine/core";
+import { Anchor, Badge, Box, Button, Group, Table, Text, UnstyledButton, useComputedColorScheme } from "@mantine/core";
 import { CaretDown, CaretUp } from "@phosphor-icons/react";
 import { createSortedRowModel, rowSortingFeature, sortFn_alphanumeric, sortFn_basic, tableFeatures, useTable, type ColumnDef, type SortingState } from "@tanstack/react-table";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { displayLabel } from "../../../../panels/labels";
 import { logConstants, rowModel } from "../../../../panels/rows";
 import type { Selection, Cell, Column, Panel, PanelResult, Unit } from "../../../../panels/types";
@@ -22,7 +22,24 @@ type Row = Cell[];
 
 export type TableCellProps = { column: Column; value: Cell; row: Cell[]; rowIndex: number; columnIndex: number };
 
-export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderCell, traceLinks, foldConstants = true }: { foldConstants?: boolean; traceLinks?: "button"; panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onVariable?: (name: string, value: string) => void; renderCell?: (props: TableCellProps) => ReactNode }) {
+/** Logs and Traces pages render rows a page at a time, show a details row under an expanded log, and offer exclusions. */
+export type RowControls = { page?: number; details?: (row: Record<string, Cell>) => ReactNode; exclude?: (field: "service" | "operation", value: string) => void };
+
+/** Formats that print a number in its unit; the rest print the cell as it came. */
+const unitFormats = new Set(["unit", "bar", "status", "sparkline"]);
+
+/** Cells print each duration in its own unit (10m, 29.5s), so a duration
+ *  column's header names none: "Max (ms)" above "10m" contradicts itself.
+ *  A format that prints the raw value keeps the unit in the header. */
+function columnHeader(column: Column, panel: Panel): string {
+  const label = displayLabel(column, panel);
+  const format = panel.options?.columns?.find(c => c.field === column.name);
+  const unit = format?.unit ?? column.unit ?? panel.unit;
+  const printed = !format || unitFormats.has(format.format);
+  return printed && column.type === "number" && (unit === "ms" || unit === "s" || unit === "ns") ? label.replace(/ \((?:ms|s|ns)\)$/, "") : label;
+}
+
+export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderCell, traceLinks, foldConstants = true, controls }: { foldConstants?: boolean; traceLinks?: "button"; panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onVariable?: (name: string, value: string) => void; renderCell?: (props: TableCellProps) => ReactNode; controls?: RowControls }) {
   const dark=useComputedColorScheme("light")==="dark";
   const traceInteractive = Boolean(onPoint);
   const pointCallback = useRef(onPoint);
@@ -32,7 +49,8 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   const frame = result.frame!;
   const hidden = useMemo(() => new Set((foldConstants ? logConstants(panel,frame) : []).map(c=>c.name)),[panel,frame,foldConstants]);
   const [expanded,setExpanded] = useState<Set<number>>(new Set());
-  useEffect(()=>setExpanded(new Set()),[frame]);
+  const [shown,setShown] = useState(controls?.page ?? Infinity);
+  useEffect(()=>{setExpanded(new Set());setShown(controls?.page ?? Infinity);},[frame,controls?.page]);
   const expandable = (column: Column) => ["body","body_template"].includes(column.name) || panel.options?.columns?.some(c=>c.field===column.name&&c.format==="log_template");
   const canExpand = frame.columns.some(expandable);
   const toggle = (index:number) => setExpanded(old=>{const next=new Set(old);if(next.has(index)) next.delete(index);else next.add(index);return next;});
@@ -42,7 +60,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   const maxima = useMemo(() => frame.columns.map((c, i) => (c.role === "measure" ? Math.max(0, ...frame.values[i].filter((v): v is number => typeof v === "number" && Number.isFinite(v))) : 0)), [frame]);
   const columns = useMemo<ColumnDef<typeof features, Row>[]>(() => frame.columns.map<ColumnDef<typeof features, Row>>((column, index) => ({
     id: column.name,
-    header: displayLabel(column, panel),
+    header: columnHeader(column, panel),
     accessorFn: (row) => row[index],
     cell: (info) => {
       const value = info.getValue() as Cell;
@@ -103,7 +121,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
     : panel.viz === "traces" ? (frame.columns.find(column => column.name === name)?.type === "time" ? 146 : traceWidths[name])
     : panel.viz === "log_patterns" ? ({ severity: 100, service: 140, count: 140, trend: 100 } as Record<string, number>)[name] : undefined;
   const minWidth=panel.viz === "logs" && columns.some(c=>c.id==="body") ? fixedWidths.reduce((sum,n)=>sum+n,0)+Math.max(180,...fixedWidths) : panel.viz === "log_patterns" ? 660 : undefined;
-  return <Box>
+  return <Box className="dashboard-table-box" data-viz={panel.viz}>
     <Table className="dashboard-table" stickyHeader highlightOnHover fz={12} verticalSpacing={6} style={{minWidth, ...(panel.viz === "traces" ? { width: "100%", tableLayout: "auto" } : {}) }}>
       <colgroup>{columns.map(c=><col key={c.id} data-field={c.id} style={{width:columnWidth(c.id!)}} />)}</colgroup>
       <Table.Thead>
@@ -119,7 +137,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
         </Table.Tr>)}
       </Table.Thead>
       <Table.Tbody>
-        {table.getRowModel().rows.map((row) => <Table.Tr key={row.id} data-row-expanded={expanded.has(row.index)} tabIndex={rowInteractive(row.index) || canExpand ? 0 : undefined} style={{ cursor: rowInteractive(row.index) || canExpand ? "pointer" : undefined }}
+        {table.getRowModel().rows.slice(0, shown).map((row) => <Fragment key={row.id}><Table.Tr data-row-expanded={expanded.has(row.index)} aria-expanded={controls?.details ? expanded.has(row.index) : undefined} tabIndex={rowInteractive(row.index) || canExpand ? 0 : undefined} style={{ cursor: rowInteractive(row.index) || canExpand ? "pointer" : undefined }}
           onClick={event => { if ((event.target as Element).closest("a,button")) return; if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); }}
           onKeyDown={event => { if ((!rowInteractive(row.index)&&!canExpand) || (event.target as Element).closest("a,button")) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); } }}>
           {row.getAllCells().map(cell => {
@@ -128,9 +146,17 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
               {expandable(column) ? <div data-row-text style={{display:expanded.has(row.index)?"block":"-webkit-box",WebkitLineClamp:expanded.has(row.index)?undefined:2,WebkitBoxOrient:"vertical",maxHeight:expanded.has(row.index)?undefined:36,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"normal",overflowWrap:"anywhere",lineHeight:"18px"}}><table.FlexRender cell={cell}/></div> : <table.FlexRender cell={cell}/>}
             </Table.Td>;
           })}
-        </Table.Tr>)}
+        </Table.Tr>
+        {controls?.details && expanded.has(row.index) && <Table.Tr data-row-details><Table.Td colSpan={columns.length} style={{ whiteSpace: "normal" }}>
+          {controls.details(Object.fromEntries(frame.columns.map((column, index) => [column.name, row.original[index]])))}
+        </Table.Td></Table.Tr>}
+        </Fragment>)}
       </Table.Tbody>
     </Table>
+    {frame.rows > shown && <Group justify="space-between" py="xs" data-row-pager>
+      <Text fz={12} c="dimmed">Showing {shown.toLocaleString()} of {frame.rows.toLocaleString()} rows</Text>
+      <Button size="compact-sm" variant="default" onClick={() => setShown(shown + (controls?.page ?? frame.rows))}>Show {Math.min(controls?.page ?? frame.rows, frame.rows - shown).toLocaleString()} more</Button>
+    </Group>}
     {(panel.options?.columns??[]).some(c=>!frame.columns.some(column=>column.name===c.field))&&<Text fz={12} c="dimmed" role="status">Column formats unavailable: {(panel.options?.columns??[]).filter(c=>!frame.columns.some(column=>column.name===c.field)).map(c=>displayLabel(c.field, panel)).join(", ")}</Text>}
   </Box>;
 }

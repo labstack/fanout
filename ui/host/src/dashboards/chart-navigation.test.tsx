@@ -40,6 +40,13 @@ async function mount(next=option,fullscreen=false) {
   };
   return {el,surface,draw,focus,click,zoom,close,pending};
 }
+it("offers Enter only when a point opens something",async()=>{
+  const el=document.createElement("div");document.body.append(el);const root=createRoot(el);cleanups.push(()=>root.unmount());
+  await act(async()=>root.render(<MantineProvider><EChartCanvas option={option} height={200} label="Requests" keyboard={{}}/></MantineProvider>));
+  const plot=el.querySelector<HTMLElement>("[data-chart-plot]")!;await act(async()=>plot.focus());
+  expect(el.textContent).toContain("←→ points · ↑↓ series");
+  expect(el.textContent).not.toContain("drill");
+});
 it("makes the plot the only chart tab stop and shows its exact hint only on focus",async()=>{
   const view=await mount();
   const plot=await view.focus();expect(plot.tabIndex).toBe(0);
@@ -150,7 +157,7 @@ it("replaces the subtitle interaction hint without covering the legend and uses 
   const el=document.createElement("div");document.body.append(el);const root=createRoot(el);cleanups.push(()=>root.unmount());
   const panel:Panel={id:"p",title:"Requests",viz:"timeseries",query:{from:"spans"},drill:"traces"};
   const result={id:"p",status:"ok" as const,elapsed_ms:0,from_ms:1000,to_ms:5000,interval:"1s",frame:{columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"count",type:"number" as const,role:"measure" as const}],values:[[1000,2000],[1,2]],rows:2}};
-  await act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title="Requests" result={result} loading={false} height={288} group="g" editing={false} agentAvailable={false} onZoom={vi.fn()}/></MantineProvider>));
+  await act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title="Requests" result={result} loading={false} height={288} group="g" editing={false} agentAvailable={false} onZoom={vi.fn()} onPoint={vi.fn()}/></MantineProvider>));
   const subtitle=el.querySelector<HTMLElement>('[data-panel-subtitle]')!;
   expect(subtitle.textContent).toContain('click for exemplar traces');
   const plot=el.querySelector<HTMLElement>('[data-chart-plot]')!;await act(async()=>plot.focus());

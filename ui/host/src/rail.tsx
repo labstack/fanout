@@ -1,6 +1,6 @@
 import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Kbd, Loader, Menu, Modal, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
-import { DotsThree, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
+import { Bell, Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { getJSON, threadHistoryQueryKey } from "./api";
@@ -13,6 +13,8 @@ export type RailProps = {
   agentAvailable: boolean;
   activeThreadID?: string;
   activeDashboardID?: string;
+  /** The current path, to mark the matching page link. */
+  activePath?: string;
   /** The mobile drawer mounts a second rail; it focuses search on open. */
   autoFocusSearch?: boolean;
   onNewChat: () => void;
@@ -20,9 +22,19 @@ export type RailProps = {
   onDeletedThread: (threadID: string) => void;
   onSelectDashboard: (dashboardID: string) => void;
   onCreateDashboard: () => void;
+  onNewDashboard: () => void;
+  onNavigate: (path: PagePath) => void;
   onInvestigateService?: (service: string) => void;
   ref?: Ref<RailHandle>;
 };
+
+export type PagePath = "/explore" | "/logs" | "/traces" | "/alerts";
+const pages = [
+  { path: "/explore", label: "Explore", Icon: Compass },
+  { path: "/logs", label: "Logs", Icon: ListMagnifyingGlass },
+  { path: "/traces", label: "Traces", Icon: Path },
+  { path: "/alerts", label: "Alerts", Icon: Bell },
+] as const;
 
 type ThreadSummary = { id: string; title: string; updated_at: string };
 type ThreadPage = { items: ThreadSummary[]; next_cursor: string | null };
@@ -36,7 +48,7 @@ async function fetchThreads(query: string, cursor: string): Promise<ThreadPage> 
   return response.json();
 }
 
-export default function Rail({ agentAvailable, activeThreadID, activeDashboardID, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, onInvestigateService, ref }: RailProps) {
+export default function Rail({ agentAvailable, activeThreadID, activeDashboardID, activePath, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, onNewDashboard, onNavigate, onInvestigateService, ref }: RailProps) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query] = useDebouncedValue(search.trim(), 250);
@@ -135,6 +147,19 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
             <Text size="sm" fw={500} truncate>{service}</Text>
           </UnstyledButton>)}
         </Stack>}
+        {/* Direct paths to ad-hoc queries; they work without chat. */}
+        <Stack gap={0}>
+          {pages.map(({ path, label, Icon }) => {
+            const active = activePath === path;
+            return <UnstyledButton key={path} component="a" href={path} className="rail-row" data-active={active || undefined} aria-current={active ? "page" : undefined} p="sm" onClick={(event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              onNavigate(path);
+            }}>
+              <Group gap="xs" wrap="nowrap"><Icon size={16} /><Text size="sm" fw={active ? 600 : 500}>{label}</Text></Group>
+            </UnstyledButton>;
+          })}
+        </Stack>
         <Stack gap={4}>
           <SectionLabel>Dashboards</SectionLabel>
           {dashboards.isLoading && <Center py="md"><Loader size="xs" /></Center>}
@@ -163,7 +188,8 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
               </UnstyledButton>}
             </Stack>;
           })}
-          {agentAvailable && <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>{dashboards.data?.length === 0 ? "New dashboard" : "Create with AI"}</Button>}
+          <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Plus size={14} />} onClick={onNewDashboard}>New dashboard</Button>
+          {agentAvailable && <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>Create with AI</Button>}
         </Stack>
       </Stack>
     </ScrollArea>

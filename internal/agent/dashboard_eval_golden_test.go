@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/querytest"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/query"
 	controlstore "github.com/labstack/fanout/internal/store"
@@ -39,6 +40,9 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 	from := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	to := from.Add(time.Hour)
 	if err = repo.Commit(t.Context(), telemetrystore.Batch{ID: "eval_fixture", Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", TraceID: "trace", SpanID: "span", Name: "request", Kind: "SPAN_KIND_SERVER", StartUnixNanos: from.UnixNano(), EndUnixNanos: from.Add(time.Millisecond).UnixNano(), DurationMS: 1, StatusCode: "STATUS_CODE_OK", IngestedAt: from.UnixNano()}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := querytest.RefreshSpanRollup(engine.DB); err != nil {
 		t.Fatal(err)
 	}
 	executor := query.NewExecutor(engine, 30)

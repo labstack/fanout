@@ -2,6 +2,7 @@ package query
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -35,7 +36,7 @@ func bindFixtureTimes(t *testing.T, text string, args []any) string {
 
 func metricIncreaseResult(t *testing.T, e *Executor, scope Scope, selectSQL string) Result {
 	t.Helper()
-	cte, args, err := metricSeriesCTE(nil, scope, []string{"counter", "histogram"})
+	cte, args, err := metricSeriesCTE(metricRead{}, scope, []string{"counter", "histogram"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,12 +148,11 @@ func TestHistogramIncreaseResetsAllChannels(t *testing.T) {
 		{"[5,20]", "[1,2,3]", 6, 12, 1},      // count decrease
 		{"[5,20]", "[2,3,4]", 9, 18, 2},      // start change
 	} {
-		m := metricCounter(fixtureStart.Add(time.Duration(i)*time.Minute), 0)
-		m.Type, m.Monotonic = "histogram", false
-		m.HistBoundsJSON, m.HistCountsJSON, m.HistCount, m.HistSum, m.StartTimeUnixNanos = p.bounds, p.counts, p.count, p.sum, p.start
+		m := metricHistogram(fixtureStart.Add(time.Duration(i)*time.Minute), p.bounds, p.counts, p.count, p.sum, "")
+		m.Attributes, m.StartTimeUnixNanos = nil, p.start
 		insertMetrics(t, db, m)
 	}
-	cte, args, err := metricSeriesCTE(nil, Scope{Start: fixtureStart, End: fixtureStart.Add(5 * time.Minute), Interval: time.Minute}, []string{"histogram"})
+	cte, args, err := metricSeriesCTE(metricRead{}, Scope{Start: fixtureStart, End: fixtureStart.Add(5 * time.Minute), Interval: time.Minute}, []string{"histogram"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestMetricReadScopeIncludesSeparateLookbackBatch(t *testing.T) {
 		t.Fatalf("read=%+v original=%+v", read, original)
 	}
 	e := NewExecutor(engine, 30)
-	cte, args, err := metricSeriesCTE(nil, original, []string{"counter"})
+	cte, args, err := metricSeriesCTE(metricRead{}, original, []string{"counter"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,9 +251,7 @@ func TestHistogramPanelsShareResetIncreases(t *testing.T) {
 		}
 	}
 	// Single delta without elapsed still contributes observations.
-	if _, err := db.Exec("DELETE FROM telemetry.metrics"); err != nil {
-		t.Fatal(err)
-	}
+	db.clear()
 	m := metricHistogram(fixtureStart, "[10]", "[3,2]", 5, 30, "a")
 	m.Temporality = "delta"
 	insertMetrics(t, db, m)
@@ -324,15 +322,17 @@ func TestMetricIncreaseSkipsInvalidValuesAndResolvesTiedRetries(t *testing.T) {
 	}
 }
 
-func TestMetricIncreaseKeepsSignedNanosecondBoundaries(t *testing.T) {
+// Stored metric times are always after the epoch (ingestion replaces a
+// nonpositive one), so the boundaries are nanoseconds just after it.
+func TestMetricIncreaseKeepsNanosecondBoundaries(t *testing.T) {
 	e, db := metricFixture(t)
-	at := time.Unix(0, -17).UTC()
+	at := time.Unix(0, 17).UTC()
 	for i, value := range []float64{100, 105, 108, 999} {
 		insertMetrics(t, db, metricCounter(at.Add(time.Duration(i-1)*time.Nanosecond), value))
 	}
 	r := metricIncreaseResult(t, e, Scope{Start: at, End: at.Add(2 * time.Nanosecond)},
 		" SELECT epoch_ns(time::TIMESTAMP_NS) AS nanos,increase,elapsed_s FROM metric_increases ORDER BY time")
-	if !reflect.DeepEqual(metricValues(t, r, "nanos"), []any{-17.0, -16.0}) ||
+	if !reflect.DeepEqual(metricValues(t, r, "nanos"), []any{17.0, 18.0}) ||
 		!reflect.DeepEqual(metricValues(t, r, "increase"), []any{5.0, 3.0}) ||
 		!reflect.DeepEqual(metricValues(t, r, "elapsed_s"), []any{1e-9, 1e-9}) {
 		t.Fatalf("nanosecond window/elapsed: %+v", r.Frame)
@@ -353,10 +353,29 @@ func TestMetricHistogramRawKeepsZeroBoundsAndEmptyBoundLists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := runMetricPanel(t, e, Panel{Viz: "table", SQL: "SELECT dim,lo,hi,n::DOUBLE AS weight FROM (" + bindFixtureTimes(t, raw, args) + ") ORDER BY dim,lo NULLS FIRST"}, scope.Start.Add(-metricLookback), scope.End)
-	if !reflect.DeepEqual(metricValues(t, r, "weight"), []any{0.0, 0.0, 3.0, 0.0, 2.0}) ||
-		!reflect.DeepEqual(metricValues(t, r, "hi"), []any{-10.0, 0.0, 10.0, nil, nil}) {
-		t.Fatalf("raw histogram lost bounds: %+v", r.Frame)
+	// The builder's SQL exceeds the authored SQL panel limit; read it directly.
+	rows, err := db.db().QueryContext(t.Context(), "SELECT hi,n::DOUBLE FROM ("+raw+") ORDER BY dim,lo NULLS FIRST", args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var his, weights []any
+	for rows.Next() {
+		var hi sql.NullFloat64
+		var weight float64
+		if err := rows.Scan(&hi, &weight); err != nil {
+			t.Fatal(err)
+		}
+		his, weights = append(his, any(nil)), append(weights, weight)
+		if hi.Valid {
+			his[len(his)-1] = hi.Float64
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(weights, []any{0.0, 0.0, 3.0, 0.0, 2.0}) || !reflect.DeepEqual(his, []any{-10.0, 0.0, 10.0, nil, nil}) {
+		t.Fatalf("raw histogram lost bounds: hi=%v weight=%v", his, weights)
 	}
 	h := runMetricPanel(t, e, Panel{Viz: "histogram", Query: &Spec{From: "metrics", Measures: []string{"count()"}, Histogram: &Histogram{Field: "value", Buckets: "explicit"}}}, scope.Start, scope.End)
 	if !reflect.DeepEqual(metricValues(t, h, "count"), []any{2.0, 3.0}) {
@@ -391,66 +410,76 @@ func TestMetricReadScopeLeavesSQLAndOtherSignalsUnchanged(t *testing.T) {
 
 func TestHistogramIncreaseRebinsChangedBounds(t *testing.T) {
 	for _, tc := range []struct {
-		name, kind              string
+		name                    string
+		exponential             []telemetry.Histogram
 		bounds, counts          []string
 		countsTotal, startTimes []int64
 		sums                    []float64
 		wantCounts, wantSums    []any
 		wantWeights             []any
 	}{
-		// Exact explicitExpHistogram outputs, also asserted by ingest goldens:
-		// scale 0, zero count 5, positive offset 1/counts [10], then either
-		// positive offset 0/counts [1,10] or negative offset 0/counts [1].
-		{"new_minimum_with_nonzero_zero_count", "exponential_histogram",
-			[]string{"[-5e-324,0,2,4]", "[-5e-324,0,1,2,4]"}, []string{"[0,5,0,10,0]", "[0,5,0,1,10,0]"},
+		// Scale 0, zero count 5, positive offset 1/counts [10], then either
+		// positive offset 0/counts [1,10] or negative offset 0/counts [1]:
+		// bounds -0,0,2,4 then -0,0,1,2,4 or -2,-1,-0,0,2,4.
+		{"new_minimum_with_nonzero_zero_count", []telemetry.Histogram{
+			{ZeroCount: 5, PositiveOffset: 1, PositiveCounts: []uint64{10}},
+			{ZeroCount: 5, PositiveCounts: []uint64{1, 10}}}, nil, nil,
 			[]int64{15, 16}, []int64{0, 0}, []float64{30, 31.5},
 			[]any{1.0}, []any{1.5}, []any{"[0,0,0,1,0,0]"}},
-		{"first_negative_with_nonzero_zero_count", "exponential_histogram",
-			[]string{"[-5e-324,0,2,4]", "[-2,-1,-5e-324,0,2,4]"}, []string{"[0,5,0,10,0]", "[0,1,0,5,0,10,0]"},
+		{"first_negative_with_nonzero_zero_count", []telemetry.Histogram{
+			{ZeroCount: 5, PositiveOffset: 1, PositiveCounts: []uint64{10}},
+			{ZeroCount: 5, PositiveOffset: 1, PositiveCounts: []uint64{10}, NegativeCounts: []uint64{1}}}, nil, nil,
 			[]int64{15, 16}, []int64{0, 0}, []float64{30, 28.5},
 			[]any{1.0}, []any{-1.5}, []any{"[0,1,0,0,0,0,0]"}},
-		{"unchanged_bounds_with_decreasing_bucket", "histogram",
+		{"unchanged_bounds_with_decreasing_bucket", nil,
 			[]string{"[1,2]", "[1,2]"}, []string{"[0,100,0]", "[0,50,60]"},
 			[]int64{100, 110}, []int64{0, 0}, []float64{150, 255},
 			[]any{110.0}, []any{255.0}, []any{"[0,50,60]"}},
-		{"growing_exponential_range", "exponential_histogram",
+		{"growing_exponential_range", nil,
 			[]string{"[1,2]", "[1,2,4]", "[1,2,4]"}, []string{"[0,100,0]", "[0,100,1,0]", "[0,102,1,0]"},
 			[]int64{100, 101, 103}, []int64{1, 0, 2}, []float64{150, 153, 156},
 			[]any{1.0, 2.0}, []any{3.0, 3.0}, []any{"[0,0,1,0]", "[0,2,0,0]"}},
-		{"downscale", "exponential_histogram",
+		{"downscale", nil,
 			[]string{"[1,2,4,8]", "[1,4]"}, []string{"[2,3,4,5,6]", "[3,9,15]"},
 			[]int64{20, 27}, []int64{1, 1}, []float64{100, 130},
 			[]any{7.0}, []any{30.0}, []any{"[1,2,4]"}},
-		{"refinement", "exponential_histogram",
+		{"refinement", nil,
 			[]string{"[1,4]", "[1,2,4]"}, []string{"[0,5,0]", "[0,3,3,0]"},
 			[]int64{5, 6}, []int64{1, 1}, []float64{10, 15},
 			[]any{6.0}, []any{15.0}, []any{"[0,3,3,0]"}},
-		{"compatible_but_negative_bucket", "histogram",
+		{"compatible_but_negative_bucket", nil,
 			[]string{"[1,2,4,8]", "[1,4]"}, []string{"[2,3,4,5,6]", "[1,9,15]"},
 			[]int64{20, 25}, []int64{1, 1}, []float64{100, 120},
 			[]any{25.0}, []any{120.0}, []any{"[1,9,15]"}},
-		{"nonzero_overflow_straddles_new_bound", "histogram",
+		{"nonzero_overflow_straddles_new_bound", nil,
 			[]string{"[1,2]", "[1,2,4]"}, []string{"[0,1,2]", "[0,2,1,1]"},
 			[]int64{3, 4}, []int64{1, 1}, []float64{10, 15},
 			[]any{4.0}, []any{15.0}, []any{"[0,2,1,1]"}},
-		{"collapse_to_overflow", "histogram",
+		{"collapse_to_overflow", nil,
 			[]string{"[1,2]", "[]"}, []string{"[2,3,4]", "[12]"},
 			[]int64{9, 12}, []int64{1, 1}, []float64{10, 15},
 			[]any{3.0}, []any{5.0}, []any{"[3]"}},
-		{"changed_start_resets_compatible_bounds", "histogram",
+		{"changed_start_resets_compatible_bounds", nil,
 			[]string{"[1,2]", "[1,2,4]"}, []string{"[0,100,0]", "[0,100,1,0]"},
 			[]int64{100, 101}, []int64{1, 2}, []float64{150, 153},
 			[]any{101.0}, []any{153.0}, []any{"[0,100,1,0]"}},
-		{"decreasing_count_resets_compatible_bounds", "histogram",
+		{"decreasing_count_resets_compatible_bounds", nil,
 			[]string{"[1,2]", "[1,2,4]"}, []string{"[0,100,0]", "[0,90,1,0]"},
 			[]int64{100, 91}, []int64{1, 1}, []float64{150, 140},
 			[]any{91.0}, []any{140.0}, []any{"[0,90,1,0]"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, db := metricFixture(t)
-			for i := range tc.bounds {
-				m := metricHistogram(fixtureStart.Add(time.Duration(i-1)*time.Minute), tc.bounds[i], tc.counts[i], tc.countsTotal[i], tc.sums[i], "a")
-				m.Type, m.StartTimeUnixNanos = tc.kind, tc.startTimes[i]
+			for i := range tc.countsTotal {
+				at := fixtureStart.Add(time.Duration(i-1) * time.Minute)
+				var m telemetry.Metric
+				if tc.exponential != nil {
+					m = metricExponential(at, tc.exponential[i], tc.sums[i])
+					m.Temporality = "cumulative"
+				} else {
+					m = metricHistogram(at, tc.bounds[i], tc.counts[i], tc.countsTotal[i], tc.sums[i], "a")
+				}
+				m.StartTimeUnixNanos = tc.startTimes[i]
 				insertMetrics(t, db, m)
 			}
 			scope := Scope{Start: fixtureStart, End: fixtureStart.Add(2 * time.Minute)}
@@ -487,7 +516,7 @@ func TestMetricSeriesFiltersKindsAtInput(t *testing.T) {
 		{[]string{"gauge", "counter"}, []any{"counter", "gauge"}},
 		{[]string{"histogram"}, []any{"histogram"}},
 	} {
-		cte, args, err := metricSeriesCTE(nil, scope, tc.kinds)
+		cte, args, err := metricSeriesCTE(metricRead{}, scope, tc.kinds)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -500,7 +529,7 @@ func TestMetricSeriesFiltersKindsAtInput(t *testing.T) {
 
 func TestMetricSeriesRejectsEmptyKinds(t *testing.T) {
 	for _, kinds := range [][]string{nil, {}} {
-		text, args, err := metricSeriesCTE(nil, Scope{}, kinds)
+		text, args, err := metricSeriesCTE(metricRead{}, Scope{}, kinds)
 		if err == nil || err.Error() != "metric series requires at least one kind" || text != "" || args != nil {
 			t.Fatalf("kinds=%v: text=%q args=%v err=%v", kinds, text, args, err)
 		}
@@ -519,7 +548,7 @@ func TestMetricSeriesKindFilterPreservesHistogramAgainstLaterGauge(t *testing.T)
 	gauge.IngestedAt++
 	insertMetrics(t, db, gauge)
 	scope := Scope{Start: fixtureStart, End: fixtureStart.Add(time.Minute)}
-	cte, args, err := metricSeriesCTE(nil, scope, []string{"histogram"})
+	cte, args, err := metricSeriesCTE(metricRead{}, scope, []string{"histogram"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,47 +557,5 @@ func TestMetricSeriesKindFilterPreservesHistogramAgainstLaterGauge(t *testing.T)
 	if !reflect.DeepEqual(metricValues(t, r, "count_increase"), []any{3.0}) ||
 		!reflect.DeepEqual(metricValues(t, r, "weights"), []any{"[1,2]"}) {
 		t.Fatalf("later gauge displaced histogram: %+v", r.Frame)
-	}
-}
-
-func TestHistogramIncreaseExcludesUnorderedBoundsBeforePairing(t *testing.T) {
-	for _, tc := range []struct {
-		name, bounds, counts string
-	}{
-		{"duplicate", "[1,1,2]", "[0,300,300,300]"},
-		{"reordered", "[2,1]", "[0,450,450]"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			e, db := metricFixture(t)
-			for _, minute := range []int{-2, 0, 1} {
-				m := metricHistogram(fixtureStart.Add(time.Duration(minute)*time.Minute), tc.bounds, tc.counts, 900, 900, "a")
-				m.IngestedAt++ // malformed retry must not displace the valid point
-				insertMetrics(t, db, m)
-			}
-			insertMetrics(t, db, metricHistogram(fixtureStart.Add(-time.Minute), "[1,2]", "[2,3,5]", 10, 10, "a"))
-			insertMetrics(t, db, metricHistogram(fixtureStart.Add(time.Minute), "[1,2]", "[3,5,7]", 15, 15, "a"))
-			r := metricIncreaseResult(t, e, Scope{Start: fixtureStart.Add(-time.Minute), End: fixtureStart.Add(2 * time.Minute)},
-				" SELECT count_increase,elapsed_s,to_json(bound_increases) AS weights FROM metric_increases ORDER BY time")
-			if !reflect.DeepEqual(metricValues(t, r, "count_increase"), []any{5.0}) ||
-				!reflect.DeepEqual(metricValues(t, r, "elapsed_s"), []any{120.0}) ||
-				!reflect.DeepEqual(metricValues(t, r, "weights"), []any{"[1,2,2]"}) {
-				t.Fatalf("malformed bounds affected pairing: %+v", r.Frame)
-			}
-		})
-	}
-}
-
-func TestMetricHistogramJSONPreservesSubnormalZeroBound(t *testing.T) {
-	_, db := metricFixture(t)
-	bounds, err := json.Marshal([]float64{-math.SmallestNonzeroFloat64, 0, 2, 4})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got float64
-	if err := db.QueryRow(`SELECT (from_json(?,'["DOUBLE"]'))[1]`, string(bounds)).Scan(&got); err != nil {
-		t.Fatal(err)
-	}
-	if math.Float64bits(got) != math.Float64bits(-math.SmallestNonzeroFloat64) {
-		t.Fatalf("JSON bound=%g bits=%x want=%x", got, math.Float64bits(got), math.Float64bits(-math.SmallestNonzeroFloat64))
 	}
 }

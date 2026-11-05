@@ -230,8 +230,8 @@ describe("Session", () => {
     document.body.append(container);
     const root = createRoot(container);
     await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
-    await vi.waitFor(() => expect(button("New dashboard")).not.toBeUndefined());
-    await act(async () => button("New dashboard")!.click());
+    await vi.waitFor(() => expect(button("Create with AI")).not.toBeUndefined());
+    await act(async () => button("Create with AI")!.click());
     await vi.waitFor(() => expect(agentMocks.runAgent).toHaveBeenCalledOnce());
     expect(window.location.pathname).toMatch(/^\/chat\/[0-9a-f-]{36}$/);
     expect(document.body.textContent).toContain(createDashboardPrompt);

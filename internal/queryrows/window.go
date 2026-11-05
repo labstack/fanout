@@ -2,6 +2,7 @@ package queryrows
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -11,8 +12,9 @@ type Window struct {
 	Start, End         time.Time
 	Namespace, Service string
 	Kind               ReadKind
-	// RetainedInventory ignores event time only for resource_inventory. Raw
-	// relations still require the caller's explicit event-time predicates.
+	// RetainedInventory is exact retained-service membership, including uncached
+	// files. It ignores event time only for resource_inventory; raw relations
+	// still require the caller's explicit event-time predicates.
 	RetainedInventory bool
 }
 
@@ -47,5 +49,25 @@ const (
 	TraceCandidateRead
 )
 
-// BatchReader exposes the completed-batch accelerators to internal callers.
-type BatchReader interface{ CompletedBatchReads() bool }
+// Coverage carries the oldest incomplete ingest horizon back from snapshot
+// binding to the panel result. Comparisons and auxiliary reads share the value.
+type Coverage struct {
+	mu    sync.Mutex
+	fresh time.Time
+}
+type coverageKey struct{}
+
+func WithCoverage(ctx context.Context) (context.Context, *Coverage) {
+	c := &Coverage{}
+	return context.WithValue(ctx, coverageKey{}, c), c
+}
+func RecordCoverage(ctx context.Context, fresh time.Time) {
+	if c, ok := ctx.Value(coverageKey{}).(*Coverage); ok {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.fresh.IsZero() || fresh.Before(c.fresh) {
+			c.fresh = fresh
+		}
+	}
+}
+func (c *Coverage) FreshTo() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.fresh }

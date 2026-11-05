@@ -1,7 +1,6 @@
 package fanql
 
 import (
-	"database/sql"
 	"reflect"
 	"strconv"
 	"testing"
@@ -152,27 +151,6 @@ func TestSortPreservesMeasureAliasDuration(t *testing.T) {
 	}
 }
 
-func TestHTTPStatusVariableRangeUsesNumericCast(t *testing.T) {
-	c, ps := Compile(`spans where http_status_code>=$code`, Options{Variables: []query.Variable{{Name: "code"}}})
-	if len(ps) != 0 {
-		t.Fatal(ps)
-	}
-	if got := c.Query.Where[0]; got != `TRY_CAST(http_status_code AS INTEGER) >= $code` {
-		t.Fatal(got)
-	}
-	// The string dashboard value "500" must have the same numeric ordering as
-	// the literal 500, including a status such as "60" that sorts after "500".
-	d, _ := newTestEngine(t)
-	var n int
-	err := d.QueryRowScan(t.Context(), []any{&n}, `SELECT count(*) AS n FROM (VALUES ('500'), ('60')) t(http_status_code) WHERE `+c.Query.Where[0], sql.Named("code", "500"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Fatalf("matched %d rows, want 1", n)
-	}
-}
-
 func TestComparedCallVariablesBindAndRespectCountIf(t *testing.T) {
 	t.Run("bind", func(t *testing.T) {
 		c, ps := Compile(`logs where lower(service)=$svc`, Options{Variables: []query.Variable{{Name: "svc"}}})
@@ -228,7 +206,7 @@ func TestGroupByAcceptsLiteralKeys(t *testing.T) {
 		}
 		dashboard := query.Dashboard{Name: "keys", Panels: []query.Panel{{ID: "keys", Title: "Keys", Viz: "table", Query: &c.Query}}}
 		query.Normalize(&dashboard)
-		if _, ps, err := query.Check(t.Context(), engine, &dashboard); len(ps) != 0 || err != nil {
+		if _, ps, err := query.NewExecutor(engine, 30).Check(t.Context(), &dashboard); len(ps) != 0 || err != nil {
 			t.Fatalf("engine check for %q: %+v %v", text, ps, err)
 		}
 	}
@@ -242,7 +220,7 @@ func TestLiteralKeyQuotesSurviveCheckedMetadata(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	d := query.Dashboard{Name: "Keys", Panels: []query.Panel{{ID: "keys", Title: "Keys", Viz: "table", Query: &c.Query}}}
 	query.Normalize(&d)
-	checked, ps, err := query.Check(t.Context(), engine, &d)
+	checked, ps, err := query.NewExecutor(engine, 30).Check(t.Context(), &d)
 	if err != nil || len(ps) != 0 {
 		t.Fatal(ps, err)
 	}

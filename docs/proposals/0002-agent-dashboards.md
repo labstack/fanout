@@ -120,7 +120,7 @@ agent / chat / MCP client                browser dashboard
         │                                         │
         ▼                                         ▼
  MCP tools ──────────────┐            /api/panels/query (batch)
- get_telemetry_schema    │            /api/annotations
+ get_telemetry_schema    │            /api/annotations/query
  preview_panels          │            /api/variables/resolve
  create/replace/edit     │                        │
  _dashboard              ▼                        ▼
@@ -381,7 +381,7 @@ New product routes follow AGENTS.md naming:
 | `POST /api/panels/query` | run inline panels for a time range and variable values; used by dashboards, previews and chat |
 | `POST /api/panels/exemplars` | traces behind one bucket, bar or row of a panel |
 | `POST /api/variables/resolve` | options for the query variables of a spec |
-| `GET /api/annotations` | deploys and anomalies for a range, namespace and services |
+| `POST /api/annotations/query` | deploys and anomalies for a range, namespace and services |
 | `GET /api/telemetry/schema` | columns, units, attribute keys with types and cardinality, metric names, services |
 
 `/api/observability/*` stays for the chat views until those views render

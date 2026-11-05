@@ -1,0 +1,78 @@
+package engine
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+)
+
+func logRollupInsertSQL(keys string) string {
+	return `INSERT INTO log_rollup
+ SELECT l.namespace,date_trunc('minute',l.time::TIMESTAMP_NS),l.service,coalesce(l.severity,''),count(*)
+ FROM logs l WHERE ` + keys + `
+ AND l.time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND l.time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ GROUP BY ALL`
+}
+
+// Read the canonical dedicated route column, including semconv conversion and
+// spill semantics. Its Parquet predicate also skips files without routes.
+// Rank route populations before building histograms, then fold the rest before
+// aggregation. The overflow row keeps every eligible span, including its errors
+// and duration distribution; retained routes can vary between minutes. Queries
+// selecting individual routes therefore stay raw.
+func endpointRollupInsertSQL(keys string) string {
+	return fmt.Sprintf(`INSERT INTO endpoint_rollup
+ WITH eligible AS MATERIALIZED (
+ SELECT s.namespace,date_trunc('minute',s.start_time::TIMESTAMP_NS) bucket,s.service,
+ coalesce(s.kind,'') kind,coalesce(s.status,'') status,
+ s._a_http_route route,s.duration_ms
+ FROM spans s WHERE %s
+ AND s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ AND s._a_http_route <> ''),
+ routes AS (SELECT namespace,bucket,service,route,
+ row_number() OVER (PARTITION BY namespace,bucket,service ORDER BY count(*) DESC,route) r
+ FROM eligible GROUP BY namespace,bucket,service,route),
+ folded AS (SELECT e.* EXCLUDE(route),CASE WHEN r.r<=%d THEN e.route ELSE 'Other routes (overflow)' END route,r.r>%d overflow
+ FROM eligible e JOIN routes r USING(namespace,bucket,service,route))
+ SELECT namespace,bucket,service,kind,status,route,overflow,count(*),sum(duration_ms),min(duration_ms),max(duration_ms),
+ histogram(CASE WHEN duration_ms>0 THEN coalesce(try_cast(ceil(log2(duration_ms)*8) AS INTEGER),2147483647) ELSE %d END)
+ FROM folded GROUP BY namespace,bucket,service,kind,status,route,overflow`, keys, endpointRouteLimit, endpointRouteLimit, spanHistogramZero)
+}
+
+func insertDashboardRollups(ctx context.Context, tx rollupSQL, lo, hi time.Time) error {
+	for _, signal := range []string{"spans", "logs", "metrics"} {
+		alias, clock := "m", "start_time"
+		if signal != "spans" {
+			alias, clock = "m", "time"
+		}
+		err := forAffectedKeys(ctx, tx,
+			`SELECT DISTINCT namespace,epoch_ns(bucket),service FROM service_pass_affected WHERE namespace IS NOT NULL AND bucket IS NOT NULL AND service IS NOT NULL`, nil,
+			fmt.Sprintf(`struct_pack(namespace := %[1]s.namespace,bucket := date_trunc('minute',%[1]s.%[2]s::TIMESTAMP_NS),service := %[1]s.service)`, alias, clock),
+			`struct_pack(namespace := ?::VARCHAR,bucket := make_timestamp_ns(?::BIGINT),service := ?::VARCHAR)`,
+			func(keys string, args []any) error {
+				resourceKeys := keys
+				if _, err := tx.ExecContext(ctx, resourceRollupInsertSQL(signal, alias+"."+clock, resourceKeys), append(args, lo, hi)...); err != nil {
+					return err
+				}
+				query := endpointRollupInsertSQL(strings.ReplaceAll(keys, "m.", "s."))
+				if signal == "logs" {
+					query = logRollupInsertSQL(strings.ReplaceAll(keys, "m.", "l."))
+				}
+				if signal == "metrics" {
+					query = receiverRollupInsertSQL(keys)
+				}
+				_, err := tx.ExecContext(ctx, query, append(args, lo, hi)...)
+				if err != nil || signal != "metrics" {
+					return err
+				}
+				entityKeys := strings.ReplaceAll(keys, "date_trunc('minute',m.time::TIMESTAMP_NS)", "m.bucket")
+				_, err = tx.ExecContext(ctx, receiverEntityRollupInsertSQL(entityKeys), append(args, lo, hi)...)
+				return err
+			})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}

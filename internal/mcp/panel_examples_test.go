@@ -279,11 +279,11 @@ func TestMetricExamplesExecuteWithObservations(t *testing.T) {
 		n := at.Add(time.Duration(i-1)*time.Minute + 30*time.Second).UnixNano()
 		metrics = append(metrics,
 			telemetry.Metric{Namespace: "test", ServiceName: "api", Name: "system.network.io", Unit: "By",
-				Type: "sum", Monotonic: true, Temporality: "cumulative", Value: float64(i * 60),
+				Type: "counter", Temporality: "cumulative", Value: float64(i * 60),
 				TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: n, Attributes: map[string]any{"direction": "receive"}},
 			telemetry.Metric{Namespace: "test", ServiceName: "api", Name: "http.server.request.duration", Unit: "s",
-				Type: "histogram", Temporality: "cumulative", HistCount: int64(i * 100), HistSum: float64(i * 50),
-				HistBoundsJSON: "[1]", HistCountsJSON: []string{"[0,0]", "[100,0]"}[i],
+				Type: "histogram", Temporality: "cumulative", Histogram: telemetry.Histogram{Count: uint64(i * 100), Sum: float64(i * 50), HasSum: true,
+					Bounds: []float64{1}, Counts: [][]uint64{{0, 0}, {100, 0}}[i]},
 				TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: n})
 	}
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metric-examples", Metrics: metrics}); err != nil {

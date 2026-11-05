@@ -59,7 +59,7 @@ func TestVersionIncrementalLateBatch(t *testing.T) {
 		t.Helper()
 		n := at.Add(offset).UnixNano()
 		err := repo.Commit(t.Context(), telemetrystore.Batch{ID: id, Spans: []telemetry.Span{{
-			Namespace: "shop", ServiceName: "checkout", ServiceVersion: version,
+			Namespace: "shop", ServiceName: "checkout", Resource: map[string]any{"service.version": version},
 			TraceID: id, SpanID: id, Name: "checkout", Kind: "SPAN_KIND_SERVER",
 			StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1,
 			IngestedAt: at.UnixNano(),
@@ -128,11 +128,11 @@ func TestAnnotationSourcesNoRawScan(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Hour)
 	for i, version := range []string{"v1", "v2"} {
 		n := at.Add(time.Duration(i) * time.Minute).UnixNano()
-		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("scan-", i), Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", ServiceVersion: version, TraceID: "trace", SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n}}, Logs: []telemetry.Log{{Namespace: "shop", ServiceName: "checkout", Body: "real log", EventUnixNanos: n, IngestedAt: n}}}); err != nil {
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("scan-", i), Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", Resource: map[string]any{"service.version": version}, TraceID: "trace", SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n}}, Logs: []telemetry.Log{{Namespace: "shop", ServiceName: "checkout", Body: "real log", EventUnixNanos: n, IngestedAt: n}}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := d.DrainVersionRollup(t.Context()); err != nil {
+	if _, _, err := d.DrainVersionRollup(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	counter := &annotationCountingEngine{Duck: d}
@@ -164,7 +164,7 @@ func TestVersionPassAndHistoryCaps(t *testing.T) {
 	for i := 0; i < versionRollupBatchBudget+1; i++ {
 		id := fmt.Sprintf("version-%03d", i)
 		n := at.Add(time.Duration(i) * time.Millisecond).UnixNano()
-		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: id, Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", ServiceVersion: "v1", TraceID: id, SpanID: id, Name: "root", StartUnixNanos: n, EndUnixNanos: n + 1000, DurationMS: .001, IngestedAt: n}}}); err != nil {
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: id, Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", Resource: map[string]any{"service.version": "v1"}, TraceID: id, SpanID: id, Name: "root", StartUnixNanos: n, EndUnixNanos: n + 1000, DurationMS: .001, IngestedAt: n}}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -211,7 +211,7 @@ func TestVersionDrainAndLimitedReset(t *testing.T) {
 	if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&limited); err != nil || limited != 1 {
 		t.Fatalf("backlog flag=%d %v", limited, err)
 	}
-	if n, err := d.DrainVersionRollup(t.Context()); err != nil || n != 6 {
+	if n, _, err := d.DrainVersionRollup(t.Context()); err != nil || n != 6 {
 		t.Fatalf("drain=%d %v", n, err)
 	}
 	if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&limited); err != nil || limited != 0 {
@@ -244,7 +244,7 @@ func TestVersionLargeBatchDrains(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
 	commitVersionLogs(t, repo, "oversized", at, 64001)
-	if n, err := d.DrainVersionRollup(t.Context()); err != nil || n != 1 {
+	if n, _, err := d.DrainVersionRollup(t.Context()); err != nil || n != 1 {
 		t.Fatalf("oversized drain=%d %v", n, err)
 	}
 	var marked, limited int
@@ -267,7 +267,7 @@ func TestVersionResourceLogsAndMetrics(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "resources", Logs: []telemetry.Log{{Namespace: "shop", ServiceName: "logsvc", Resource: map[string]any{"service.version": "log-v"}, EventUnixNanos: n, IngestedAt: n}}, Metrics: []telemetry.Metric{{Namespace: "shop", ServiceName: "metricsvc", Name: "n", Type: "gauge", Resource: map[string]any{"service.version": "metric-v"}, EventUnixNanos: n, IngestedAt: n}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.DrainVersionRollup(t.Context()); err != nil {
+	if _, _, err := d.DrainVersionRollup(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := d.DB.Query(`SELECT service,service_version,first_seen::TIMESTAMP_NS FROM version_rollup ORDER BY service`)
@@ -294,11 +294,11 @@ func TestVersionMarkersCompactionRetention(t *testing.T) {
 	at := time.Now().UTC().Truncate(time.Hour)
 	for i := range 8 {
 		n := at.Add(time.Duration(i) * time.Second).UnixNano()
-		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("part-", i), Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", ServiceVersion: "v1", TraceID: "trace", SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: at.UnixNano()}}}); err != nil {
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("part-", i), Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", Resource: map[string]any{"service.version": "v1"}, TraceID: "trace", SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: at.UnixNano()}}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := d.DrainVersionRollup(t.Context()); err != nil {
+	if _, _, err := d.DrainVersionRollup(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := repo.CompactParquet(t.Context(), d, 8); err != nil || n != 8 {
@@ -350,41 +350,6 @@ func TestAnomalyCoalescesOpenEpisode(t *testing.T) {
 	}
 	if err := d.DB.QueryRow(`SELECT count(*) FROM anomaly_log`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("separate episodes=%d %v", count, err)
-	}
-}
-
-func TestVersionSchemaRebuildClearsPair(t *testing.T) {
-	for _, table := range []string{"version_rollup", "version_rollup_batches"} {
-		t.Run(table, func(t *testing.T) {
-			d, repo := versionEngine(t)
-			commitVersionLogs(t, repo, "rebuild", time.Now().UTC().Add(-time.Hour), 3)
-			if _, err := d.RefreshVersionRollup(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			column := "last_seen"
-			if table == "version_rollup_batches" {
-				column = "max_ingested"
-			}
-			if _, err := d.DB.Exec("ALTER TABLE " + table + " DROP COLUMN " + column); err != nil {
-				t.Fatal(err)
-			}
-			if err := createAnnotationTables(d.DB); err != nil {
-				t.Fatal(err)
-			}
-			for _, q := range []string{"SELECT count(*) FROM version_rollup", "SELECT count(*) FROM version_rollup_batches", "SELECT count(*) FROM rollup_state WHERE cache_key LIKE 'version_rollup%'"} {
-				var n int
-				if err := d.DB.QueryRow(q).Scan(&n); err != nil || n != 0 {
-					t.Fatalf("stale paired state: %s count=%d err=%v", q, n, err)
-				}
-			}
-			if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
-				t.Fatalf("history not reread: %d %v", n, err)
-			}
-			var n int
-			if err := d.DB.QueryRow("SELECT count(*) FROM version_rollup").Scan(&n); err != nil || n == 0 {
-				t.Fatalf("missing rebuilt history: %d %v", n, err)
-			}
-		})
 	}
 }
 

@@ -3,11 +3,14 @@ package query
 import (
 	"errors"
 	"fmt"
-	"github.com/labstack/fanout/internal/suggest"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/labstack/fanout/internal/suggest"
+	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/fanout/internal/telemetry/semconv"
 )
 
 type FieldType string
@@ -17,6 +20,7 @@ const (
 	TypeNumber FieldType = "number"
 	TypeTime   FieldType = "time"
 	TypeMap    FieldType = "map"
+	TypeBool   FieldType = "bool"
 )
 
 type Field struct {
@@ -27,6 +31,7 @@ type Field struct {
 }
 
 type signal struct {
+	source  *telemetry.Signal
 	name    string
 	time    string
 	fields  []Field
@@ -34,95 +39,101 @@ type signal struct {
 	lowCard []string // columns whose common values the schema lists
 }
 
-func newSignal(name, timeColumn string, lowCard []string, fields ...Field) *signal {
-	s := &signal{name: name, time: timeColumn, fields: fields, index: map[string]Field{}, lowCard: lowCard}
-	for _, f := range fields {
-		s.index[f.Name] = f
+// column presents one clean-view column of the telemetry registry, which
+// owns its name and type; the catalog adds display order and documentation.
+type column struct{ name, unit, description string }
+
+func col(name, description string) column { return column{name: name, description: description} }
+
+func (c column) in(unit string) column { c.unit = unit; return c }
+
+var fieldTypes = map[telemetry.Type]FieldType{
+	telemetry.String: TypeString, telemetry.Int64: TypeNumber, telemetry.Uint64: TypeNumber,
+	telemetry.Float64: TypeNumber, telemetry.Bool: TypeBool, telemetry.Time: TypeTime, telemetry.Variant: TypeMap,
+}
+
+func newSignal(source *telemetry.Signal, lowCard []string, columns ...column) *signal {
+	s := &signal{source: source, name: source.Name, time: source.Clock(), index: map[string]Field{}, lowCard: lowCard}
+	for _, c := range columns {
+		f, ok := source.Field(c.name)
+		typ, known := fieldTypes[f.Type]
+		if !ok || !known {
+			panic(fmt.Sprintf("%s has no queryable column %s", source.Name, c.name))
+		}
+		field := Field{Name: c.name, Type: typ, Unit: c.unit, Description: c.description}
+		s.fields = append(s.fields, field)
+		s.index[field.Name] = field
 	}
 	return s
 }
 
-func str(name, description string) Field {
-	return Field{Name: name, Type: TypeString, Description: description}
-}
-func num(name, unit, description string) Field {
-	return Field{Name: name, Type: TypeNumber, Unit: unit, Description: description}
-}
-func ts(name, description string) Field {
-	return Field{Name: name, Type: TypeTime, Description: description}
-}
-func dict(name, description string) Field {
-	return Field{Name: name, Type: TypeMap, Description: description}
-}
-
-// The columns of the spans, logs and metrics views in internal/engine/views.go.
+// The catalog's columns of each signal's clean view, in display order.
 var signals = map[string]*signal{
-	"spans": newSignal("spans", "start_time",
-		[]string{"service", "kind", "status", "http_method", "db_system", "messaging_system", "deployment_env", "service_version"},
-		str("namespace", "OpenTelemetry service namespace"),
-		str("service", "Service name"),
-		str("operation", "Span name"),
-		str("kind", vocabularyDescription("kind")),
-		str("status", vocabularyDescription("status")),
-		str("status_message", "Status description"),
-		str("trace_id", "Trace identifier"),
-		str("span_id", "Span identifier"),
-		str("parent_span_id", "Parent span identifier; empty for roots"),
-		ts("start_time", "Span start"),
-		ts("end_time", "Span end"),
-		num("duration_ms", "ms", "Span duration in milliseconds"),
-		str("http_method", "HTTP method"),
-		str("http_status_code", "HTTP response status code as text"),
-		str("http_route", "HTTP route template"),
-		str("db_system", "Database system, e.g. postgresql, redis"),
-		str("rpc_method", "RPC method"),
-		str("rpc_service", "RPC service"),
-		str("peer_service", "Remote service named by the caller"),
-		str("service_version", "service.version resource attribute"),
-		str("deployment_env", "deployment.environment resource attribute"),
-		str("exception_type", "Exception type from the span's exception event"),
-		str("exception_message", "Exception message"),
-		str("messaging_system", "messaging.system attribute"),
-		str("messaging_destination", "messaging.destination.name attribute"),
-		str("scope_name", "Instrumentation scope"),
-		dict("attributes", "Span attributes; use attributes['key']"),
-		dict("resource", "Resource attributes; use resource['key']"),
+	"spans": newSignal(telemetry.Spans,
+		[]string{"service", "kind", "status", "messaging_system"},
+		col("namespace", "OpenTelemetry service namespace"),
+		col("service", "Service name"),
+		col("operation", "Span name"),
+		col("kind", vocabularyDescription("kind")),
+		col("status", vocabularyDescription("status")),
+		col("status_message", "Status description"),
+		col("trace_id", "Trace identifier"),
+		col("span_id", "Span identifier"),
+		col("parent_span_id", "Parent span identifier; empty for roots"),
+		col("start_time", "Span start"),
+		col("end_time", "Span end"),
+		col("duration_ms", "Span duration in milliseconds").in("ms"),
+		col("rpc_service", "RPC service"),
+		col("peer_service", "Remote service named by the caller"),
+		col("exception_type", "Exception type from the span's exception event"),
+		col("exception_message", "Exception message"),
+		col("messaging_system", "messaging.system attribute"),
+		col("messaging_destination", "messaging.destination.name attribute"),
+		col("scope_name", "Instrumentation scope"),
+		col("attributes", "Span attributes; use attributes['key']"),
+		col("resource", "Resource attributes; use resource['key']"),
 	),
-	"logs": newSignal("logs", "time",
+	"logs": newSignal(telemetry.Logs,
 		[]string{"service", "severity"},
-		str("namespace", "OpenTelemetry service namespace"),
-		str("service", "Service name"),
-		ts("time", "Log time"),
-		str("severity", "Severity text, e.g. ERROR, WARN, INFO"),
-		num("severity_number", "none", "OpenTelemetry severity number; 17 and above is an error"),
-		str("body", "Redacted log body"),
-		str("body_template", "Body with variable parts replaced by <*>; groups similar messages"),
-		str("trace_id", "Trace identifier"),
-		str("span_id", "Span identifier"),
-		str("scope_name", "Instrumentation scope"),
-		dict("attributes", "Log attributes; use attributes['key']"),
-		dict("resource", "Resource attributes; use resource['key']"),
+		col("namespace", "OpenTelemetry service namespace"),
+		col("service", "Service name"),
+		col("time", "Log time"),
+		col("severity", "Severity text, e.g. ERROR, WARN, INFO"),
+		col("severity_number", "OpenTelemetry severity number; 17 and above is an error").in("none"),
+		col("body", "Redacted log body"),
+		col("body_template", "Body with variable parts replaced by <*>; groups similar messages"),
+		col("trace_id", "Trace identifier"),
+		col("span_id", "Span identifier"),
+		col("scope_name", "Instrumentation scope"),
+		col("attributes", "Log attributes; use attributes['key']"),
+		col("resource", "Resource attributes; use resource['key']"),
 	),
-	"metrics": newSignal("metrics", "time",
+	"metrics": newSignal(telemetry.Metrics,
 		[]string{"service", "type", "temporality"},
-		str("namespace", "OpenTelemetry service namespace"),
-		str("service", "Service name"),
-		ts("time", "Data point time"),
-		str("name", "Metric name"),
-		str("unit", "Metric unit as reported"),
-		str("type", vocabularyDescription("type")),
-		str("temporality", "cumulative or delta; empty for gauge and summary"),
-		ts("start_time", "Data point start time; NULL when absent"),
-		num("value", "none", "Gauge or sum value"),
-		num("hist_count", "count", "Histogram point count"),
-		num("hist_sum", "none", "Histogram point sum"),
-		dict("attributes", "Data point attributes; use attributes['key']"),
-		dict("resource", "Resource attributes; use resource['key']"),
+		col("namespace", "OpenTelemetry service namespace"),
+		col("service", "Service name"),
+		col("time", "Data point time"),
+		col("name", "Metric name"),
+		col("unit", "Metric unit as reported"),
+		col("type", vocabularyDescription("type")),
+		col("temporality", "cumulative or delta; NULL for gauge and summary"),
+		col("start_time", "Data point start time; NULL when absent"),
+		col("value", "Gauge or sum value; NULL for histogram and summary").in("none"),
+		col("hist_count", "Histogram point count").in("count"),
+		col("hist_sum", "Histogram point sum; NULL when absent").in("none"),
+		col("attributes", "Data point attributes; use attributes['key']"),
+		col("resource", "Resource attributes; use resource['key']"),
 	),
 }
 
 // SignalNames lists the queryable signals in display order.
-func SignalNames() []string { return []string{"spans", "logs", "metrics"} }
+func SignalNames() []string {
+	names := make([]string, len(telemetry.Signals))
+	for i, s := range telemetry.Signals {
+		names[i] = s.Name
+	}
+	return names
+}
 
 func lookupSignal(name string) (*signal, bool) {
 	s, ok := signals[name]
@@ -154,10 +165,14 @@ var attributePattern = regexp.MustCompile(`(?s)^(attributes|resource)\['((?:[^']
 func (s *signal) field(text string) (FieldRef, error) {
 	text = strings.TrimSpace(text)
 	if m := attributePattern.FindStringSubmatch(text); m != nil {
-		return FieldRef{Text: text, Column: m[1], Key: strings.ReplaceAll(m[2], "''", "'"), Type: TypeString, Unit: "none"}, nil
+		key := strings.ReplaceAll(m[2], "''", "'")
+		return FieldRef{Text: text, Column: m[1], Key: key, Type: s.keyType(m[1], key), Unit: "none"}, nil
 	}
 	f, ok := s.index[text]
 	if !ok {
+		if k, internal := internalKey(text); internal {
+			return FieldRef{}, fmt.Errorf("%s is internal; write %s", text, k)
+		}
 		message := fmt.Sprintf("%q is not a %s field", text, s.name)
 		if hint := suggest.Spelling(text, s.names()); hint != "" {
 			return FieldRef{}, errors.New(message + "; " + hint)
@@ -172,6 +187,29 @@ func (s *signal) field(text string) (FieldRef, error) {
 		unit = "none"
 	}
 	return FieldRef{Text: text, Column: f.Name, Type: f.Type, Unit: unit}, nil
+}
+
+// keyType is the type of a map lookup: a standard key with a dedicated
+// column reads as the column's type (proposal 0005), any other key as text.
+func (s *signal) keyType(column, key string) FieldType {
+	if k, ok := s.source.Dedicated(column, key); ok && k.Type == semconv.Int {
+		return TypeNumber
+	}
+	return TypeString
+}
+
+// internalKey returns the lookup to write instead of a storage column.
+func internalKey(name string) (string, bool) {
+	for _, k := range semconv.Keys {
+		if strings.EqualFold(k.Column, name) {
+			column := "attributes"
+			if k.Scope == semconv.Resource {
+				column = "resource"
+			}
+			return column + "[" + sqlString(k.Name) + "]", true
+		}
+	}
+	return "", false
 }
 
 func quoteIdent(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }

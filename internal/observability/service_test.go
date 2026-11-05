@@ -166,7 +166,7 @@ func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"caller", "callee", "edge_type", "calls", "average_ms", "error_rate"}).
 			AddRow("checkout", "postgres", "call", int64(10), 12.5, 0.0))
 
-	mock.ExpectQuery(regexp.QuoteMeta(topologyExternalQuery)).WithArgs(start, end, "prod", "prod", "", "", "", start, end, start, end, 50).WillReturnRows(sqlmock.NewRows([]string{"caller", "callee", "calls", "average_ms", "error_rate", "spans", "peer_error_rate", "p50", "p95"}))
+	mock.ExpectQuery(regexp.QuoteMeta(topologyPeersQuery)).WithArgs(start, end, "prod", "prod", "", "", "", start, end, 50).WillReturnRows(sqlmock.NewRows([]string{"caller", "callee", "calls", "average_ms", "error_rate", "spans", "peer_error_rate", "p50", "p95"}))
 	result, err := svc.Topology(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, 50)
 	if err != nil {
 		t.Fatalf("Topology: %v", err)
@@ -186,7 +186,7 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	svc, mock, repository := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	mock.ExpectQuery(regexp.QuoteMeta(recentTraceQuery)).
+	mock.ExpectQuery(regexp.QuoteMeta(completedTraceQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"trace_id"}).AddRow("trace-1"))
 	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "trace-fixture", Spans: []telemetry.Span{

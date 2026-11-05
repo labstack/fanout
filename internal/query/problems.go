@@ -36,6 +36,16 @@ func DiagnosisProblem(path, message, hint string) Problem {
 	return Problem{Path: path, Message: PresentDiagnosis(message), Hint: PresentDiagnosis(hint), productDiagnosis: true}
 }
 
+// Diagnoses presents FanQL problems, which quote the user's own text (often URL
+// paths), as product-authored guidance rather than engine errors.
+func Diagnoses(problems Problems) Problems {
+	for i := range problems {
+		p := &problems[i]
+		p.Message, p.Hint, p.productDiagnosis = PresentDiagnosis(p.Message), PresentDiagnosis(p.Hint), true
+	}
+	return problems
+}
+
 // Problems is a validation result; empty means valid. It is an error so a
 // caller can return it unchanged and an adapter can unwrap it with errors.As.
 type Problems []Problem

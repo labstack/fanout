@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/labstack/fanout/internal/engine"
 )
 
 // Filter is one checked filter expression.
 type Filter struct {
+	RoutePopulation bool     `json:"-"` // Checked nonempty http.route population, safe for bounded endpoint summaries.
+	Columns         []string `json:"-"` // Checked column dependencies, including attribute roots.
 	// Expr is DuckDB's canonical rendering of the checked expression; it is
 	// the only text ever embedded in SQL.
 	Expr string `json:"expr"`
@@ -17,6 +21,9 @@ type Filter struct {
 	Source   string          `json:"source"`
 	Params   []string        `json:"params,omitempty"`
 	InParams map[string]bool `json:"-"`
+	// PatternParams are variables used as patterns; their values are bounded
+	// when bound.
+	PatternParams map[string]bool `json:"-"`
 	// EqField is the field compared when the filter is `field = value`; the
 	// empty-panel diagnosis lists values seen for it.
 	EqField        string `json:"-"`
@@ -27,6 +34,9 @@ type Filter struct {
 	DisplayLiteral string `json:"-"`
 	DisplayParam   string `json:"-"`
 	NameInAnd      bool   `json:"-"`
+	// Negated is a whole entry that is one negated term as FanQL lowers it
+	// (proposal 0004, section 0.7); on the traces viz it excludes traces.
+	Negated bool `json:"-"`
 }
 
 var (
@@ -60,7 +70,7 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 	if !onlyWhereClause(node, sig.name) {
 		return Filter{}, errors.New("must be a single boolean expression")
 	}
-	f := Filter{Source: strings.TrimSpace(expr), InParams: map[string]bool{}}
+	f := Filter{Columns: []string{}, Source: strings.TrimSpace(expr), InParams: map[string]bool{}}
 	uses := map[string]int{}
 	typed := SQLExpression(node["where_clause"])
 	if err := walkFilterExpr(typed, sig, vars, &f, uses); err != nil {
@@ -74,10 +84,12 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 			return Filter{}, fmt.Errorf("use $%s either with IN or with a comparison, not both", name)
 		}
 	}
+	f.RoutePopulation = typed != nil && typed.Class == "COMPARISON" && typed.Type == "COMPARE_NOTEQUAL" && fieldText(typed.Left) == "attributes['http.route']" && typed.Right != nil && typed.Right.LiteralKind == "STRING" && typed.Right.LiteralText == ""
 	f.EqField = equalityField(typed)
 	f.DisplayField, f.DisplayLiteral, f.DisplayParam = filterDisplay(typed)
 	f.EqLiteral, f.EqParam, f.EqValue = equalityValue(typed)
 	f.NameInAnd = nameEqualityInAnd(typed)
+	f.Negated = negatedTerm(typed)
 	if f.EqValue {
 		f.EqField = "name"
 	}
@@ -203,6 +215,7 @@ func walkFilterExpr(v *SQLExpr, sig *signal, vars map[string]Variable, f *Filter
 		return walk(v.Input, v.Lower, v.Upper)
 	case "OPERATOR":
 		if v.Type == "ARRAY_EXTRACT" {
+			f.Columns = append(f.Columns, fieldText(v))
 			return checkAttributeExpr(v)
 		}
 		if !filterOperators[v.Type] {
@@ -224,6 +237,9 @@ func walkFilterExpr(v *SQLExpr, sig *signal, vars map[string]Variable, f *Filter
 	case "COLUMN_REF":
 		if len(v.Columns) != 1 {
 			return errors.New("qualified column names are not allowed in a filter")
+		}
+		if !slices.Contains(f.Columns, v.Columns[0]) {
+			f.Columns = append(f.Columns, v.Columns[0])
 		}
 		_, err := sig.field(v.Columns[0])
 		return err
@@ -255,6 +271,9 @@ func walkFilterExpr(v *SQLExpr, sig *signal, vars map[string]Variable, f *Filter
 		if v.HasFilter {
 			return errors.New("FILTER is not allowed in a filter")
 		}
+		if err := checkFilterPattern(v, f); err != nil {
+			return err
+		}
 		if v.Function == "contains" && len(v.Arguments) == 2 && v.Arguments[0] != nil && v.Arguments[0].Class == "PARAMETER" {
 			f.InParams[v.Arguments[0].Identifier] = true
 		}
@@ -263,6 +282,35 @@ func walkFilterExpr(v *SQLExpr, sig *signal, vars map[string]Variable, f *Filter
 		return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(strings.TrimPrefix(v.Type, "VALUE_")))
 	}
 }
+
+// filterPatterns names the filter functions whose second argument is a
+// pattern. A pattern costs its length times the text's per row, and DuckDB
+// stops a statement only between chunks, so it is a literal or a variable of
+// at most engine.MaxPatternBytes, never a column.
+var filterPatterns = map[string]string{"~~": "LIKE", "!~~": "NOT LIKE", "~~*": "ILIKE", "!~~*": "NOT ILIKE", "regexp_matches": "regexp_matches"}
+
+func checkFilterPattern(v *SQLExpr, f *Filter) error {
+	label, ok := filterPatterns[v.Function]
+	if !ok || len(v.Arguments) < 2 {
+		return nil
+	}
+	pattern := v.Arguments[1]
+	for pattern != nil && pattern.Class == "CAST" {
+		pattern = pattern.Child
+	}
+	switch {
+	case pattern != nil && pattern.Class == "PARAMETER":
+		if f.PatternParams == nil {
+			f.PatternParams = map[string]bool{}
+		}
+		f.PatternParams[pattern.Identifier] = true
+		return nil
+	case pattern != nil && pattern.Class == "CONSTANT" && len(pattern.LiteralText) <= engine.MaxPatternBytes:
+		return nil
+	}
+	return fmt.Errorf("the pattern of %s must be a literal or a variable of at most %d bytes", label, engine.MaxPatternBytes)
+}
+
 func checkAttributeExpr(v *SQLExpr) error {
 	if len(v.Children) != 2 {
 		return errors.New("attribute lookups take one key")
@@ -275,6 +323,90 @@ func checkAttributeExpr(v *SQLExpr) error {
 		return errors.New("attribute keys must be literal strings such as attributes['http.route']")
 	}
 	return nil
+}
+
+// negatedTerm reports whether an expression is one prefix-negated term in a
+// shape FanQL lowers it to and lifts back as one: k IS NULL (-k:*), NOT
+// coalesce((p), FALSE) over one leaf, or (k IS NULL OR q) where q is one
+// comparison, IN, BETWEEN, LIKE or negated contains that reads only k. SQL's
+// own k != v is not one, nor is a hand-written q that FanQL keeps raw.
+func negatedTerm(v *SQLExpr) bool {
+	if v == nil {
+		return false
+	}
+	if v.Type == "OPERATOR_IS_NULL" && len(v.Children) == 1 {
+		return fieldText(v.Children[0]) != ""
+	}
+	if v.Class == "OPERATOR" && v.Type == "OPERATOR_NOT" && len(v.Children) == 1 {
+		c := v.Children[0]
+		if c == nil || c.Type != "OPERATOR_COALESCE" || len(c.Children) != 2 || c.Children[0] == nil || c.Children[0].Class == "CONJUNCTION" {
+			return false
+		}
+		last := c.Children[1]
+		return last != nil && last.Class == "CONSTANT" && strings.EqualFold(last.LiteralText, "false")
+	}
+	if v.Class != "CONJUNCTION" || v.Type != "CONJUNCTION_OR" || len(v.Children) != 2 {
+		return false
+	}
+	isNull := v.Children[0]
+	if isNull == nil || isNull.Type != "OPERATOR_IS_NULL" || len(isNull.Children) != 1 {
+		return false
+	}
+	field := fieldText(isNull.Children[0])
+	return field != "" && negatedLeaf(v.Children[1]) && readsOnly(v.Children[1], field)
+}
+
+// negatedLeaf reports whether q is one of the leaves FanQL writes after
+// k IS NULL OR in a negated term: a predicate on the field itself, or a
+// negated contains.
+func negatedLeaf(q *SQLExpr) bool {
+	if q == nil {
+		return false
+	}
+	var operand *SQLExpr
+	switch {
+	case q.Class == "COMPARISON":
+		operand = q.Left
+	case q.Class == "BETWEEN":
+		operand = q.Input
+	case (q.Type == "COMPARE_IN" || q.Type == "COMPARE_NOT_IN") && len(q.Children) > 0:
+		operand = q.Children[0]
+	case q.Class == "FUNCTION" && (q.Function == "~~" || q.Function == "!~~" || q.Function == "~~*" || q.Function == "!~~*") && len(q.Arguments) > 0:
+		operand = q.Arguments[0]
+	case q.Type == "OPERATOR_NOT" && len(q.Children) == 1:
+		c := q.Children[0]
+		return c != nil && c.Class == "FUNCTION" && c.Function == "contains"
+	}
+	return fieldText(operand) != ""
+}
+
+// readsOnly reports whether an expression reads one field and no other.
+func readsOnly(v *SQLExpr, field string) bool {
+	found := false
+	var visit func(*SQLExpr) bool
+	visit = func(n *SQLExpr) bool {
+		if n == nil {
+			return true
+		}
+		if n.Class == "COLUMN_REF" || n.Class == "OPERATOR" && n.Type == "ARRAY_EXTRACT" {
+			found = true
+			return fieldText(n) == field
+		}
+		for _, child := range []*SQLExpr{n.Left, n.Right, n.Child, n.Input, n.Lower, n.Upper} {
+			if !visit(child) {
+				return false
+			}
+		}
+		for _, children := range [][]*SQLExpr{n.Children, n.Arguments} {
+			for _, child := range children {
+				if !visit(child) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return visit(v) && found
 }
 
 func equalityField(v *SQLExpr) string {
@@ -472,8 +604,9 @@ func groupType(sig *signal, operands ...any) string {
 }
 
 // operandType classifies an operand as a number (paramNumber) or a time
-// (paramTime), or returns "" for text, attribute lookups, parameters and
-// anything else.
+// (paramTime), or returns "" for text, parameters and anything else. A
+// lookup of a standard integer key is a number: the engine reads its typed
+// column (proposal 0005). Other attribute lookups are text.
 func operandType(n any, sig *signal) string {
 	v, _ := n.(map[string]any)
 	switch v["class"] {
@@ -507,6 +640,11 @@ func operandType(n any, sig *signal) string {
 			return paramNumber
 		}
 	case "OPERATOR":
+		if field := fieldText(SQLExpression(v)); v["type"] == "ARRAY_EXTRACT" && field != "" {
+			if ref, err := sig.field(field); err == nil && ref.Type == TypeNumber {
+				return paramNumber
+			}
+		}
 		if v["type"] == "OPERATOR_COALESCE" {
 			children, _ := v["children"].([]any)
 			return groupType(sig, children...)
@@ -571,8 +709,21 @@ func nameEqualityInAnd(v *SQLExpr) bool {
 
 // filterDisplay derives product wording from the checked AST, never SQL text.
 func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
-	if node == nil || node.Class != "COMPARISON" {
+	if node == nil {
 		return "", "", ""
+	}
+	if node.Class == "FUNCTION" && node.Function == "contains" && len(node.Arguments) == 2 {
+		// FanQL free text and `~` lower to contains(lower(field), lower('text')).
+		if field := displayField(fieldText(unwrapLower(node.Arguments[0]))); field != "" {
+			if text := constantText(unwrapLower(node.Arguments[1])); text != "" {
+				return field, `containing "` + text + `"`, ""
+			}
+			return field, "", ""
+		}
+	}
+	if node.Class != "COMPARISON" {
+		// Negations and other compound filters are named by their first field.
+		return displayField(firstField(node)), "", ""
 	}
 	other := node.Right
 	field = fieldText(node.Left)
@@ -582,18 +733,7 @@ func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
 	if field == "" {
 		return "", "", ""
 	}
-	switch field {
-	case "http_route":
-		field = "HTTP route"
-	case "http_method":
-		field = "HTTP method"
-	case "http_status_code":
-		field = "HTTP status code"
-	case "name":
-		field = "metric"
-	default:
-		field = strings.NewReplacer("attributes['", "attribute ", "resource['", "resource ", "']", "", "_", " ").Replace(field)
-	}
+	field = displayField(field)
 	if node.Type != "COMPARE_EQUAL" {
 		return field, "", ""
 	}
@@ -602,7 +742,10 @@ func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
 		case "CAST":
 			other = other.Child
 		case "CONSTANT":
-			return field, constantText(other), ""
+			if other.LiteralKind == "NULL" {
+				return field, "", ""
+			}
+			return field, other.LiteralText, ""
 		case "PARAMETER":
 			return field, "", other.Identifier
 		default:
@@ -610,4 +753,49 @@ func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
 		}
 	}
 	return field, "", ""
+}
+
+// displayField names a filtered field for people.
+func displayField(field string) string {
+	switch field {
+	case "":
+		return ""
+	case "name":
+		return "metric"
+	case "duration_ms":
+		return "duration"
+	}
+	// Attribute keys keep their spelling; only column names read as words.
+	if key, ok := strings.CutPrefix(field, "attributes['"); ok {
+		return "attribute " + strings.TrimSuffix(key, "']")
+	}
+	if key, ok := strings.CutPrefix(field, "resource['"); ok {
+		return "resource " + strings.TrimSuffix(key, "']")
+	}
+	return strings.ReplaceAll(field, "_", " ")
+}
+
+func unwrapLower(v *SQLExpr) *SQLExpr {
+	if v != nil && v.Class == "FUNCTION" && v.Function == "lower" && len(v.Arguments) == 1 {
+		return v.Arguments[0]
+	}
+	return v
+}
+
+// firstField is the first field a filter reads, depth first.
+func firstField(v *SQLExpr) string {
+	if v == nil {
+		return ""
+	}
+	if field := fieldText(v); field != "" {
+		return field
+	}
+	for _, list := range [][]*SQLExpr{{v.Left, v.Right, v.Child, v.Input, v.Lower, v.Upper}, v.Children, v.Arguments} {
+		for _, child := range list {
+			if field := firstField(child); field != "" {
+				return field
+			}
+		}
+	}
+	return ""
 }

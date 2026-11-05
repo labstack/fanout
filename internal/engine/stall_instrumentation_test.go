@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -79,80 +78,6 @@ func TestWritesDoNotDrawFromTheReadPool(t *testing.T) {
 	// The read pool is the one worth watching, so it is the one the gauges read.
 	if got := int(metricFamily(t, "fanout_duckdb_pool_max_open").Metric[0].GetGauge().GetValue()); got != 4 {
 		t.Fatalf("pool gauges read a pool with MaxOpenConnections = %d, want the read pool's 4", got)
-	}
-}
-
-// A stalled query asks one question — how long did I wait to enter the
-// snapshot? — and until this metric existed the answer was unavailable, which
-// is why the first diagnosis of the stalls named a lock that does not exist.
-func TestSnapshotWaitIsMeasuredForReaders(t *testing.T) {
-	// Label values of this test's own, so the counts are this test's alone
-	// however the package's tests are ordered.
-	admitted := fmt.Sprintf("test-admitted-%d", time.Now().UnixNano())
-	refused := fmt.Sprintf("test-refused-%d", time.Now().UnixNano())
-	d := &Duck{}
-	before := len(metricFamily(t, "fanout_parquet_read_wait_seconds").Metric)
-	if err := d.lockParquetRead(context.Background(), admitted); err != nil {
-		t.Fatalf("lockParquetRead: %v", err)
-	}
-	d.parquetMu.RUnlock()
-	admittedCount := len(metricFamily(t, "fanout_parquet_read_wait_seconds").Metric)
-	if admittedCount != before+1 {
-		t.Fatalf("an admitted reader added %d wait series, want 1", admittedCount-before)
-	}
-
-	// A reader that gives up is counted separately: a refusal and a long wait
-	// are different failures.
-	if err := d.parquetMu.LockContext(context.Background()); err != nil {
-		t.Fatalf("take the publisher side: %v", err)
-	}
-	defer d.parquetMu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
-	defer cancel()
-	if err := d.lockParquetRead(ctx, refused); err == nil {
-		t.Fatal("reader entered a snapshot held by a publisher")
-	}
-	if refusals := counterValue(t, "fanout_parquet_read_refusals_total", "reader", refused); refusals != 1 {
-		t.Fatalf("refusals = %v, want 1", refusals)
-	}
-	// A refusal is not also counted as a wait: they are different failures.
-	if series := len(metricFamily(t, "fanout_parquet_read_wait_seconds").Metric); series != admittedCount {
-		t.Fatalf("a refused reader added %d wait series, want 0", series-admittedCount)
-	}
-}
-
-func TestPublisherWaitingTracksFreshAndCanceledPublication(t *testing.T) {
-	gate := parquetReadGate{}
-	base := time.Now()
-	gate.now = func() time.Time { return base }
-	if gate.publisherWaiting() {
-		t.Fatal("idle gate reports a waiting publisher")
-	}
-	if err := gate.RLockContext(t.Context(), parquetReadQuery); err != nil {
-		t.Fatal(err)
-	}
-	defer gate.RUnlock()
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- gate.LockContext(ctx) }()
-	deadline := time.Now().Add(time.Second)
-	for !gate.publisherWaiting() {
-		if time.Now().After(deadline) {
-			t.Fatal("fresh publisher was not observed")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	if !gate.TryRLock(parquetReadQuery) {
-		t.Fatal("fresh publisher exhausted reader grace")
-	}
-	gate.RUnlock()
-	cancel()
-	if err := <-done; err != context.Canceled {
-		t.Fatalf("publication: %v", err)
-	}
-	if gate.publisherWaiting() {
-		t.Fatal("canceled publisher remained waiting")
 	}
 }
 
@@ -319,15 +244,4 @@ func metricFamily(t *testing.T, name string) *dto.MetricFamily {
 		}
 	}
 	return &dto.MetricFamily{}
-}
-func counterValue(t *testing.T, name, label, value string) float64 {
-	t.Helper()
-	for _, metric := range metricFamily(t, name).Metric {
-		for _, pair := range metric.Label {
-			if pair.GetName() == label && pair.GetValue() == value {
-				return metric.GetCounter().GetValue()
-			}
-		}
-	}
-	return 0
 }

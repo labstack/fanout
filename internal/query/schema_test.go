@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"slices"
 	"testing"
-	"time"
+
+	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/fanout/internal/telemetry/semconv"
 )
 
 func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
@@ -16,15 +18,20 @@ func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	spans := schema.Signals["spans"]
-	if len(schema.Signals) != 3 || len(schema.SQLRelations) != 3 || len(schema.SQLRelations["resource_inventory"].Columns) != 6 {
+	if len(schema.Signals) != 3 || len(schema.SQLRelations) != 10 || len(schema.SQLRelations["resource_inventory"].Columns) != 6 {
 		t.Fatalf("SQL relation discovery: %+v", schema)
 	}
 	if got := schema.SQLRelations["resource_inventory"]; got.Columns[3].SQLType != "VARIANT" || got.Columns[4].SQLType != "TIMESTAMPTZ_NS" {
 		t.Fatalf("inventory types: %+v", got)
 	}
-	d := Dashboard{Name: "Invalid structured inventory", Panels: []Panel{{ID: "resources", Title: "Resources", Viz: "stat", Query: &Spec{From: "resource_inventory", Measures: []string{"count()"}}}}}
-	if err := e.Validate(t.Context(), &d); err == nil {
-		t.Fatal("SQL-only relation accepted as structured signal")
+	for _, name := range []string{"resource_inventory", "resource_rollup", "receiver_rollup", "receiver_points", "receiver_entity_rollup"} {
+		if _, ok := schema.SQLRelations[name]; !ok {
+			t.Fatalf("SQL relation %s missing", name)
+		}
+		d := Dashboard{Name: "Invalid structured summary", Panels: []Panel{{ID: "resources", Title: "Resources", Viz: "stat", Query: &Spec{From: name, Measures: []string{"count()"}}}}}
+		if err := e.Validate(t.Context(), &d); err == nil {
+			t.Fatalf("SQL-only relation %s accepted as a structured signal", name)
+		}
 	}
 	if spans.TimeColumn != "start_time" {
 		t.Fatalf("time column = %q", spans.TimeColumn)
@@ -35,6 +42,27 @@ func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
 	}
 	if !slices.Contains(keys, "attributes:http.route:string") || !slices.Contains(keys, "attributes:customer.tier:string") {
 		t.Fatalf("attributes = %v", keys)
+	}
+	indexed := map[string]bool{}
+	for _, a := range spans.Attributes {
+		if a.Indexed {
+			indexed[a.Scope+":"+a.Key+":"+a.Type] = true
+		}
+	}
+	if len(indexed) != len(semconv.Keys) || !indexed["attributes:http.route:string"] || !indexed["attributes:http.response.status_code:number"] || !indexed["resource:k8s.pod.name:string"] {
+		t.Fatalf("indexed span keys = %v", indexed)
+	}
+	logKeys := 0
+	for _, a := range schema.Signals["logs"].Attributes {
+		if a.Indexed {
+			logKeys++
+			if a.Scope != "resource" {
+				t.Fatalf("log attribute %s indexed", a.Key)
+			}
+		}
+	}
+	if logKeys != len(telemetry.Logs.Keys()) {
+		t.Fatalf("indexed log keys = %d", logKeys)
 	}
 	var kinds []string
 	for _, c := range spans.Columns {
@@ -50,8 +78,8 @@ func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
 	if len(schema.Services) != 2 || schema.Services[0].Value != "checkout" {
 		t.Fatalf("services = %+v", schema.Services)
 	}
-	if !slices.Contains(schema.Measures, "p95") || !slices.Contains(schema.Units, "ms") {
-		t.Fatalf("measures %v units %v", schema.Measures, schema.Units)
+	if !slices.Contains(schema.Measures, "p95") || !slices.Contains(schema.Units, "ms") || !slices.Equal(schema.Buckets, BucketNames()) {
+		t.Fatalf("measures %v units %v buckets %v", schema.Measures, schema.Units, schema.Buckets)
 	}
 	again, err := e.Schema(t.Context(), SchemaRequest{Window: "1h"})
 	if err != nil || again != schema {
@@ -65,7 +93,7 @@ func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
 func TestSchemaRollupColumnsMatchEngine(t *testing.T) {
 	_, db := metricFixture(t)
 	for _, name := range []string{"service_rollup", "edge_rollup"} {
-		rows, err := db.QueryContext(t.Context(), "SELECT * FROM "+name+" LIMIT 0")
+		rows, err := db.db().QueryContext(t.Context(), "SELECT * FROM "+name+" LIMIT 0")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,25 +130,41 @@ func TestSchemaReturnsOperationalErrorsUnwrapped(t *testing.T) {
 
 func TestSchemaCacheIsBounded(t *testing.T) {
 	e := newFixtureExecutor(t)
-	now := e.now()
 	for i := range 70 {
-		if _, err := e.Schema(t.Context(), SchemaRequest{Window: "1h", Namespace: fmt.Sprintf("ns%d", i)}); err != nil {
-			t.Fatal(err)
-		}
-		e.mu.Lock()
-		n := len(e.schemas)
-		e.mu.Unlock()
-		if n > maxSchemaEntries {
-			t.Fatalf("cache holds %d entries", n)
+		_, err := e.Schema(t.Context(), SchemaRequest{Window: "1h", Namespace: fmt.Sprintf("ns%d", i)})
+		var problems Problems
+		if !errors.As(err, &problems) || problems[0].Path != "namespace" {
+			t.Fatalf("junk namespace: %v", err)
 		}
 	}
-	e.now = func() time.Time { return now.Add(schemaTTL + time.Second) }
-	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "1h", Namespace: "fresh"}); err != nil {
+	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "2h"}); err == nil {
+		t.Fatal("unsupported window accepted")
+	}
+	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "1h", Namespace: "shop"}); err != nil {
 		t.Fatal(err)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if len(e.schemas) != 1 {
-		t.Fatalf("expired entries kept: %d", len(e.schemas))
+	// The namespace listing and the one real key: junk took no entries.
+	if len(e.schemas) != 2 {
+		t.Fatalf("cache holds %d entries", len(e.schemas))
+	}
+}
+
+// A standard key reads as its column's type whatever the map's sampled rows
+// sent, so the schema reports no mixed types for it.
+func TestSchemaReportsStandardKeysTyped(t *testing.T) {
+	got := indexAttributes(telemetry.Spans, []AttributeSchema{
+		{Key: "http.response.status_code", Scope: "attributes", Type: "string", Count: 9, Types: []string{"string", "number"}, Numbers: []Option{{Value: "200", Count: 4}}},
+		{Key: "http.status_code", Scope: "attributes", Type: "string", Types: []string{"string", "number"}},
+	})
+	if a := got[0]; !a.Indexed || a.Type != "number" || a.Types != nil || a.Numbers != nil || a.Count != 9 {
+		t.Fatalf("standard key: %+v", a)
+	}
+	if a := got[1]; a.Indexed || a.Types == nil {
+		t.Fatalf("other key: %+v", a)
+	}
+	if len(got) != len(semconv.Keys)+1 {
+		t.Fatalf("%d attributes", len(got))
 	}
 }

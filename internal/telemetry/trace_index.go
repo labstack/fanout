@@ -142,13 +142,13 @@ func (w *traceIndexWriter) fail(err error) error {
 	return err
 }
 
-func writeTraceIndex(path string, rows []spanParquetRow) error {
+func writeTraceIndex(path string, hashes []uint64) error {
 	writer, err := newTraceIndexWriter(path)
 	if err != nil {
 		return err
 	}
-	for i := range rows {
-		if err := writer.Append(rows[i].TraceHash); err != nil {
+	for _, hash := range hashes {
+		if err := writer.Append(hash); err != nil {
 			writer.Abort()
 			return err
 		}

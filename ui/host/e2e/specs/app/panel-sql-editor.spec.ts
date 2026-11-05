@@ -6,13 +6,13 @@ test("edits an existing SQL panel, previews it and saves a new version in histor
   page.on("request", request => { if (request.resourceType() === "script") scripts.push(request.url()); });
   const { record, cleanup } = await openSqlDashboard(page, request, info);
   try {
-    expect(scripts.some(url => /panel-sql-editor-.*\.js/.test(url))).toBe(false);
+    expect(scripts.some(url => /panel-editor-.*\.js/.test(url))).toBe(false);
     const dialog = await openSqlEditor(page);
-    expect(scripts.some(url => /panel-sql-editor-.*\.js/.test(url))).toBe(true);
+    expect(scripts.some(url => /panel-editor-.*\.js/.test(url))).toBe(true);
     const editor = dialog.getByRole("textbox", { name: "Panel SQL" });
     await editor.fill(editedSQL);
     await editor.press("ControlOrMeta+Enter");
-    await expect(dialog.getByText("Preview result", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Result", { exact: true })).toBeVisible();
     await expect(dialog.locator("[data-stat-value]")).toBeVisible();
     await editor.focus(); await editor.press("Escape");
     await expect(dialog.getByRole("button", { name: "Run", exact: true })).toBeFocused();
@@ -21,13 +21,13 @@ test("edits an existing SQL panel, previews it and saves a new version in histor
     await expect(dialog.getByRole("button", { name: "Discard changes", exact: true })).toHaveCount(0);
     await editor.focus(); await editor.press("Tab");
     await expect(dialog.getByRole("button", { name: "Run", exact: true })).toBeFocused();
-    await dialog.getByRole("button", { name: "Save SQL", exact: true }).click();
+    await dialog.getByRole("button", { name: "Save panel", exact: true }).click();
     await expect(dialog).toBeHidden();
     await page.getByRole("button", { name: "History", exact: true }).click();
     const history = page.locator("[data-version-history]");
     const currentVersion = history.getByRole("listitem").filter({ has: page.getByRole("button", { name: `Version ${record.version + 1}`, exact: true }) });
     await expect(currentVersion.getByText("Current", { exact: true })).toBeVisible();
-    await expect(currentVersion).toContainText("Edited SQL for SQL requests");
+    await expect(currentVersion).toContainText("Edited SQL requests");
     const saved = await request.get(`/api/dashboards/${record.id}`);
     expect(saved.ok()).toBe(true);
     const next = await saved.json();
@@ -42,7 +42,7 @@ test("cancel discards SQL edits without creating a version", async ({ page, requ
     const dialog = await openSqlEditor(page);
     await dialog.getByRole("textbox", { name: "Panel SQL" }).fill(editedSQL);
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-    await expect(dialog.getByText("Discard SQL changes?", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Discard changes?", { exact: true })).toBeVisible();
     await dialog.getByRole("button", { name: "Keep editing", exact: true }).click();
     await expect(dialog.getByRole("textbox", { name: "Panel SQL" })).toHaveText(editedSQL);
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();

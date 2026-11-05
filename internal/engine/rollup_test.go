@@ -37,7 +37,7 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 		ingested:  100,
 	})
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
 
@@ -62,7 +62,7 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 		ingested:  300,
 	})
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("second rollupOnce failed: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestServiceRollupLatencyExcludesDependencyWaits(t *testing.T) {
 		start: bucket.Add(4 * time.Second), duration: 250 * time.Millisecond, ingested: 300,
 	})
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("rollupOnce failed: %v", err)
 	}
 
@@ -168,7 +168,7 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 		ingested:     100,
 	})
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
 
@@ -196,7 +196,7 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 		ingested:     200,
 	})
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("second rollupOnce failed: %v", err)
 	}
 
@@ -266,7 +266,7 @@ INSERT INTO telemetry.metrics (
   metric_time,
   time_unix_nano,
   name,
-  metric_type,
+  type,
   service,
   value,
   ingested_at,
@@ -276,7 +276,7 @@ VALUES ('ns-a', NULL, 0, 'cpu.usage', 'gauge', 'checkout', 1.0, now(), 300)`); e
 		t.Fatalf("insert telemetry.metrics failed: %v", err)
 	}
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("rollupOnce failed: %v", err)
 	}
 
@@ -337,7 +337,7 @@ func TestRollupOnceMessagingEdgeCountsConsumedMessages(t *testing.T) {
 		})
 	}
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("rollupOnce failed: %v", err)
 	}
 
@@ -399,7 +399,7 @@ func TestRollupOnceDropsCallEdgeParentOutsideWindow(t *testing.T) {
 	}
 	// Drain the parents' start-time sub-windows before publishing children,
 	// so the next ingested window contains only the children's bucket.
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
 	for pass := 0; pass < 5; pass++ {
@@ -426,7 +426,7 @@ func TestRollupOnceDropsCallEdgeParentOutsideWindow(t *testing.T) {
 			ingested:     200,
 		})
 	}
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("second rollupOnce failed: %v", err)
 	}
 
@@ -565,7 +565,7 @@ WHERE namespace = ?
 		return got
 	}
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
 
@@ -581,10 +581,10 @@ WHERE namespace = 'ns-new'`, nil, 0)
 		t.Fatalf("ns-new call edges after first pass = %d, want 0", got)
 	}
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("second rollupOnce failed: %v", err)
 	}
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("third rollupOnce failed: %v", err)
 	}
 	requireServiceRollupSpans(t, db, "ns-new", bucket, "checkout", 1)
@@ -600,8 +600,6 @@ type rollupTestSpan struct {
 	parentSpanID string
 	service      string
 	operation    string
-	httpMethod   string
-	httpRoute    string
 	status       string
 	kind         string
 	attrs        string
@@ -631,8 +629,6 @@ INSERT INTO telemetry.spans (
   parent_span_id,
   service,
   operation,
-	  http_method,
-	  http_route,
   kind,
   attributes,
   start_time,
@@ -644,15 +640,13 @@ INSERT INTO telemetry.spans (
   ingested_at,
   ingested_unix_nano
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::VARCHAR::JSON::VARIANT, ?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?::VARCHAR::JSON::VARIANT, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		span.namespace,
 		span.traceID,
 		span.spanID,
 		nullIfEmpty(span.parentSpanID),
 		span.service,
 		span.operation,
-		nullIfEmpty(span.httpMethod),
-		nullIfEmpty(span.httpRoute),
 		kind,
 		nullIfEmpty(span.attrs),
 		span.start,
@@ -711,7 +705,7 @@ func nullIfEmpty(v string) any {
 	return v
 }
 
-// A cache table that is dropped for a schema change has to be rebuilt, and a
+// A cache table that is dropped for a version change has to be rebuilt, and a
 // rollup only rebuilds what its watermark says is missing. Leaving the
 // watermark in place after emptying the table loses every historical bucket
 // permanently, and every query over that window then reports no data.
@@ -732,23 +726,24 @@ func TestRecreatingAServiceRollupClearsItsWatermark(t *testing.T) {
 		operation: "POST /checkout", start: bucket.Add(5 * time.Second),
 		duration: 50 * time.Millisecond, ingested: 100,
 	})
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("rollupOnce failed: %v", err)
 	}
 	requireServiceRollupSpans(t, db, "ns", bucket, "checkout", 1)
 
-	// Stand in for the upgrade: the stored table is missing a column this
-	// build requires, so ensureCacheTable empties it.
-	if _, err := db.Exec(`ALTER TABLE service_rollup DROP COLUMN served_spans`); err != nil {
-		t.Fatalf("simulate an older table: %v", err)
+	// Stand in for the upgrade: the stored caches carry an older version, so
+	// the rollup and its progress are dropped together.
+	if _, err := db.Exec(`UPDATE read_cache_version SET version=version-1`); err != nil {
+		t.Fatalf("simulate an older cache: %v", err)
 	}
 	if err := CreateTables(db); err != nil {
-		t.Fatalf("CreateTables after the schema change: %v", err)
+		t.Fatalf("CreateTables after the version change: %v", err)
 	}
 	requireRowCount(t, db, `SELECT count(*) FROM service_rollup`, nil, 0)
+	requireRowCount(t, db, `SELECT count(*) FROM rollup_state`, nil, 0)
 	d.rollupWatermarks = nil
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("rollupOnce after recreate failed: %v", err)
 	}
 	requireServiceRollupSpans(t, db, "ns", bucket, "checkout", 1)
@@ -767,4 +762,18 @@ func tablePublicationBounds(db *sql.DB) func() (int64, int64, int64) {
 		}
 		return hi, hi, lo
 	}
+}
+
+// Mutable-table fixtures exercise analytical rollups without a Parquet
+// repository. Completed-file caches are covered by repository-backed tests.
+func tableRollupOnce(d *Duck, ctx context.Context) (int, error) {
+	if d.repository != nil {
+		return d.rollupOnce(ctx)
+	}
+	service, err := d.drainServiceRollup(ctx, d.cfg.RollupInterval/2)
+	if err != nil {
+		return int(service), err
+	}
+	edge, err := drainEdgeRollup(ctx, d.cfg.RollupInterval/2, d.refreshEdgeRollupPass)
+	return int(service + edge), err
 }

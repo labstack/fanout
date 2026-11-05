@@ -251,3 +251,5 @@ func TestSharedListenerForceCloseCancelsHTTP2Stream(t *testing.T) {
 		t.Fatal("HTTP/2 stream context was not canceled")
 	}
 }
+
+func (*blockedExport) Admit(context.Context, int) error { return nil }

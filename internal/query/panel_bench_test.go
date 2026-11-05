@@ -304,8 +304,8 @@ func TestPanelBenchmarkReplayTilesSignedTimesAndDistinctIdentities(t *testing.T)
 	start := time.Unix(0, int64(time.Hour)).UTC()
 	n := start.Add(time.Minute).UnixNano()
 	err = repo.Commit(t.Context(), telemetrystore.Batch{ID: "signed", Spans: []telemetry.Span{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", SpanID: "span", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: 1, Attributes: map[string]any{"literal.dot": int64(7)}}}, Logs: []telemetry.Log{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: 1, Severity: "INFO", Body: "complete"}}, Metrics: []telemetry.Metric{
-		{Namespace: "bench", ServiceName: "checkout", Name: "absent", Type: "sum", Monotonic: true, Temporality: "cumulative", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
-		{Namespace: "bench", ServiceName: "checkout", Name: "started", Type: "sum", Monotonic: true, Temporality: "cumulative", StartTimeUnixNanos: n - int64(30*time.Second), TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
+		{Namespace: "bench", ServiceName: "checkout", Name: "absent", Type: "counter", Temporality: "cumulative", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
+		{Namespace: "bench", ServiceName: "checkout", Name: "started", Type: "counter", Temporality: "cumulative", StartTimeUnixNanos: n - int64(30*time.Second), TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -420,22 +420,21 @@ func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
 	add := func(kind, name string, at time.Time, count int) {
 		for i := range count {
 			n := at.UnixNano()
-			m := telemetry.Metric{ServiceName: fmt.Sprintf("svc%d", i%2), Type: kind, Name: name, EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: n, Value: float64(i + 1), HistSum: float64(i + 1), HistCount: 1, HistBoundsJSON: "[10]", HistCountsJSON: "[1,0]"}
-			if kind == "updown" {
-				m.Type = "sum"
+			m := telemetry.Metric{ServiceName: fmt.Sprintf("svc%d", i%2), Type: kind, Name: name, EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: n, Value: float64(i + 1)}
+			if kind == "histogram" {
+				m.Histogram = telemetry.Histogram{Sum: float64(i + 1), HasSum: true, Count: 1, Bounds: []float64{10}, Counts: []uint64{1, 0}}
 			}
-			if m.Type == "sum" || kind == "histogram" {
+			if kind != "gauge" {
 				m.Temporality = "cumulative"
-				m.Monotonic = kind == "sum"
 			}
 			metrics = append(metrics, m)
-			if kind == "sum" || kind == "histogram" {
+			if kind == "counter" || kind == "histogram" {
 				n = at.Add(time.Minute).UnixNano()
 				m.EventUnixNanos, m.TimeUnixNanos, m.IngestedAt = n, n, n
 				m.Value++
-				m.HistCount++
-				m.HistSum++
-				m.HistCountsJSON = "[2,0]"
+				m.Count++
+				m.Sum++
+				m.Counts = []uint64{2, 0}
 				metrics = append(metrics, m)
 			}
 		}
@@ -444,8 +443,8 @@ func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
 	add("gauge", "cpu'usage", data.End.Add(-time.Nanosecond), 3)
 	add("gauge", "outside", data.Start.Add(-time.Nanosecond), 4)
 	add("gauge", "outside", data.End, 4)
-	add("sum", "requests", data.Start, 2)
-	add("sum", "rare", data.Start, 1)
+	add("counter", "requests", data.Start, 2)
+	add("counter", "rare", data.Start, 1)
 	add("updown", "inflight", data.Start, 2)
 	add("histogram", "z_latency", data.Start, 2)
 	add("histogram", "a_latency", data.Start, 2)

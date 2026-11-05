@@ -77,8 +77,9 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const axis = (unit: string | undefined, scale: string | undefined, measure: string, pixels: number) => {
       const values = rows.map(row => row[measure]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
       const min = Math.min(0, ...values), max = Math.max(0, ...values);
-      return { type: scale === "log" ? "log" : "value", ...(scale === "log" ? {splitNumber:valueAxisTicks(pixels)} : valueAxis(min, max, unit, pixels)),
-        axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { lineStyle: { color: theme.grid } }, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatAxis(unit), hideOverlap: true } };
+      const bounds = scale === "log" ? undefined : valueAxis(min, max, unit, pixels);
+      return { type: scale === "log" ? "log" : "value", ...(bounds ?? {splitNumber:valueAxisTicks(pixels)}),
+        axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { lineStyle: { color: theme.grid } }, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatAxis(unit, bounds), hideOverlap: true } };
     };
     return {
       ...base,

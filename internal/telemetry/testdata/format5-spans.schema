@@ -1,0 +1,143 @@
+message spans {
+	optional binary _a_db_collection_name (STRING);
+	optional binary _a_db_namespace (STRING);
+	optional binary _a_db_operation_name (STRING);
+	optional binary _a_db_query_summary (STRING);
+	optional binary _a_db_response_status_code (STRING);
+	optional binary _a_db_stored_procedure_name (STRING);
+	optional binary _a_db_system_name (STRING);
+	optional binary _a_error_type (STRING);
+	optional binary _a_http_request_method (STRING);
+	optional int64 _a_http_response_status_code (INT(64,true));
+	optional binary _a_http_route (STRING);
+	optional binary _a_network_peer_address (STRING);
+	optional int64 _a_network_peer_port (INT(64,true));
+	optional binary _a_network_protocol_name (STRING);
+	optional binary _a_network_protocol_version (STRING);
+	optional binary _a_server_address (STRING);
+	optional int64 _a_server_port (INT(64,true));
+	optional binary _a_url_scheme (STRING);
+	optional binary _r_container_id (STRING);
+	optional binary _r_container_image_name (STRING);
+	optional binary _r_deployment_environment_name (STRING);
+	optional binary _r_k8s_cluster_name (STRING);
+	optional binary _r_k8s_cluster_uid (STRING);
+	optional binary _r_k8s_container_name (STRING);
+	optional int64 _r_k8s_container_restart_count (INT(64,true));
+	optional binary _r_k8s_cronjob_name (STRING);
+	optional binary _r_k8s_cronjob_uid (STRING);
+	optional binary _r_k8s_daemonset_name (STRING);
+	optional binary _r_k8s_daemonset_uid (STRING);
+	optional binary _r_k8s_deployment_name (STRING);
+	optional binary _r_k8s_deployment_uid (STRING);
+	optional binary _r_k8s_job_name (STRING);
+	optional binary _r_k8s_job_uid (STRING);
+	optional binary _r_k8s_namespace_name (STRING);
+	optional binary _r_k8s_node_name (STRING);
+	optional binary _r_k8s_node_uid (STRING);
+	optional binary _r_k8s_pod_hostname (STRING);
+	optional binary _r_k8s_pod_ip (STRING);
+	optional binary _r_k8s_pod_name (STRING);
+	optional binary _r_k8s_pod_start_time (STRING);
+	optional binary _r_k8s_pod_uid (STRING);
+	optional binary _r_k8s_replicaset_name (STRING);
+	optional binary _r_k8s_replicaset_uid (STRING);
+	optional binary _r_k8s_statefulset_name (STRING);
+	optional binary _r_k8s_statefulset_uid (STRING);
+	optional binary _r_service_instance_id (STRING);
+	optional binary _r_service_version (STRING);
+	required int64 _trace_hash (INT(64,false));
+	optional group attributes (VARIANT) {
+		required binary metadata;
+		optional binary value;
+		optional group typed_value {
+			required group messaging.destination.name {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group messaging.system {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+		}
+	}
+	required double duration_ms;
+	required int64 end_time (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+	required int64 end_unix_nano (INT(64,true));
+	optional group event_attributes (LIST) {
+		repeated group list {
+			optional group element (VARIANT) {
+				required binary metadata;
+				required binary value;
+			}
+		}
+	}
+	optional group event_names (LIST) {
+		repeated group list {
+			required binary element (STRING);
+		}
+	}
+	optional group event_times (LIST) {
+		repeated group list {
+			required int64 element (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+		}
+	}
+	required binary exception_message (STRING);
+	required binary exception_type (STRING);
+	required int64 flags (INT(64,true));
+	required int64 ingested_at (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+	required int64 ingested_unix_nano (INT(64,true));
+	required binary kind (STRING);
+	optional group link_attributes (LIST) {
+		repeated group list {
+			optional group element (VARIANT) {
+				required binary metadata;
+				required binary value;
+			}
+		}
+	}
+	optional group link_span_ids (LIST) {
+		repeated group list {
+			required binary element (STRING);
+		}
+	}
+	optional group link_trace_ids (LIST) {
+		repeated group list {
+			required binary element (STRING);
+		}
+	}
+	optional group link_trace_states (LIST) {
+		repeated group list {
+			required binary element (STRING);
+		}
+	}
+	required binary namespace (STRING);
+	required binary operation (STRING);
+	required binary parent_span_id (STRING);
+	required binary peer_service (STRING);
+	optional group resource (VARIANT) {
+		required binary metadata;
+		optional binary value;
+		optional group typed_value {
+			required group service.name {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group service.namespace {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+		}
+	}
+	required binary rpc_service (STRING);
+	required binary scope_name (STRING);
+	required binary scope_version (STRING);
+	required binary service (STRING);
+	required binary span_id (STRING);
+	required int64 start_time (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+	required int64 start_unix_nano (INT(64,true));
+	required binary status (STRING);
+	required binary status_message (STRING);
+	required binary trace_id (STRING);
+	required binary trace_state (STRING);
+}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 // seedEdgeSpread writes SERVER/CLIENT pairs that share one ingested instant but
@@ -60,9 +61,10 @@ func newSpreadDuck(t *testing.T, baseTime time.Time, rows, spreadMins int) *Duck
 	return d
 }
 
-// A fresh publisher must get the snapshot at the first resumable boundary,
-// while the pass still completes at least one sub-window and can resume later.
-func TestEdgeRollupYieldsToAQueuedPublisher(t *testing.T) {
+// Retired files waiting for the pass get its snapshot at the first resumable
+// boundary, while the pass still completes at least one sub-window and can
+// resume later.
+func TestEdgeRollupYieldsToWaitingRetirement(t *testing.T) {
 	const (
 		rows       = 6_000
 		spreadMins = 300
@@ -85,22 +87,28 @@ func TestEdgeRollupYieldsToAQueuedPublisher(t *testing.T) {
 	}
 
 	yielding := newSpreadDuck(t, baseTime, rows, spreadMins)
-	if _, err := edgePassBeforeQueuedPublisher(t, yielding, false); err != nil {
+	yielding.snapshotWanted = func(telemetry.SnapshotPin) bool { return true }
+	n, err := yielding.refreshEdgeRollup(ctx)
+	if err != nil {
 		t.Fatalf("yielding pass: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("a pass yielded before doing any work")
 	}
 	watermark, yieldCursor := readEdgeRollupState(t, yielding)
 	if yieldCursor == 0 {
-		t.Fatal("the pass ran the whole window with a publisher waiting on it")
+		t.Fatal("the pass ran the whole window with retired files waiting on it")
 	}
 	if watermark != 0 {
 		t.Fatalf("ingested watermark advanced to %d over a window the pass did not finish", watermark)
 	}
 	if yieldCursor != freeCursor {
-		t.Fatalf("queued and undisturbed passes must each commit one sub-window: queued=%d undisturbed=%d", yieldCursor, freeCursor)
+		t.Fatalf("yielding and undisturbed passes must each commit one sub-window: yielding=%d undisturbed=%d", yieldCursor, freeCursor)
 	}
 
-	// Yielding must not stall the rollup: with the publisher gone the same
+	// Yielding must not stall the rollup: once nothing waits, the same
 	// instance finishes the window.
+	yielding.snapshotWanted = nil
 	for passes := 0; ; passes++ {
 		if passes > spreadMins/30+4 {
 			t.Fatal("edge rollup did not converge after yielding")
@@ -115,71 +123,4 @@ func TestEdgeRollupYieldsToAQueuedPublisher(t *testing.T) {
 	if watermark, _ = readEdgeRollupState(t, yielding); watermark == 0 {
 		t.Fatal("watermark never advanced after the window completed")
 	}
-}
-
-// An admitted pass completes one sub-window even if a publisher's grace
-// expires while the pass is in flight.
-func TestEdgeRollupAlwaysCompletesOneSubWindow(t *testing.T) {
-	baseTime := time.Now().UTC().Truncate(time.Minute)
-	d := newSpreadDuck(t, baseTime, 4_000, 180)
-	rows, err := edgePassBeforeQueuedPublisher(t, d, true)
-	if err != nil {
-		t.Fatalf("pass with a publisher queued: %v", err)
-	}
-	if rows == 0 {
-		t.Fatal("an admitted pass yielded before doing any work")
-	}
-}
-
-// Hold the only SQL connection after loading admission's prerequisites. The
-// pass can take its snapshot but cannot begin SQL until publication queues.
-func edgePassBeforeQueuedPublisher(t *testing.T, d *Duck, overdue bool) (int64, error) {
-	t.Helper()
-	ctx := t.Context()
-	horizon, published, minimum := d.publicationBounds()
-	d.publicationBounds = func() (int64, int64, int64) { return horizon, published, minimum }
-	if _, err := d.cachedRollupWatermark(ctx, edgeRollupStateKey, horizon); err != nil {
-		t.Fatal(err)
-	}
-	clock := &fakeClock{now: time.Now()}
-	d.parquetMu.now = clock.Now
-	conn, err := d.writer().Conn(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	type result struct {
-		rows int64
-		err  error
-	}
-	finished := make(chan result, 1)
-	go func() { rows, err := d.refreshEdgeRollup(ctx); finished <- result{rows, err} }()
-	deadline := time.Now().Add(time.Second)
-	for readers(&d.parquetMu) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("edge pass never entered its snapshot")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	publishedResult := make(chan error, 1)
-	go func() { publishedResult <- d.PublishParquet(ctx, func(context.Context) error { return nil }) }()
-	waitForQueuedWriter(t, &d.parquetMu)
-	if overdue {
-		clock.Advance(defaultWriterGrace + time.Second)
-	}
-	if err := conn.Close(); err != nil {
-		t.Fatal(err)
-	}
-	pass := <-finished
-	if err := <-publishedResult; err != nil {
-		t.Fatal(err)
-	}
-	return pass.rows, pass.err
-}
-
-func readers(gate *parquetReadGate) int {
-	gate.init()
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	return gate.readers
 }

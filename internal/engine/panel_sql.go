@@ -10,7 +10,7 @@ import (
 // ParseSQL parses one statement with DuckDB's parser and returns its
 // serialized node. It reads no telemetry and takes no snapshot.
 func (d *Duck) ParseSQL(ctx context.Context, query string) (map[string]any, error) {
-	return parseStatement(ctx, d.DB, query)
+	return parseStatement(ctx, d.parser(), query)
 }
 
 // PrepareTelemetrySQL checks one untrusted SELECT (both query and describe,
@@ -20,23 +20,27 @@ func (d *Duck) ParseSQL(ctx context.Context, query string) (map[string]any, erro
 // by NULL, which DESCRIBE can bind; the returned statement keeps query's
 // placeholders and is run with QueryContext under the panel's read window.
 func (d *Duck) PrepareTelemetrySQL(ctx context.Context, query, describe string, maxRows int) (string, []bool, error) {
-	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
-		return "", nil, err
-	}
-	defer d.parquetMu.RUnlock()
+	// Describing binds the views without reading rows. Their file list starts
+	// with the schema batch, the only file binding opens, so no pin is needed.
 	conn, err := d.acquireRead(ctx)
 	if err != nil {
 		return "", nil, err
 	}
-	defer conn.Close()
-	if err := validateSQLAST(ctx, conn, query, true); err != nil {
+	defer func() { _ = conn.Close() }()
+	if err := validateSQLAST(ctx, conn, query); err != nil {
 		return "", nil, err
 	}
-	if err := validateSQLAST(ctx, conn, describe, true); err != nil {
+	if err := validateSQLAST(ctx, conn, describe); err != nil {
 		return "", nil, err
 	}
 	trim := func(s string) string { return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), ";")) }
-	projection, aliases, serialized, err := describeProjection(ctx, conn, trim(describe))
+	// Describe the statement as snapshot binding will run it, with standard
+	// keys read through their columns.
+	described, err := compileRelations(ctx, conn, trim(describe), nil, map[string]string{})
+	if err != nil {
+		return "", nil, err
+	}
+	projection, aliases, serialized, err := describeProjection(ctx, conn, described)
 	if err != nil {
 		return "", nil, err
 	}
@@ -64,7 +68,7 @@ func (d *Duck) RenderSQL(ctx context.Context, node map[string]any) (string, erro
 		return "", err
 	}
 	var text string
-	if err := d.DB.QueryRowContext(ctx, "SELECT json_deserialize_sql(?::JSON)", string(wrapped)).Scan(&text); err != nil {
+	if err := d.parser().QueryRowContext(ctx, "SELECT json_deserialize_sql(?::JSON)", string(wrapped)).Scan(&text); err != nil {
 		return "", fmt.Errorf("SQL rendering failed: %w", err)
 	}
 	return text, nil

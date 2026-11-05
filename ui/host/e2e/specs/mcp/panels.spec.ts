@@ -28,12 +28,35 @@ for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
         await expect(main.getByRole("columnheader", { name: /operation/i })).toBeVisible();
       }
       if (scenario === "trace") {
+        const spans = recordings.trace.result.structuredContent.trace.data.spans;
         await expect(main.getByRole("button", { name: "Waterfall", exact: true })).toHaveAttribute("aria-pressed", "true");
+        // One scrolling list holds every span, the root first and children indented below their parents.
+        const rows = main.locator("[data-waterfall] tbody tr");
+        await expect(rows).toHaveCount(spans.length);
+        await expect(rows.first()).toHaveAttribute("data-depth", "0");
+        await expect(rows.first().getByRole("img", { name: /^GET \/frontend on frontend took / })).toBeVisible();
+        const depths = await rows.evaluateAll(elements => elements.map(element => Number(element.getAttribute("data-depth"))));
+        expect(Math.max(...depths), "Child spans are indented under their parents").toBeGreaterThan(0);
+        for (const span of spans) await expect(main.getByRole("img", { name: `${span.operation} on ${span.service} took`, exact: false }).first()).toBeAttached();
         await expect(main.getByText("Correlated logs", { exact: true })).toBeVisible();
         await expect(main.getByRole("cell", { name: "payment failed", exact: true })).toBeVisible();
+        // Clicking a span opens its details below the chart.
+        await rows.first().click();
+        await expect(rows.first()).toHaveAttribute("aria-selected", "true");
+        const details = main.getByRole("region", { name: "Span GET /frontend", exact: true });
+        await expect(details).toBeVisible();
+        await expect(details.getByText("Error", { exact: true })).toBeVisible();
+        await details.getByRole("button", { name: "Close span details", exact: true }).click();
+        await expect(details).toHaveCount(0);
         await main.getByRole("button", { name: "Flame graph", exact: true }).click();
         await expect(main.getByRole("button", { name: "Flame graph", exact: true })).toHaveAttribute("aria-pressed", "true");
-        await expect(main.getByRole("img", { name: /GET \/frontend/ }).first()).toBeVisible();
+        const frame = main.getByRole("button", { name: /^GET \/frontend · .+ · frontend$/ });
+        await expect(frame).toBeVisible();
+        await frame.click();
+        await expect(details).toBeVisible();
+        // The hovered frame's tooltip fades out; scanning it mid-fade blends its colors with the chart.
+        await main.page().mouse.move(0, 0);
+        await expect(main.locator("xpath=ancestor::body").getByRole("tooltip")).toHaveCount(0);
       }
       if (scenario === "logs") await expect(main.getByRole("columnheader", { name: /body/i })).toBeVisible();
       if (scenario === "custom") {
@@ -44,7 +67,7 @@ for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
       await tabTo(main.getByRole("button").first());
       if (scenario === "trace") {
         await main.getByRole("button", { name: recordings.trace.result.structuredContent.trace.data.trace_id.slice(0, 16), exact: true }).click();
-        const detail = frame.getByRole("dialog", { name: "Slow or erroring traces · traces" });
+        const detail = frame.getByRole("dialog", { name: "Trace", exact: true });
         await expect(detail.getByRole("button", { name: "Waterfall", exact: true })).toBeVisible();
         await expect(detail.getByRole("alert")).toHaveCount(0);
       }

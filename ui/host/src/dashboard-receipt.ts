@@ -21,7 +21,7 @@ export type BuildReceipt = {
   save_attempts: Array<{call_id:string;state:Stage["state"] | "retried"}>;
   explanations: string[]; context_counts: { deploys: number; anomalies: number }; saved?: DashboardToolResult;
 };
-const contextTools = new Set(["get_intelligence_snapshot", "query_telemetry", "get_observability_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs"]);
+const contextTools = new Set(["get_insights", "query_telemetry", "get_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs"]);
 const namedProblems = (value: unknown, id: string): Problem[] => Array.isArray(value) ? value.flatMap(p => object(p) && typeof p.path === "string" && typeof p.message === "string" ? [{panel_id:id,path:p.path,message:p.message}] : []) : [];
 const toolCode = (content: unknown) => { const error = jsonObject(content)?.error; return object(error) ? error.code : undefined; };
 export const interruptedResult = (message:Message) => message.role === "tool" && toolCode(message.content) === "interrupted";

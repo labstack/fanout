@@ -43,7 +43,7 @@ func TestDeploySplitUsesEffectiveWindowAndRates(t *testing.T) {
 	if before, since := wire.Periods["Before deploy"], wire.Periods["Since deploy"]; !before.From.Equal(at) || !before.To.Equal(at.Add(15*time.Minute)) || !since.From.Equal(before.To) || !since.To.Equal(at.Add(time.Hour)) {
 		t.Fatalf("missing period windows: %s", raw)
 	}
-	req := ExemplarRequest{Dashboard: d, PanelID: d.Panels[0].ID, From: at, To: at.Add(15 * time.Minute), Dimensions: map[string]string{"http_route": "/cart"}}
+	req := ExemplarRequest{Dashboard: d, PanelID: d.Panels[0].ID, From: at, To: at.Add(15 * time.Minute), Dimensions: map[string]string{"attributes['http.route']": "/cart"}}
 	exemplars, err := e.Exemplars(t.Context(), req)
 	if err != nil || len(exemplars.Traces) != 15 {
 		t.Fatalf("before exemplars: %+v %v", exemplars, err)
@@ -130,12 +130,12 @@ func TestDeploySplitChecksASTScopeReferences(t *testing.T) {
 		expr  string
 		valid bool
 	}{
-		{"http_route = '/service/namespace'", true},
+		{"attributes['http.route'] = '/service/namespace'", true},
 		{"namespace = 'shop'", true},
 		{"'shop' = namespace", true},
 		{"service LIKE '%out'", false},
 		{"namespace IN ('shop')", false},
-		{"service = 'checkout' OR http_route = '/cart'", false},
+		{"service = 'checkout' OR attributes['http.route'] = '/cart'", false},
 		{"service = 'checkout' AND namespace = 'shop'", false},
 		{"CAST(service AS VARCHAR) = 'checkout'", false},
 		{"namespace = service", false},

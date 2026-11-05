@@ -16,6 +16,8 @@ func TestMigrationChecksums(t *testing.T) {
 		"migrations/20261008000001_dashboard_origins.sql":       "6e7e89adf6e51633da0d73b052b12eec08ae3e7dd21ca315a4ac2fecfa703501",
 		"migrations/20261009000000_user_profile_status.sql":     "aed4c0a316a5fb67b1e60c82d45c6b3ec34a2fbb44721ef772f6b5d3df546659",
 		"migrations/20261030000000_alert_last_evaluated_at.sql": "577ef95a1964aebf72d8ecb9610c310910121f7bb735dbb287966525b2fb537a",
+		"migrations/20261031000000_alert_created_at.sql":        "74b75784794f4207790b21d94db4322d5d76cf4a423741788b22ac4f8f2c55f9",
+		"migrations/20261031180000_alert_episodes.sql":          "2406758ae63a8534194ab4cda1257529cfc85b8aaa5d5dc8a3b2f53293d9e2ae",
 	}
 	paths, err := fs.Glob(migrationsFS, "migrations/*.sql")
 	if err != nil {

@@ -31,7 +31,7 @@ client, built-in agent, MCP tools, dashboards, and alerts are preview capabiliti
 ### Docker
 
 ```sh
-docker run --name fanout -p 7520:7520 \
+docker run --name fanout --restart unless-stopped -p 7520:7520 \
   -v fanout-data:/var/lib/fanout/data \
   -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
   labstack/fanout:latest

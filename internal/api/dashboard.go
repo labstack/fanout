@@ -125,7 +125,7 @@ func (h *DashboardHandler) delete(c *echo.Context) error {
 		return err
 	}
 	if c.Request().Header.Get("Fanout-Confirm-Delete") != c.Param("id") {
-		return echo.NewHTTPError(http.StatusPreconditionRequired, "dashboard deletion requires confirmation")
+		return newAPIError(http.StatusPreconditionRequired, "confirmation_required", "Deleting a dashboard requires the Fanout-Confirm-Delete header set to its ID.")
 	}
 	if err := h.dashboards.Delete(c.Request().Context(), owner, c.Param("id")); err != nil {
 		return dashboardError(c, err)

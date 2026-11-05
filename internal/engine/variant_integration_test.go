@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	engine "github.com/labstack/fanout/internal/duckdb"
+	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -44,17 +45,15 @@ func TestPinnedEngineReadsShreddedTelemetry(t *testing.T) {
 		Metrics: []telemetry.Metric{{Namespace: "prod", TimeUnixNanos: nanos, Attributes: attrs, Resource: resource}}}); err != nil {
 		t.Fatal(err)
 	}
+	window := queryrows.WithWindow(ctx, queryrows.Window{Start: time.Unix(0, nanos-1), End: time.Unix(0, nanos+1)})
 	for _, relation := range []string{"spans", "logs", "metrics"} {
-		resp := d.ExecuteSQL(ctx, SQLRequest{Query: "SELECT * FROM " + relation})
-		if resp.Error != "" || len(resp.Results) != 1 {
-			t.Fatalf("%s: %#v", relation, resp)
+		rows := mustRunTelemetrySQL(t, window, d, "SELECT * FROM "+relation, 1000)
+		if len(rows) != 1 {
+			t.Fatalf("%s: %#v", relation, rows)
 		}
-		got := resp.Results[0]["attributes"].(map[string]any)
+		got := jsonValue(t, rows[0]["attributes"]).(map[string]any)
 		if got["dotted.key"] != json.Number("9223372036854775807") || got["zero"] != json.Number("0") || got["false"] != false || got["null"] != nil {
 			t.Fatalf("%s types: %#v", relation, got)
-		}
-		if _, err := json.Marshal(resp.Results); err != nil {
-			t.Fatal(err)
 		}
 	}
 	var extracted int64
@@ -85,8 +84,5 @@ func TestPinnedEngineReadsShreddedTelemetry(t *testing.T) {
 		t.Fatal("operator thread limit locked:", err)
 	}
 	// Nested nanosecond timezone types must never reach an unsupported Go vector.
-	resp := d.ExecuteSQL(ctx, SQLRequest{Query: "SELECT [start_time::TIMESTAMPTZ_NS] AS times FROM spans"})
-	if resp.Error != "" {
-		t.Fatal(resp.Error)
-	}
+	mustRunTelemetrySQL(t, window, d, "SELECT [start_time::TIMESTAMPTZ_NS] AS times FROM spans", 1000)
 }

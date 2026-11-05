@@ -121,17 +121,8 @@ func liftSQLField(signal string, node *query.SQLExpr, contains bool) (fieldName,
 	}
 	switch node.Class {
 	case "CAST":
-		name := node.CastType
 		f, ok := liftSQLField(signal, node.Child, false)
-		if !ok {
-			return fieldName{}, false
-		}
-		if contains && name == "VARCHAR" && f.Ref.Key != "" {
-			return f, true
-		}
-		tr := node.TryCast
-		if tr && name == "INTEGER" && f.Ref.Column == "http_status_code" && f.Ref.Key == "" {
-			f.Ref.CompareAs = "integer"
+		if ok && contains && node.CastType == "VARCHAR" && f.Ref.Key != "" {
 			return f, true
 		}
 		return fieldName{}, false
@@ -231,7 +222,7 @@ func spellingValue(f fieldName, v literalValue, aliases bool) literalValue {
 				}
 			}
 		}
-		if f.Ref.Column != "status" && f.Ref.Column != "kind" && f.Ref.Column != "severity" && f.Ref.Column != "type" && f.Ref.CompareAs == "" {
+		if f.Ref.Column != "status" && f.Ref.Column != "kind" && f.Ref.Column != "severity" && f.Ref.Column != "type" {
 			if numberPattern.MatchString(v.Text) {
 				v.Kind = numberValue
 				return v

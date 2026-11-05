@@ -23,7 +23,7 @@ func TestAnnotationScopeUsesCheckedAST(t *testing.T) {
 	vars := map[string]Variable{"services": {Name: "services", Kind: "custom", Options: []string{"checkout", "payment"}, Multi: true, IncludeAll: true}}
 	scope := Scope{Start: at, End: at.Add(time.Hour), Vars: map[string]Value{"services": {Values: []string{"checkout"}}}}
 	p := &Panel{ID: "p", Title: "P", Viz: "timeseries", Query: &Spec{From: "spans"}}
-	for _, expr := range []string{"service IN $services", "service LIKE '%out'", "namespace = 'shop' AND service = 'checkout' AND http_route = '/cart'"} {
+	for _, expr := range []string{"service IN $services", "service LIKE '%out'", "namespace = 'shop' AND service = 'checkout' AND attributes['http.route'] = '/cart'"} {
 		f, err := checkFilter(t.Context(), engine, sig, vars, expr)
 		if err != nil {
 			t.Fatal(err)
@@ -36,7 +36,7 @@ func TestAnnotationScopeUsesCheckedAST(t *testing.T) {
 			t.Fatalf("%s: %+v", expr, got)
 		}
 	}
-	f, err := checkFilter(t.Context(), engine, sig, vars, "service = 'checkout' OR http_route = '/cart'")
+	f, err := checkFilter(t.Context(), engine, sig, vars, "service = 'checkout' OR attributes['http.route'] = '/cart'")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestCheckOperationalFailures(t *testing.T) {
 			d := Dashboard{Name: "Operational", Panels: []Panel{p}}
 			Normalize(&d)
 			parser := &failExtraParse{Parser: engine, failure: failure}
-			_, problems, err := Check(t.Context(), parser, &d)
+			_, problems, err := checkWith(t.Context(), parser, &d, nil)
 			if !errors.Is(err, failure) || len(problems) != 0 || parser.parses != 3 {
 				t.Fatalf("%s converted operational error to Problems: %+v %v calls=%d", p.Viz, problems, err, parser.parses)
 			}
@@ -174,10 +174,10 @@ func TestAnnotationProjectionOmitsOnlySignalRestrictions(t *testing.T) {
 	scope := Scope{Vars: map[string]Value{"service": {Values: []string{"checkout"}}, "route": {All: true}}}
 	p := &Panel{ID: "p", Viz: "timeseries", Query: &Spec{From: "spans"}}
 	for _, expr := range []string{
-		"service = $service AND http_route = $route",
-		"namespace = 'shop' AND CAST(service AS VARCHAR) = $service AND http_route = $route",
-		"service = $service AND NOT (http_route = $route)",
-		"service = $service AND (namespace = 'shop' OR http_route = $route)",
+		"service = $service AND attributes['http.route'] = $route",
+		"namespace = 'shop' AND CAST(service AS VARCHAR) = $service AND attributes['http.route'] = $route",
+		"service = $service AND NOT (attributes['http.route'] = $route)",
+		"service = $service AND (namespace = 'shop' OR attributes['http.route'] = $route)",
 	} {
 		f, err := checkFilter(t.Context(), engine, sig, vars, expr)
 		if err != nil {
@@ -192,7 +192,7 @@ func TestAnnotationProjectionOmitsOnlySignalRestrictions(t *testing.T) {
 			t.Fatalf("%s: %+v %v", expr, got, err)
 		}
 	}
-	for _, expr := range []string{"service = $service OR http_route = $route", "NOT (service = $service AND http_route = $route)"} {
+	for _, expr := range []string{"service = $service OR attributes['http.route'] = $route", "NOT (service = $service AND attributes['http.route'] = $route)"} {
 		f, err := checkFilter(t.Context(), engine, sig, vars, expr)
 		if err != nil {
 			t.Fatal(err)

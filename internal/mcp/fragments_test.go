@@ -341,7 +341,7 @@ func TestFragmentPayloadCapFixedWideFramesAndScopes(t *testing.T) {
 func TestFragmentPresetsRejectExplicitZeroLimitBeforeExecution(t *testing.T) {
 	s := newPanelServer(t)
 	client := connectTestClient(t, s, nil)
-	for _, name := range []string{"get_observability_overview", "get_service_topology", "get_service_performance", "inspect_trace", "search_logs"} {
+	for _, name := range []string{"get_overview", "get_service_topology", "get_service_performance", "inspect_trace", "search_logs"} {
 		result, err := client.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: map[string]any{"limit": 0}})
 		if err == nil && !result.IsError {
 			t.Fatalf("explicit zero limit accepted: %s", name)
@@ -357,7 +357,7 @@ func TestFragmentNamedToolsMCPSeededContract(t *testing.T) {
 			capabilities = &mcp.ClientCapabilities{Extensions: map[string]any{mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}}}}
 		}
 		client := connectTestClient(t, s, capabilities)
-		for _, name := range []string{"get_observability_overview", "get_service_topology", "get_service_performance", "search_logs", "inspect_trace", "query_telemetry"} {
+		for _, name := range []string{"get_overview", "get_service_topology", "get_service_performance", "search_logs", "inspect_trace", "query_telemetry"} {
 			args := map[string]any{"namespace": "shop"}
 			if name == "query_telemetry" {
 				args = map[string]any{"panel": query.Panel{ID: "custom", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}}

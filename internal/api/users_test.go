@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/labstack/echo/v5"
+
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/config"
 )
@@ -329,14 +331,16 @@ func TestUserProjectionsAndProvisioning(t *testing.T) {
 	if list.Code != http.StatusOK {
 		t.Fatalf("list = %d", list.Code)
 	}
-	var users []json.RawMessage
-	if err := json.Unmarshal(list.Body.Bytes(), &users); err != nil {
+	var envelope struct {
+		Users []json.RawMessage `json:"users"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if len(users) != 2 {
+	if len(envelope.Users) != 2 {
 		t.Fatalf("users = %s", list.Body.String())
 	}
-	for _, user := range users {
+	for _, user := range envelope.Users {
 		assertUserProjection(user)
 	}
 	for _, body := range []string{
@@ -401,5 +405,17 @@ func TestStatusRouteSuspensionBlocksSessionsAndSignIn(t *testing.T) {
 	var audits int
 	if err := s.db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'user.suspended' AND target_id = ?`, target.ID).Scan(&audits); err != nil || audits != 1 {
 		t.Fatalf("suspension audits = %d, %v", audits, err)
+	}
+}
+
+func TestListUsersEmptyEnvelope(t *testing.T) {
+	s := newTestAuthServer(t)
+	e := echo.New()
+	h := &UserHandler{users: s.users}
+	e.GET("/api/users", h.ListUsers)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/users", nil))
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"users":[]}` {
+		t.Fatalf("empty users = %d %s", rec.Code, rec.Body)
 	}
 }

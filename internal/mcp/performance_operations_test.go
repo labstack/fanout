@@ -36,9 +36,13 @@ func TestPerformanceSlowOperationsAcrossProtocols(t *testing.T) {
 	add := func(namespace, service, operation, kind, route string, ms float64) {
 		n := from.Add(time.Minute).UnixNano()
 		id := fmt.Sprintf("span-%d", len(spans))
+		var attributes map[string]any
+		if route != "" {
+			attributes = map[string]any{"http.route": route}
+		}
 		spans = append(spans, telemetry.Span{
 			Namespace: namespace, ServiceName: service, TraceID: id, SpanID: id,
-			Name: operation, Kind: kind, HTTPRoute: route, DurationMS: ms,
+			Name: operation, Kind: kind, Attributes: attributes, DurationMS: ms,
 			StartUnixNanos: n, EndUnixNanos: n + int64(ms*1e6), IngestedAt: n,
 		})
 	}

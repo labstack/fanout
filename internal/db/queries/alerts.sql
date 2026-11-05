@@ -1,5 +1,10 @@
 -- name: GetAlert :one
-SELECT * FROM alerts WHERE rule_id = ? AND service = ?;
+SELECT * FROM alerts WHERE rule_id = ? AND service = ?
+ORDER BY state IN ('pending', 'firing') DESC, created_at DESC
+LIMIT 1;
+
+-- name: GetAlertByID :one
+SELECT * FROM alerts WHERE id = ?;
 
 -- name: ListAlerts :many
 SELECT * FROM alerts ORDER BY created_at DESC;
@@ -16,9 +21,9 @@ SELECT * FROM alerts WHERE rule_id = ? ORDER BY created_at DESC;
 -- name: UpsertAlert :one
 INSERT INTO alerts (
     id, rule_id, service, state, value, fired_at, resolved_at,
-    repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(rule_id, service) DO UPDATE SET
+    repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
     state = excluded.state,
     value = excluded.value,
     fired_at = excluded.fired_at,
@@ -26,7 +31,8 @@ ON CONFLICT(rule_id, service) DO UPDATE SET
     repeated_at = excluded.repeated_at,
     last_evaluated_at = excluded.last_evaluated_at,
     last_delivery_status = excluded.last_delivery_status,
-    last_delivery_at = excluded.last_delivery_at
+    last_delivery_at = excluded.last_delivery_at,
+    created_at = COALESCE(NULLIF(excluded.created_at, ''), alerts.created_at)
 RETURNING *;
 
 -- name: DeleteAlert :exec
@@ -37,10 +43,10 @@ DELETE FROM alerts WHERE rule_id = ? AND state IN (?, ?);
 
 -- name: UpdateDeliveryStatus :exec
 UPDATE alerts SET last_delivery_status = ?, last_delivery_at = ?
-WHERE rule_id = ? AND service = ?;
+WHERE id = ?;
 
 -- name: AlertSummary :many
 SELECT state, COUNT(*) AS count FROM alerts GROUP BY state;
 
 -- name: PruneResolved :execresult
-DELETE FROM alerts WHERE state = 'resolved' AND resolved_at < datetime('now', ? || ' days');
+DELETE FROM alerts WHERE state = 'resolved' AND datetime(resolved_at) < datetime('now', ? || ' days');

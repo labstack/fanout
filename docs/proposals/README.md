@@ -36,5 +36,6 @@ Earlier proposals predate the template and keep their original structure.
 | 0002 | [Agent-built dashboards](0002-agent-dashboards.md) | Implemented |
 | 0003 | [Milestone 5: correct metrics and the system page](0003-agent-dashboards-m5.md) | Implemented |
 | 0004 | [Full UI without an LLM key, and FanQL](0004-fanql.md) | Accepted |
+| 0005 | [Dedicated attribute columns and batch format 5](0005-dedicated-attribute-columns.md) | Accepted |
 
 Settled decisions that a proposal leads to are recorded in [../adr](../adr/README.md).

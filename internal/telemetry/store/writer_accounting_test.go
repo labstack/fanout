@@ -16,29 +16,33 @@ func accountingBatch() Batch {
 	return Batch{Logs: []telemetry.Log{{Body: strings.Repeat("x", 4096)}}}
 }
 
-func TestWriterRetainsQueuedReservationAfterCallerTimeout(t *testing.T) {
+// A caller that times out while queued gives up its reservation at once, so
+// its retries are admitted rather than shed against copies that will never
+// be written.
+func TestWriterReleasesQueuedReservationAfterCallerTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		w := testWriter(&recordingCommitter{}, 1)
+		c := &recordingCommitter{}
+		w := testWriter(c, 1)
 		w.SetInFlightBudget(8192)
 		batch := accountingBatch()
 		for range 8 {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
 			err := w.Submit(ctx, batch)
 			cancel()
-			if err != context.DeadlineExceeded && !errors.Is(err, ErrIngestOverBudget) {
+			if err != context.DeadlineExceeded {
 				t.Fatalf("submit: %v", err)
 			}
 		}
-		if got := w.inFlightBytes.Load(); got != int64(len(w.submissions)*batchBytes(batch)) || got > 8192 || got == 0 {
-			t.Fatalf("retained queue=%d bytes=%d, budget=8192", len(w.submissions), got)
+		if got := w.inFlightBytes.Load(); got != 0 || len(w.submissions) != 8 {
+			t.Fatalf("retained queue=%d bytes=%d, want 8 queued and 0 bytes", len(w.submissions), got)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		if err := w.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			t.Fatal(err)
 		}
-		if got := w.inFlightBytes.Load(); got != 0 || len(w.submissions) != 0 {
-			t.Fatalf("shutdown retained queue=%d bytes=%d", len(w.submissions), got)
+		if got := w.inFlightBytes.Load(); got != 0 || len(w.submissions) != 0 || len(c.batches) != 0 {
+			t.Fatalf("shutdown retained queue=%d bytes=%d committed=%d", len(w.submissions), got, len(c.batches))
 		}
 	})
 }
@@ -98,10 +102,10 @@ func TestWriterReleasesUnenqueuedAndDiscardedJobsExactlyOnce(t *testing.T) {
 				if mode == "grouped" {
 					w.batchSize = 3
 				}
-				requests := make([]submission, 4)
+				requests := make([]*submission, 4)
 				for i := range requests {
 					batch := accountingBatch()
-					requests[i] = submission{batch: batch, bytes: batchBytes(batch), ack: make(chan error, 1)}
+					requests[i] = newSubmission(context.Background(), batch)
 					if err := w.reserve(requests[i].bytes); err != nil {
 						t.Fatal(err)
 					}
@@ -172,7 +176,7 @@ func TestWriterReleasesReservationsDuringConcurrentShutdown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := testWriter(&recordingCommitter{}, 1)
 		w.SetInFlightBudget(1 << 20)
-		w.submissions = make(chan submission, 1)
+		w.submissions = make(chan *submission, 1)
 		results := make(chan error, 16)
 		for range cap(results) {
 			go func() { results <- w.Submit(t.Context(), accountingBatch()) }()

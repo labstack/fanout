@@ -11,15 +11,6 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-const recentTraceQuery = `
-SELECT trace_id
-FROM spans
-WHERE start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND (? = '' OR namespace = ?) AND trace_id <> '' AND (? = '' OR service = ?)
-GROUP BY trace_id
-ORDER BY MAX(CASE WHEN status = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) DESC,
-         MAX(end_unix_nano) - MIN(start_unix_nano) DESC, trace_id ASC
-LIMIT 1`
-
 const traceLogsQuery = `
 SELECT time::TIMESTAMP_NS, severity, coalesce(service, ''), body, coalesce(trace_id, ''), coalesce(span_id, '')
 FROM logs
@@ -39,13 +30,8 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 	traceID, service = strings.TrimSpace(traceID), strings.TrimSpace(service)
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End, Namespace: scope.Namespace, Service: service})
 	if traceID == "" {
-		candidateQuery := recentTraceQuery
-		candidateCtx := ctx
-		if reader, ok := s.db.(queryrows.BatchReader); ok && reader.CompletedBatchReads() {
-			candidateQuery = completedTraceQuery
-			candidateCtx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End, Namespace: scope.Namespace, Service: service, Kind: queryrows.TraceCandidateRead})
-		}
-		rows, queryErr := s.db.QueryContext(candidateCtx, candidateQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service)
+		candidateCtx := queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End, Namespace: scope.Namespace, Service: service, Kind: queryrows.TraceCandidateRead})
+		rows, queryErr := s.db.QueryContext(candidateCtx, completedTraceQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service)
 		if queryErr != nil {
 			return Result[TraceDetail]{}, fmt.Errorf("query recent trace: %w", queryErr)
 		}

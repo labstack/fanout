@@ -17,10 +17,21 @@ Everything below is served by the same HTTP listener as the browser client, on
 
 | Path | Requires | Reports |
 |---|---|---|
-| `/healthz` | nothing | Liveness — the process is up |
-| `/readyz` | nothing | Readiness — storage is attached, plus resolved runtime sizing |
+| `/healthz` | nothing | Liveness — the process is up and its own work on the query engine is not stalled |
+| `/readyz` | nothing | Readiness — storage is attached, plus resolved runtime sizing; a busy engine, or a query running past its deadline, reads `degraded` |
 
 Use `/healthz` for restart decisions and `/readyz` for traffic decisions.
+
+`/healthz` fails when a Parquet publication holds reads for 10 minutes, or
+when an idle engine does not answer a ping. A query running past its deadline
+never fails it: a restart would not stop the query from running again.
+
+Fanout exits with status 1 on a fatal query engine error, or when a stall
+that fails `/healthz` lasts another 25 seconds. Run it under a
+supervisor that restarts on exit: Docker or Compose with
+`restart: unless-stopped`, systemd with `Restart=on-failure`, or Kubernetes.
+Docker's `HEALTHCHECK` alone marks a container unhealthy but does not restart
+it.
 
 ## Operations
 

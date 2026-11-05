@@ -76,7 +76,7 @@ func TestDefaultResourcePanelsAcrossCacheStates(t *testing.T) {
 	}
 	defer d.Close()
 	e := query.NewExecutor(d, 30)
-	start := time.Date(2026, 10, 1, 12, 0, 0, 1, time.UTC)
+	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Minute)
 	for i := range 2 {
 		b := telemetrystore.Batch{ID: []string{"first", "second"}[i]}
@@ -103,7 +103,7 @@ func TestDefaultResourcePanelsAcrossCacheStates(t *testing.T) {
 	for _, state := range []string{"partial", "cold", "full"} {
 		t.Run(state, func(t *testing.T) {
 			if state == "cold" {
-				if _, err := d.DB.Exec(`DELETE FROM read_cache_version`); err != nil {
+				if _, err := d.DB.Exec(`DELETE FROM read_batches; DELETE FROM read_resource_inventory; DELETE FROM read_resource_seconds; DELETE FROM read_metric_names; DELETE FROM read_trace_parts; DELETE FROM read_trace_candidates`); err != nil {
 					t.Fatal(err)
 				}
 				if err := engine.CreateCacheTables(d.DB); err != nil {
@@ -114,6 +114,9 @@ func TestDefaultResourcePanelsAcrossCacheStates(t *testing.T) {
 				if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if _, err := d.RefreshDashboardRollups(t.Context()); err != nil {
+				t.Fatal(err)
 			}
 			for _, p := range resourcePanels() {
 				got := executeResourcePanel(t, e, p, start, end)
@@ -152,6 +155,9 @@ func TestDefaultResourceInventoryKeepsVantageNamespacesSeparate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
+		if _, err := d.RefreshDashboardRollups(t.Context()); err != nil {
+			t.Fatal(err)
+		}
 		for _, p := range resourcePanels() {
 			if p.ID != "check_states" {
 				continue
@@ -214,6 +220,9 @@ func TestResourceInventoryFrozenSnapshotFrames(t *testing.T) {
 	}
 	stats := map[string]any{"engine": engine, "start": start, "end": end}
 	sqlEvidence := map[string]string{}
+	if _, err := d.RefreshDashboardRollups(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	for _, p := range resourcePanels() {
 		sqlEvidence[p.ID] = p.SQL
 	}
@@ -262,6 +271,9 @@ func TestResourceInventoryFrozenSnapshotFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	stats["inventory_rows_by_signal"] = bySignal
+	if _, err := d.RefreshDashboardRollups(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	for _, p := range resourcePanels() {
 		var elapsed []int64
 		var want *query.Frame

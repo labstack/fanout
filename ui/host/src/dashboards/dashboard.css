@@ -75,3 +75,48 @@
 }
 
 .chart-keyboard-point:focus-visible, [data-panel] button:focus-visible, [data-panel] tr:focus-visible, [data-panel]:focus-visible { outline: 2px solid var(--mantine-primary-color-filled); outline-offset: -2px; }
+
+/* Narrow logs and traces stack each row: its context on one wrapping line and
+   the body or operation at full width, so nothing important scrolls away. */
+.dashboard-table-box:is([data-viz="logs"], [data-viz="traces"]) {
+  container-type: inline-size;
+}
+
+@container (max-width: 560px) {
+  .dashboard-table-box .dashboard-table {
+    min-width: 0 !important;
+  }
+
+  .dashboard-table-box .dashboard-table :is(thead, colgroup) {
+    display: none;
+  }
+
+  .dashboard-table-box .dashboard-table tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 10px;
+    padding: 8px 4px;
+    border-bottom: 1px solid var(--mantine-color-default-border);
+  }
+
+  .dashboard-table-box .dashboard-table tbody td {
+    min-width: 0 !important;
+    max-width: 100%;
+    padding: 0;
+    border: 0;
+  }
+
+  .dashboard-table-box .dashboard-table tbody td:is([data-field="body"], [data-field="operation"], [colspan]) {
+    flex: 1 0 100%;
+    white-space: normal;
+  }
+
+  .dashboard-table-box[data-viz="traces"] td[data-field="operation"] {
+    order: -1;
+  }
+
+  .dashboard-table-box[data-viz="traces"] td[data-field="namespace"] {
+    display: none;
+  }
+}

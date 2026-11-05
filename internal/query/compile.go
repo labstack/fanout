@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/labstack/fanout/internal/engine"
 )
 
 // Value is a variable's current value. JSON: a string, a list of strings, or
@@ -56,9 +58,13 @@ func (v *Value) UnmarshalJSON(data []byte) error {
 
 // Scope is everything a compiled query depends on besides the spec.
 type Scope struct {
-	Start, End time.Time
-	Interval   time.Duration // bucket width; zero means no time grouping
-	Vars       map[string]Value
+	Start, End   time.Time
+	FreshTo      time.Time // Ingest horizon for minute rollups.
+	RollupSource string
+	Rollup       bool
+	NoTop        bool          // Table trends select displayed tuples after aggregation.
+	Interval     time.Duration // bucket width; zero means no time grouping
+	Vars         map[string]Value
 }
 
 // Column describes one frame column.
@@ -71,6 +77,7 @@ type Column struct {
 
 // Compiled is one statement ready to run.
 type Compiled struct {
+	HasTotals     bool
 	ranking       *Ranking
 	rankingFloor  bool
 	rankOffset    int
@@ -101,18 +108,32 @@ func (s Scope) lookup(f Filter) func(string) ([]any, bool, error) {
 		}
 		values := make([]any, len(v.Values))
 		for i, value := range v.Values {
+			if f.PatternParams[name] && len(value) > engine.MaxPatternBytes {
+				return nil, false, patternTooLong(name)
+			}
 			values[i] = value
 		}
 		return values, f.InParams[name], nil
 	}
 }
 
+// patternTooLong reports a variable whose value is too long for the pattern
+// it fills: a pattern costs its length times the text's per row.
+func patternTooLong(name string) error {
+	return Problems{{Path: "vars." + name, Message: fmt.Sprintf("$%s is a pattern of at most %d bytes", name, engine.MaxPatternBytes)}}
+}
+
 // buildWhere renders the read window and the active filters. The window is
 // always the first predicate: the snapshot binder prunes files by it.
 func buildWhere(sig *signal, filters []Filter, scope Scope) (string, []any, error) {
 	column := quoteIdent(sig.time)
+	start := scope.Start
+	if scope.Rollup {
+		column = quoteIdent("bucket")
+		start = start.Truncate(time.Minute)
+	}
 	clauses := []string{fmt.Sprintf("%s >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND %s < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS", column, column)}
-	args := []any{scope.Start.UTC(), scope.End.UTC()}
+	args := []any{start.UTC(), scope.End.UTC()}
 	for _, f := range filters {
 		if scope.dropped(f) {
 			continue
@@ -124,7 +145,11 @@ func buildWhere(sig *signal, filters []Filter, scope Scope) (string, []any, erro
 		clauses = append(clauses, clause)
 		args = append(args, values...)
 	}
-	return strings.Join(clauses, " AND "), args, nil
+	where := strings.Join(clauses, " AND ")
+	if scope.Rollup {
+		where = strings.ReplaceAll(where, "?::TIMESTAMP_NS::TIMESTAMPTZ_NS", "?::TIMESTAMP_NS")
+	}
+	return where, args, nil
 }
 
 // filterClause renders one filter that the scope keeps. A variable bound to
@@ -160,10 +185,25 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		return compileMetricQuery(p, measures, filters, scope)
 	}
 
+	if rollupPlan(p, measures, filters, scope) {
+		return compileRollupQuery(p, measures, filters, scope)
+	}
+	return compileAggregateQuery(p, measures, filters, scope, false)
+}
+
+func compileAggregateQuery(p *Panel, measures []Measure, filters []Filter, scope Scope, rolled bool) (Compiled, error) {
 	q := p.Query
 	sig, ok := lookupSignal(q.From)
 	if !ok {
 		return Compiled{}, fmt.Errorf("unknown signal %q", q.From)
+	}
+	source := structuredSource(sig.name)
+	if rolled {
+		scope.Rollup = true
+		copied := *sig
+		copied.time = "bucket"
+		sig = &copied
+		source = rollupReadSource(rollupSource(p))
 	}
 	where, args, err := buildWhere(sig, filters, scope)
 	if err != nil {
@@ -188,17 +228,17 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 	}
 	top := 0
 	foldDimension := -1
-	if bucket != "" && len(dims) == 1 {
+	if !scope.NoTop && bucket != "" && len(dims) == 1 {
 		top = p.Top()
 		foldDimension = 0
-	} else if p.Viz == "bar" && len(dims) == 2 {
+	} else if !scope.NoTop && p.Viz == "bar" && len(dims) == 2 {
 		top = p.Top()
 		foldDimension = 1
 	}
 	for i, d := range dims {
 		expr := d.stringSQL()
 		if top > 0 && i == foldDimension {
-			expr = fmt.Sprintf("CASE WHEN coalesce(%s, '') IN (SELECT d FROM top) THEN %s ELSE (SELECT 'Other (' || count(*)::VARCHAR || ')' FROM candidates WHERE d NOT IN (SELECT d FROM top)) END", expr, expr)
+			expr = "_fold"
 		}
 		selects = append(selects, fmt.Sprintf("coalesce(%s, '') AS %s", expr, quoteIdent(d.alias())))
 		groups = append(groups, expr)
@@ -212,8 +252,20 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 	if bucket != "" {
 		partition = "PARTITION BY " + bucket
 	}
+	hasTotals := bucket != "" && (p.Viz == "stat" || p.Viz == "gauge")
+	quantiles := map[int]Measure{}
 	for _, m := range measures {
-		selects = append(selects, measureExprSQL(m, sig, seconds, partition)+" AS "+quoteIdent(m.Alias))
+		expr := measureExprSQL(m, sig, seconds, partition)
+		if rolled {
+			expr = rollupMeasureSQL(m, coveredSecondsSQL(scope, bucket, hasTotals), partition)
+		} else if hasTotals {
+			expr = strings.ReplaceAll(expr, "count(*) / "+sqlFloat(seconds), "count(*) / (CASE WHEN grouping("+bucket+")=1 THEN "+sqlFloat(scope.End.Sub(scope.Start).Seconds())+" ELSE "+sqlFloat(seconds)+" END)")
+		}
+		if rolled && histogramMeasure(m) {
+			quantiles[len(selects)] = m
+			expr = "NULL::DOUBLE"
+		}
+		selects = append(selects, expr+" AS "+quoteIdent(m.Alias))
 		unit := m.Unit
 		if unit == "none" {
 			unit = "" // The catalog cannot infer a physical unit for this field.
@@ -223,7 +275,7 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 	var b strings.Builder
 	var ranking *Ranking
 	rankingFloor := false
-	b.WriteString("WITH base AS (SELECT * FROM " + structuredSource(sig.name) + " WHERE " + where + ")")
+	b.WriteString("WITH base AS (SELECT * FROM " + source + " WHERE " + where + ")")
 	if top > 0 {
 		first := measures[0]
 		better := p.Better
@@ -242,15 +294,53 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		}
 		ranking = &Ranking{Rule: rule.Rule, Better: rule.Better, Floor: rule.Floor, SupportColumn: samples, TieBreakers: []string{"n desc", "dimension asc"}}
 
-		fmt.Fprintf(&b, ", candidates AS (SELECT coalesce(%s, '') AS d, %s AS value, %s AS n%s FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", dims[foldDimension].stringSQL(), value, samples, extra, order, top)
+		if rolled {
+			value, samples, extra = rollupRankingSQL(extra, first, scope.End.Sub(scope.Start).Seconds())
+		}
+		if rolled && histogramMeasure(first) {
+			dimension := "coalesce(" + dims[foldDimension].stringSQL() + ", '')"
+			histogramAggregate(&b, "candidates", "base", []string{dimension + " AS d", "NULL::DOUBLE AS value", samples + " AS n"}, []string{"d", "value", "n"}, []string{dimension}, false, map[int]Measure{1: first})
+			fmt.Fprintf(&b, ", top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", order, top)
+		} else {
+			fmt.Fprintf(&b, ", candidates AS (SELECT coalesce(%s, '') AS d, %s AS value, %s AS n%s FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", dims[foldDimension].stringSQL(), value, samples, extra, order, top)
+		}
+		dim := dims[foldDimension].stringSQL()
+		fmt.Fprintf(&b, ", other AS (SELECT 'Other (' || count(*)::VARCHAR || ')' AS _other FROM candidates ANTI JOIN top USING(d)), folded AS (SELECT base.*, CASE WHEN top.d IS NOT NULL THEN coalesce(%s, '') ELSE other._other END AS _fold FROM base LEFT JOIN top ON coalesce(%s, '')=top.d CROSS JOIN other)", dim, dim)
 	}
 	rankOffset := b.Len() + len(" SELECT ") + len(strings.Join(selects, ", "))
-	b.WriteString(" SELECT " + strings.Join(selects, ", ") + " FROM base")
-	if len(groups) > 0 {
-		b.WriteString(" GROUP BY " + strings.Join(groups, ", "))
+	from := "base"
+	if top > 0 {
+		from = "folded"
 	}
-	b.WriteString(orderAndLimit(p, measures, bucket != "", len(dims)))
-	return Compiled{SQL: b.String(), Args: args, Columns: columns, ranking: ranking, rankOffset: rankOffset, rankingFloor: rankingFloor}, nil
+	if len(quantiles) > 0 {
+		aliases := make([]string, len(columns))
+		projected := make([]string, len(columns))
+		for i, c := range columns {
+			aliases[i] = c.Name
+			if c.Role == "time" {
+				aliases[i] = "_t"
+			}
+			projected[i] = quoteIdent(aliases[i])
+		}
+		from = histogramAggregate(&b, "__panel_hist", from, selects, aliases, groups, hasTotals, quantiles)
+		rankOffset = b.Len() + len(" SELECT ") + len(strings.Join(projected, ", "))
+		b.WriteString(" SELECT " + strings.Join(projected, ", ") + " FROM " + from)
+	} else {
+		b.WriteString(" SELECT " + strings.Join(selects, ", ") + " FROM " + from)
+		if len(groups) > 0 {
+			if hasTotals {
+				b.WriteString(" GROUP BY GROUPING SETS ((" + strings.Join(groups, ", ") + "), (" + strings.Join(groups[1:], ", ") + "))")
+			} else {
+				b.WriteString(" GROUP BY " + strings.Join(groups, ", "))
+			}
+		}
+	}
+	order := orderAndLimit(p, measures, bucket != "", len(dims))
+	if hasTotals {
+		order = strings.Replace(order, `ORDER BY "_t"`, `ORDER BY "_t" NULLS FIRST`, 1)
+	}
+	b.WriteString(order)
+	return Compiled{HasTotals: hasTotals, SQL: b.String(), Args: args, Columns: columns, ranking: ranking, rankOffset: rankOffset, rankingFloor: rankingFloor}, nil
 }
 
 func measureSQL(m Measure, sig *signal, seconds float64, partition string) string {

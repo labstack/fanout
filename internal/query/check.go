@@ -2,10 +2,13 @@ package query
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
@@ -48,19 +51,84 @@ func isOperational(err error) bool {
 	return false
 }
 
-// Check runs Validate and then the checks that need DuckDB's parser: every
-// filter expression and every SQL panel. It reports all problems it finds.
-// An operational failure (cancelled request, expired deadline, closed
-// database) stops the check and is returned as the error, never as a Problem.
-// The dashboard must already be normalized.
-func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems, error) {
+// checkMemo keeps what the database-backed checks found for each variable
+// list and each panel, keyed by exactly the fields those checks read. A save
+// that renames the dashboard, moves panels or edits one panel re-checks only
+// what changed; checking every SQL panel again took seconds, more while
+// panels were running.
+type checkMemo struct {
+	mu      sync.Mutex
+	entries map[[32]byte]memoEntry
+}
+
+type memoEntry struct {
+	vars       map[string][]Filter
+	annotation []AnnotationFilter
+	filters    []Filter
+	measures   []Measure
+}
+
+func (m *checkMemo) get(key [32]byte) (memoEntry, bool) {
+	if m == nil {
+		return memoEntry{}, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry, ok := m.entries[key]
+	return entry, ok
+}
+
+func (m *checkMemo) put(key [32]byte, entry memoEntry) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.entries == nil || len(m.entries) >= 1024 {
+		m.entries = map[[32]byte]memoEntry{}
+	}
+	m.entries[key] = entry
+}
+
+// memoKey hashes the variables, which every filter may reference, and the
+// panel fields Check reads, including the unit that infers a ranking
+// direction; titles, layout and other display options are left out.
+func memoKey(vars []Variable, p *Panel) [32]byte {
+	var input struct {
+		Vars                []Variable
+		ID, Viz, SQL, Split string
+		Better, Unit        string
+		Query               *Spec
+	}
+	input.Vars = vars
+	if p != nil {
+		input.ID, input.Viz, input.SQL, input.Better, input.Unit, input.Query = p.ID, p.Viz, p.SQL, p.Better, p.Unit, p.Query
+		if p.Options != nil {
+			input.Split = p.Options.Split
+		}
+	}
+	raw, _ := json.Marshal(input)
+	return sha256.Sum256(raw)
+}
+
+func checkWith(ctx context.Context, parser Parser, d *Dashboard, memo *checkMemo) (*Checked, Problems, error) {
 	problems := Validate(d)
 	if len(problems) > 0 {
 		return nil, problems, nil
 	}
 	checked := &Checked{AnnotationFilters: map[string][]AnnotationFilter{}, Filters: map[string][]Filter{}, VarFilters: map[string][]Filter{}, Measures: map[string][]Measure{}}
 	earlier := map[string]Variable{}
+	varsKey := memoKey(d.Variables, nil)
+	if entry, ok := memo.get(varsKey); ok {
+		checked.VarFilters = entry.vars
+		for _, v := range d.Variables {
+			earlier[v.Name] = v
+		}
+	}
 	for i, v := range d.Variables {
+		if len(earlier) == len(d.Variables) {
+			break
+		}
 		if v.Kind == "query" {
 			if sig, ok := lookupSignal(v.From); ok {
 				for j, expr := range v.Where {
@@ -78,9 +146,26 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 		}
 		earlier[v.Name] = v
 	}
+	if len(problems) == 0 {
+		memo.put(varsKey, memoEntry{vars: checked.VarFilters})
+	}
 	for i := range d.Panels {
 		p := &d.Panels[i]
 		path := fmt.Sprintf("panels[%d]", i)
+		key := memoKey(d.Variables, p)
+		if entry, ok := memo.get(key); ok {
+			if entry.annotation != nil {
+				checked.AnnotationFilters[p.ID] = entry.annotation
+			}
+			if entry.filters != nil {
+				checked.Filters[p.ID] = entry.filters
+			}
+			if entry.measures != nil {
+				checked.Measures[p.ID] = entry.measures
+			}
+			continue
+		}
+		before := len(problems)
 		switch {
 		case p.Query != nil:
 			sig, ok := lookupSignal(p.Query.From)
@@ -170,6 +255,9 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 				}
 				problems = append(problems, sqlProblem(path+".sql", err))
 			}
+		}
+		if len(problems) == before {
+			memo.put(key, memoEntry{annotation: checked.AnnotationFilters[p.ID], filters: checked.Filters[p.ID], measures: checked.Measures[p.ID]})
 		}
 	}
 	return checked, problems, nil

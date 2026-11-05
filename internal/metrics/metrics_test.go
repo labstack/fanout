@@ -42,27 +42,6 @@ func TestRecordFlush(t *testing.T) {
 	}
 }
 
-func TestRecordQuery(t *testing.T) {
-	// Reset metrics
-	QueryTotal.Reset()
-
-	RecordQuery("/services", "ok", 0.1)
-	RecordQuery("/services", "ok", 0.2)
-	RecordQuery("/services", "error", 0.5)
-
-	// Check success queries
-	okCount := testutil.ToFloat64(QueryTotal.WithLabelValues("/services", "ok"))
-	if okCount != 2 {
-		t.Errorf("QueryTotal[/services,ok] = %f, want 2", okCount)
-	}
-
-	// Check error queries
-	errCount := testutil.ToFloat64(QueryTotal.WithLabelValues("/services", "error"))
-	if errCount != 1 {
-		t.Errorf("QueryTotal[/services,error] = %f, want 1", errCount)
-	}
-}
-
 func TestRecordRollup(t *testing.T) {
 	totalBefore := testutil.ToFloat64(RollupTotal)
 	rowsBefore := testutil.ToFloat64(RollupRows)

@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -39,46 +40,196 @@ func metricBucketSQL(interval time.Duration) string {
 	return fmt.Sprintf("epoch_ms(time_bucket(INTERVAL '%d seconds',time::TIMESTAMP_NS,%s))::BIGINT", int64(interval/time.Second), bucketOrigin)
 }
 
+// metricRead is the relation a builder reads. Without a scan it reads metrics
+// itself under the given filters, projecting columns. A query with several
+// builders reads one shared scan that already applied its filters and
+// projection, so each builder only narrows it to its own window and kinds;
+// the scan records the earliest window.
+type metricRead struct {
+	filters []Filter
+	columns string
+	scan    string
+	start   *time.Time
+}
+
+// metricPointColumns are the view columns every series builder reads, and
+// metricHistogramColumns the ones only histogram builders read. A query names
+// its columns rather than passing the whole view through its CTE chain: the
+// view's width costs binding and optimization at every layer, and a counter
+// or gauge never reads a histogram's lists.
+var (
+	metricPointColumns     = []string{"series_id", "time", "type", "temporality", "start_time", "value", "hist_count", "hist_sum", "ingested_unix_nano"}
+	metricHistogramColumns = []string{"hist_bounds", "hist_counts", "exp_scale", "exp_zero_count", "exp_zero_threshold",
+		"exp_positive_offset", "exp_positive_counts", "exp_negative_offset", "exp_negative_counts"}
+)
+
+// metricColumns is the projection of a metric read: point columns, the
+// columns of authored fields, and each map lookup computed once under an
+// alias. A lookup binds where the projection reads metrics, so a standard
+// key reads its dedicated column there and later stages read the alias.
+type metricColumns struct {
+	list    []string
+	columns map[string]bool
+	lookups map[string]string
+}
+
+func newMetricColumns(names ...[]string) *metricColumns {
+	c := &metricColumns{columns: map[string]bool{}, lookups: map[string]string{}}
+	for _, group := range names {
+		for _, name := range group {
+			c.column(name)
+		}
+	}
+	return c
+}
+
+func (c *metricColumns) column(name string) {
+	if !c.columns[name] {
+		c.columns[name] = true
+		c.list = append(c.list, quoteIdent(name))
+	}
+}
+
+func (c *metricColumns) lookup(sql string) string {
+	alias, ok := c.lookups[sql]
+	if !ok {
+		alias = fmt.Sprintf("_field%d", len(c.lookups))
+		c.lookups[sql] = alias
+		c.list = append(c.list, sql+" AS "+quoteIdent(alias))
+	}
+	return quoteIdent(alias)
+}
+
+// text and number render a field over the projection's output.
+func (c *metricColumns) text(f FieldRef) string {
+	if f.Key != "" {
+		return c.lookup(f.stringSQL())
+	}
+	c.column(f.Column)
+	return f.stringSQL()
+}
+
+func (c *metricColumns) number(f FieldRef) string {
+	if f.Key != "" {
+		return c.lookup(f.numberSQL())
+	}
+	c.column(f.Column)
+	return f.numberSQL()
+}
+
+// with returns the projection plus extra columns, leaving c unchanged.
+func (c *metricColumns) with(names []string) string {
+	list := slices.Clone(c.list)
+	for _, name := range names {
+		if !c.columns[name] {
+			list = append(list, quoteIdent(name))
+		}
+	}
+	return strings.Join(list, ",")
+}
+
+func (r metricRead) where(read Scope) (string, string, []any, error) {
+	if r.scan == "" {
+		where, args, err := buildWhere(signals["metrics"], r.filters, read)
+		return "metrics", where, args, err
+	}
+	if r.start.IsZero() || read.Start.Before(*r.start) {
+		*r.start = read.Start
+	}
+	where, args, err := buildWhere(signals["metrics"], nil, read)
+	return r.scan, where, args, err
+}
+
+func metricKindList(kinds []string) string {
+	quoted := make([]string, len(kinds))
+	for i, kind := range kinds {
+		quoted[i] = sqlString(kind)
+	}
+	return strings.Join(quoted, ",")
+}
+
+// An exponential histogram point becomes explicit bounds and counts: the
+// negative buckets reversed below zero, the zero bucket (zlo, threshold] with
+// zlo the smallest negative double when the threshold is zero, and the
+// positive buckets above, each bound base^index with base 2^(2^-scale)
+// written as one exponent so powers of two stay exact. Extreme scales and
+// offsets overflow or underflow a bound; a bound that is not finite or not
+// above every earlier finite bound cannot separate observations, so it is
+// dropped and the bucket above it merges into the one below. Each segment
+// ascends, so the earlier maximum is the previous one or two bounds, or the
+// threshold for positive bounds. Every list operation is linear in buckets.
+var (
+	expRawSQL = `CASE WHEN exp_scale IS NOT NULL THEN
+CASE WHEN len(exp_negative_counts)>0 THEN list_transform(range(len(exp_negative_counts),-1,-1),lambda i:-` + expBound("exp_negative_offset") + `) ELSE []::DOUBLE[] END||
+[CASE WHEN exp_zero_threshold=0 THEN -4.9406564584124654e-324 ELSE -exp_zero_threshold END,exp_zero_threshold]||
+CASE WHEN len(exp_positive_counts)>0 THEN list_transform(range(len(exp_positive_counts)+1),lambda i:` + expBound("exp_positive_offset") + `) ELSE []::DOUBLE[] END END AS _eb,
+CASE WHEN exp_scale IS NOT NULL THEN [0]::UBIGINT[]||
+CASE WHEN len(exp_negative_counts)>0 THEN list_reverse(exp_negative_counts)||[0]::UBIGINT[] ELSE [] END||[exp_zero_count,0]||
+CASE WHEN len(exp_positive_counts)>0 THEN exp_positive_counts||[0]::UBIGINT[] ELSE [] END END AS _ec,
+CASE WHEN len(exp_negative_counts)>0 THEN len(exp_negative_counts)+2 ELSE 1 END AS _ez`
+	expKeptSQL = `list_filter(range(1,len(_eb)+1),lambda p:isfinite(_eb[p]) AND NOT coalesce(_eb[p]<=greatest(
+CASE WHEN p>1 AND isfinite(_eb[p-1]) THEN _eb[p-1] END,CASE WHEN p>2 AND isfinite(_eb[p-2]) THEN _eb[p-2] END,
+CASE WHEN p>_ez+1 THEN exp_zero_threshold END),false)) AS _ek`
+	expBoundsSQL = `list_transform(_ek,lambda p:_eb[p])`
+	expCountsSQL = `list_transform(range(1,len(_ek)+2),lambda j:
+list_sum(_ec[CASE WHEN j>1 THEN _ek[j-1] ELSE 0 END+1:coalesce(_ek[j],len(_eb)+1)])::UBIGINT)`
+)
+
+// expBound is bucket offset+i's bound, base^(offset+i) with base 2^(2^-scale).
+func expBound(offset string) string {
+	return "pow(2.0,(" + offset + "+i)*pow(2.0,-exp_scale::DOUBLE))"
+}
+
 // Point-only builders never lag or decode a ten-minute history. Separate SQL
 // scopes let callers share a builder without rewriting authored filter text.
-func metricPointsCTE(filters []Filter, scope Scope, kinds []string, lookback time.Duration) (string, []any, error) {
+func metricPointsCTE(source metricRead, scope Scope, kinds []string, lookback time.Duration) (string, []any, error) {
 	if len(kinds) == 0 {
 		return "", nil, fmt.Errorf("metric series requires at least one kind")
 	}
 	read := scope
 	read.Start = read.Start.Add(-lookback)
-	where, args, err := buildWhere(signals["metrics"], filters, read)
+	from, where, args, err := source.where(read)
 	if err != nil {
 		return "", nil, err
 	}
-	quoted := make([]string, len(kinds))
-	for i, kind := range kinds {
-		quoted[i] = sqlString(kind)
+	where += " AND type IN (" + metricKindList(kinds) + ")"
+	columns := "*"
+	if source.columns != "" {
+		columns = source.columns
 	}
-	where += " AND type IN (" + strings.Join(quoted, ",") + ")"
-	text := `WITH metric_input AS (SELECT * FROM metrics WHERE ` + where + `),
-      metric_decoded AS (SELECT *,
-        CASE WHEN type='histogram' THEN TRY(from_json(hist_bounds_json,'["DOUBLE"]')) END AS _bounds,
-        CASE WHEN type='histogram' THEN TRY(from_json(hist_counts_json,'["UBIGINT"]')) END AS _counts
-        FROM metric_input),
+	text := `WITH metric_input AS (SELECT ` + columns + ` FROM ` + from + ` WHERE ` + where + `),`
+	if slices.Contains(kinds, "histogram") {
+		// Decoding consumes the stored lists; later stages read _bounds and _counts.
+		text += `
+      metric_exp_raw AS (SELECT *,` + expRawSQL + ` FROM metric_input),
+      metric_exp_kept AS (SELECT *,` + expKeptSQL + ` FROM metric_exp_raw),
+      metric_decoded AS (SELECT * EXCLUDE (_eb,_ec,_ez,_ek,` + strings.Join(metricHistogramColumns, ",") + `),
+        CASE WHEN type='histogram' AND exp_scale IS NULL THEN hist_bounds WHEN type='histogram' THEN ` + expBoundsSQL + ` END AS _bounds,
+        CASE WHEN type='histogram' AND exp_scale IS NULL THEN hist_counts WHEN type='histogram' THEN ` + expCountsSQL + ` END AS _counts
+        FROM metric_exp_kept),`
+	} else {
+		// Other kinds have no buckets, so their reads omit the histogram columns.
+		text += `
+      metric_decoded AS (SELECT *,NULL::DOUBLE[] AS _bounds,NULL::UBIGINT[] AS _counts FROM metric_input),`
+	}
+	text += `
+      -- OTLP allows a histogram without buckets: it counts toward count, sum,
+      -- rate and avg, and its empty bucket list adds nothing to quantiles.
       metric_valid AS (SELECT * FROM metric_decoded WHERE
         (type<>'histogram' AND isfinite(value)) OR
-        (type='histogram' AND isfinite(hist_sum) AND hist_count>=0
-         AND _bounds IS NOT NULL AND _counts IS NOT NULL
-         AND len(_counts)=len(_bounds)+1
-         AND coalesce(list_bool_and(list_transform(_bounds,lambda x: isfinite(x))),true)
-         AND coalesce(list_bool_and(list_transform(range(2,len(_bounds)+1),lambda i: _bounds[i-1] < _bounds[i])),true))),
+        (type='histogram' AND (hist_sum IS NULL OR isfinite(hist_sum))
+         AND (len(_counts)=len(_bounds)+1 OR len(_counts)=0 AND len(_bounds)=0))),
       metric_unique AS (SELECT * EXCLUDE (_retry) FROM (
         SELECT *,row_number() OVER (PARTITION BY ` + metricSeriesKey + `,time ORDER BY
           ingested_unix_nano DESC,value DESC,hist_count DESC,hist_sum DESC,
-          hist_counts_json DESC,hist_bounds_json DESC,start_time DESC NULLS LAST) AS _retry
+          _counts DESC,_bounds DESC,start_time DESC NULLS LAST) AS _retry
         FROM metric_valid) WHERE _retry=1),
       metric_points AS (SELECT *,` + metricBucketSQL(scope.Interval) + ` AS _bucket FROM metric_unique)`
 	return strings.TrimSpace(text), args, nil
 }
 
-func metricSeriesCTE(filters []Filter, scope Scope, kinds []string) (string, []any, error) {
-	text, args, err := metricPointsCTE(filters, scope, kinds, metricLookback)
+func metricSeriesCTE(source metricRead, scope Scope, kinds []string) (string, []any, error) {
+	text, args, err := metricPointsCTE(source, scope, kinds, metricLookback)
 	if err != nil {
 		return "", nil, err
 	}
@@ -131,8 +282,10 @@ func metricSeriesCTE(filters []Filter, scope Scope, kinds []string) (string, []a
 	return strings.TrimSpace(text), args, nil
 }
 
+// dimSelect is projected where the read binds metrics, as the column dim.
 func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string, []any, error) {
-	cte, args, err := metricSeriesCTE(filters, scope, []string{"histogram"})
+	columns := newMetricColumns(metricPointColumns, metricHistogramColumns).with(nil) + "," + dimSelect
+	cte, args, err := metricSeriesCTE(metricRead{filters: filters, columns: columns}, scope, []string{"histogram"})
 	if err != nil {
 		return "", nil, err
 	}
@@ -145,7 +298,7 @@ func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string
 	if scope.Interval > 0 {
 		timeSQL = "make_timestamp_ns(_bucket*1000000)::TIMESTAMPTZ_NS"
 	}
-	text := cte + ` SELECT * FROM (SELECT ` + timeSQL + ` AS t,` + dimSelect + `,_bucket,
+	text := cte + ` SELECT * FROM (SELECT ` + timeSQL + ` AS t,dim,_bucket,
       unnest(list_prepend(NULL::DOUBLE,_bounds)) AS lo,
       unnest(list_append(_bounds,NULL::DOUBLE)) AS hi,
       unnest(bound_increases) AS n
@@ -156,12 +309,12 @@ func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string
 // A series' value at a bucket's exclusive end is its latest point strictly
 // before that end, found per series by an ASOF join so the cost follows
 // series times buckets rather than points times buckets.
-func metricLastCTE(filters []Filter, scope Scope, kinds []string) (string, []any, error) {
+func metricLastCTE(source metricRead, scope Scope, kinds []string) (string, []any, error) {
 	read := scope
 	if scope.Interval <= 0 {
 		read.Start = scope.End
 	}
-	cte, args, err := metricPointsCTE(filters, read, kinds, metricStaleness)
+	cte, args, err := metricPointsCTE(source, read, kinds, metricStaleness)
 	if err != nil {
 		return "", nil, err
 	}

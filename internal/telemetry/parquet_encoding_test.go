@@ -1,9 +1,8 @@
 package telemetry
 
 import (
-	"errors"
 	"fmt"
-	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"slices"
@@ -54,14 +53,14 @@ func TestSpanParquetDictionaryEncodesLowCardinalityColumns(t *testing.T) {
 			t.Errorf("%s is not dictionary encoded: %v", column, encodings[column])
 		}
 	}
-	for _, column := range []string{"namespace", "service", "operation", "trace_id", "span_id", "parent_span_id", "events_json", "links_json"} {
+	for _, column := range []string{"namespace", "service", "operation", "trace_id", "span_id", "parent_span_id", "link_trace_ids", "link_span_ids"} {
 		if slices.Contains(encodings[column], format.RLEDictionary) {
 			t.Errorf("%s is dictionary encoded: %v", column, encodings[column])
 		}
 	}
-	// The encoding is physical layout, not schema: the fixed format-4 schema
+	// The encoding is physical layout, not schema: the fixed format-5 schema
 	// still matches, so files written either way remain readable together.
-	if !parquet.EqualNodes(file.Schema(), telemetrySchema[spanParquetRow]()) {
+	if !parquet.EqualNodes(file.Schema(), Spans.schema) {
 		t.Fatal("dictionary encoding changed the physical schema")
 	}
 	rows, totals, err := store.Trace(t.Context(), TraceQuery{TraceID: spans[7].TraceID, StartNanos: 0, EndNanos: 1000, Limit: 10})
@@ -70,7 +69,7 @@ func TestSpanParquetDictionaryEncodesLowCardinalityColumns(t *testing.T) {
 	}
 }
 
-// HTTP routes are client-supplied text. Past parquetDictionaryMaxBytes the
+// HTTP routes are client-supplied text in a dictionary-encoded dedicated column. Past parquetDictionaryMaxBytes the
 // column continues in plain pages, so distinct routes stop growing its
 // dictionary once a page flushes, and every row still reads back.
 func TestSpanDictionaryFallsBackToPlainPastItsBound(t *testing.T) {
@@ -81,7 +80,7 @@ func TestSpanDictionaryFallsBackToPlainPastItsBound(t *testing.T) {
 	spans := make([]Span, 20_000)
 	for i := range spans {
 		spans[i] = Span{Namespace: "prod", TraceID: fmt.Sprintf("%032x", i), SpanID: fmt.Sprintf("%016x", i),
-			ServiceName: "checkout", HTTPRoute: fmt.Sprintf("/%0100d", i), Name: "op", Kind: "SPAN_KIND_SERVER", StatusCode: "STATUS_CODE_OK",
+			ServiceName: "checkout", Attributes: map[string]any{"http.route": fmt.Sprintf("/%0100d", i)}, Name: "op", Kind: "SPAN_KIND_SERVER", StatusCode: "STATUS_CODE_OK",
 			StartUnixNanos: int64(i + 1), EndUnixNanos: int64(i + 2), IngestedAt: 999}
 	}
 	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "bounded"}, spans, nil, nil); err != nil {
@@ -99,7 +98,7 @@ func TestSpanDictionaryFallsBackToPlainPastItsBound(t *testing.T) {
 	}
 	var stats []format.PageEncodingStats
 	for _, chunk := range file.Metadata().RowGroups[0].Columns {
-		if chunk.MetaData.PathInSchema[0] == "http_route" {
+		if chunk.MetaData.PathInSchema[0] == "_a_http_route" {
 			stats = chunk.MetaData.EncodingStats
 		}
 	}
@@ -110,15 +109,51 @@ func TestSpanDictionaryFallsBackToPlainPastItsBound(t *testing.T) {
 	if !plainPages {
 		t.Fatalf("http_route stayed dictionary encoded past its bound: %+v", stats)
 	}
-	rows := make([]spanParquetRow, len(spans))
-	if n, err := parquet.NewGenericReader[spanParquetRow](file).Read(rows); n != len(spans) || (err != nil && !errors.Is(err, io.EOF)) {
-		t.Fatalf("read %d rows: %v", n, err)
-	}
 	routes := map[string]bool{}
-	for _, row := range rows {
-		routes[row.HTTPRoute] = true
+	for _, row := range engineRows(t, filepath.Join(store.BatchPath("bounded"), "spans.parquet")) {
+		routes[row["_a_http_route"]] = true
 	}
-	if len(routes) != len(spans) || !routes[spans[len(spans)-1].HTTPRoute] {
+	if len(routes) != len(spans) || !routes[spans[len(spans)-1].Attributes["http.route"].(string)] {
 		t.Fatalf("read back %d distinct routes, want %d", len(routes), len(spans))
+	}
+}
+
+// Histogram bucket counts of hundreds or more fill two bytes of each
+// eight-byte slot; the dense codec stores them in a third of the fastest
+// level's bytes.
+func TestDenseCodecCompressesBucketCounts(t *testing.T) {
+	// Cumulative points of 40 series, of which a few buckets grow between
+	// points, as exported histograms do; rows sort by series, then time.
+	r := rand.New(rand.NewSource(3))
+	rows := make([]Metric, 0, 20_000)
+	for series := range 40 {
+		counts := make([]uint64, 90)
+		for point := range 500 {
+			for range 10 {
+				counts[r.Intn(len(counts))] += uint64(r.Intn(40))
+			}
+			rows = append(rows, Metric{Name: "latency", Type: "histogram", Temporality: "cumulative", SeriesID: uint64(series),
+				TimeUnixNanos: int64(point + 1), Histogram: Histogram{Exponential: true, Count: 1, PositiveCounts: slices.Clone(counts)}})
+		}
+	}
+	size := func(options ...parquet.WriterOption) int64 {
+		path := filepath.Join(t.TempDir(), "metrics.parquet")
+		if err := writeParquet(path, Metrics, rows, parquetPageSize, options...); err != nil {
+			t.Fatal(err)
+		}
+		file := openParquetFile(t, path)
+		var total int64
+		for _, group := range file.Metadata().RowGroups {
+			for _, chunk := range group.Columns {
+				if chunk.MetaData.PathInSchema[0] == "exp_positive_counts" {
+					total += chunk.MetaData.TotalCompressedSize
+				}
+			}
+		}
+		return total
+	}
+	dense, fastest := size(), size(uncompressedSchema(Metrics))
+	if float64(dense) > 0.7*float64(fastest) {
+		t.Fatalf("dense counts take %d bytes, the fastest level %d", dense, fastest)
 	}
 }

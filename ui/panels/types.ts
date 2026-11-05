@@ -79,6 +79,8 @@ export type PanelResult = {
   frame?: Frame;
   previous?: Frame;
   error?: string;
+  /** "busy": the panel never started because other queries held the server. */
+  reason?: "busy";
   retryable?: boolean;
   diagnosis?: string;
   sql?: string;

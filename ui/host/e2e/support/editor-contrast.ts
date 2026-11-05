@@ -24,7 +24,7 @@ export function proveEditorText(selectors: string[]) {
     const target = JSON.stringify([selector]);
     const node = document.querySelector(selector);
     const editor = node?.closest("[data-sql-editor] .cm-editor");
-    const problem = node?.matches("[data-panel-sql-editor] li.panel-sql-problem") ? node : null;
+    const problem = node?.matches("[data-explore] li.sql-problem") ? node : null;
     const surface = editor ?? problem?.closest('[role="dialog"]');
     const samples: { text: string; fg: string | null; bg: string | null; ratio: number | null }[] = [];
     const unresolved = () => ({ target, samples, ratio: null });

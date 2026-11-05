@@ -82,6 +82,15 @@ type Config struct {
 	// CPU/heap/mutex/goroutine profiling under load. Off by default; the routes
 	// require an admin browser session with operations:read.
 	PprofEnabled bool `group:"server" env:"FANOUT_PPROF_ENABLED" default:"false"`
+	// QueryCacheTTL is the oldest a dashboard panel, exemplar or trace
+	// detail result served from memory may be, measured from the end of the
+	// time window it covers (for traces and exemplars, from when their run
+	// started). A result younger than half the TTL is served as is; one
+	// younger than the TTL is served while one background run refreshes it;
+	// an older one is rerun. A request with Cache-Control: no-cache, such as
+	// a dashboard's manual refresh, always reruns. Zero disables the cache;
+	// concurrent identical requests still share one execution.
+	QueryCacheTTL time.Duration `group:"server" env:"FANOUT_QUERY_CACHE_TTL" default:"10s"`
 	// The DuckDB knobs below self-size where possible and otherwise default to
 	// values validated on the reference deployment target, a small shared VM
 	// (Hetzner CPX32: 4 vCPU, 8 GB RAM, 160 GB disk). There the self-sizing
@@ -102,9 +111,11 @@ type Config struct {
 	// report the resolved budget and detection status. Set an explicit cap when
 	// memory limit detection is incomplete.
 	DuckDBMemory string `group:"storage" env:"FANOUT_DUCKDB_MEMORY"`
-	// DuckDBThreads caps DuckDB's global query worker pool. Zero leaves
-	// DuckDB's own default in place (one worker per core). Set it to leave
-	// cores free for ingest on a query-heavy co-tenant host.
+	// DuckDBThreads caps DuckDB's global query worker pool. Zero selects one
+	// worker per CPU the process may run on (the affinity mask and cgroup
+	// quota, as GOMAXPROCS resolves them) rather than DuckDB's count of the
+	// machine's hardware threads. Set it to leave cores free for ingest on a
+	// query-heavy co-tenant host.
 	DuckDBThreads int `group:"storage" env:"FANOUT_DUCKDB_THREADS" default:"0"`
 	// DuckDBMaxConns caps the DuckDB read connection pool. Reads scan immutable
 	// Parquet concurrently; analytical and completed-batch writes use separate
@@ -267,6 +278,9 @@ func (c Config) Validate() error {
 	}
 	if c.MaintenanceInterval < time.Second {
 		return fmt.Errorf("FANOUT_MAINTENANCE_INTERVAL must be at least 1s, got %s", c.MaintenanceInterval)
+	}
+	if c.QueryCacheTTL < 0 {
+		return fmt.Errorf("FANOUT_QUERY_CACHE_TTL must be >= 0, got %s", c.QueryCacheTTL)
 	}
 	if c.DuckDBThreads < 0 {
 		return fmt.Errorf("FANOUT_DUCKDB_THREADS must be >= 0, got %d", c.DuckDBThreads)

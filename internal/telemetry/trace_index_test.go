@@ -8,9 +8,9 @@ import (
 
 func TestTraceIndexLookupKeepsEntriesOnDisk(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "trace.fidx")
-	rows := make([]spanParquetRow, 10_000)
+	rows := make([]uint64, 10_000)
 	for i := range rows {
-		rows[i].TraceHash = uint64(i * 2)
+		rows[i] = uint64(i * 2)
 	}
 	if err := writeTraceIndex(path, rows); err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestTraceIndexLookupKeepsEntriesOnDisk(t *testing.T) {
 
 func TestTraceIndexRejectsNoncontiguousEntry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "trace.fidx")
-	rows := []spanParquetRow{{TraceHash: 1}, {TraceHash: 2}}
+	rows := []uint64{1, 2}
 	if err := writeTraceIndex(path, rows); err != nil {
 		t.Fatal(err)
 	}

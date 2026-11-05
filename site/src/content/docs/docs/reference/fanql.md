@@ -55,13 +55,15 @@ A word is a field only before a field operator; otherwise it searches log `body`
 | `not like` | SQL spelling, SQL meaning: missing values are excluded; prefix `-` includes them. |
 | `not ilike` | SQL spelling, SQL meaning: missing values are excluded; prefix `-` includes them. |
 
-Prefix `-` or `not` excludes a term and includes rows where its predicate is NULL. Repeated negation cancels in pairs. SQL operators retain SQL null behavior. Compound negation follows De Morgan's law. TRY_CAST failures are NULL, so `-http_status_code between 400 and 599` includes uncastable codes.
+Prefix `-` or `not` excludes a term and includes rows where its predicate is NULL. Repeated negation cancels in pairs. SQL operators retain SQL null behavior. Compound negation follows De Morgan's law. A missing attribute makes a comparison NULL, so `-http.response.status_code between 400 and 599` includes spans without a status code.
 
 Whitespace and `and` join filters. An `or` chain must occupy its whole filter list or be parenthesized: `a:1 (b:2 or c:3)` and `(a:1 b:2) or c:3` differ. This rule also applies inside groups and `count_if`. Mixing conjunction and `or` without parentheses is a problem with suggested repairs.
 
 ## Fields
 
-A single identifier is a source column when one exists, otherwise an attribute key with a notice. Dotted `http.target` means `attributes['http.target']`; `resource.k8s.pod.name` means `resource['k8s.pod.name']`. Explicit `attributes.<path>` uses the attributes map. Bracket keys are literal nonempty strings, including spaces, Unicode, punctuation and doubled quotes. Keys beginning `resource.` or `attributes.` retain brackets where needed to preserve the map.
+A single identifier is a source column when one exists, otherwise an attribute key with a notice. Dotted `url.path` means `attributes['url.path']`; `resource.k8s.pod.name` means `resource['k8s.pod.name']`. Explicit `attributes.<path>` uses the attributes map. Bracket keys are literal nonempty strings, including spaces, Unicode, punctuation and doubled quotes. Keys beginning `resource.` or `attributes.` retain brackets where needed to preserve the map.
+
+Standard OpenTelemetry keys that the schema marks indexed, such as `http.response.status_code` and `k8s.pod.name`, read typed from their own columns: ingest converts a value sent in another type, so `"200"` reads as the number 200. Other keys read as sent.
 
 Canonical text brackets single-segment attribute keys, so new columns cannot reinterpret canonical or stored text. Map columns require a key. `duration` denotes `duration_ms` in filters, measure arguments and trace sorts. `duration_ms>500` takes a number; `duration>500ms` requires a unit. A measure alias named duration or duration_ms stays that alias in sort. Time columns accept range comparisons against quoted timestamps, not equality shorthand.
 
@@ -81,15 +83,8 @@ Canonical text brackets single-segment attribute keys, so new columns cannot rei
 | `start_time` | `time` | `none` |  | Span start |
 | `end_time` | `time` | `none` |  | Span end |
 | `duration_ms` | `number` | `ms` |  | Span duration in milliseconds |
-| `http_method` | `string` | `none` | yes | HTTP method |
-| `http_status_code` | `string` | `none` |  | HTTP response status code as text |
-| `http_route` | `string` | `none` |  | HTTP route template |
-| `db_system` | `string` | `none` | yes | Database system, e.g. postgresql, redis |
-| `rpc_method` | `string` | `none` |  | RPC method |
 | `rpc_service` | `string` | `none` |  | RPC service |
 | `peer_service` | `string` | `none` |  | Remote service named by the caller |
-| `service_version` | `string` | `none` | yes | service.version resource attribute |
-| `deployment_env` | `string` | `none` | yes | deployment.environment resource attribute |
 | `exception_type` | `string` | `none` |  | Exception type from the span's exception event |
 | `exception_message` | `string` | `none` |  | Exception message |
 | `messaging_system` | `string` | `none` | yes | messaging.system attribute |
@@ -125,15 +120,13 @@ Canonical text brackets single-segment attribute keys, so new columns cannot rei
 | `name` | `string` | `none` |  | Metric name |
 | `unit` | `string` | `none` |  | Metric unit as reported |
 | `type` | `string` | `none` | yes | counter, gauge, histogram, summary, updown |
-| `temporality` | `string` | `none` | yes | cumulative or delta; empty for gauge and summary |
+| `temporality` | `string` | `none` | yes | cumulative or delta; NULL for gauge and summary |
 | `start_time` | `time` | `none` |  | Data point start time; NULL when absent |
-| `value` | `number` | `none` |  | Gauge or sum value |
+| `value` | `number` | `none` |  | Gauge or sum value; NULL for histogram and summary |
 | `hist_count` | `number` | `count` |  | Histogram point count |
-| `hist_sum` | `number` | `none` |  | Histogram point sum |
+| `hist_sum` | `number` | `none` |  | Histogram point sum; NULL when absent |
 | `attributes` | `map` | `none` |  | Data point attributes; use attributes['key'] |
 | `resource` | `map` | `none` |  | Resource attributes; use resource['key'] |
-
-`http_status_code` is text. `<`, `<=`, `>`, `>=` and `between` use `TRY_CAST(http_status_code AS INTEGER)` for literals and variables alike. Equality and membership stay text, so `http_status_code:500` means `'500'`.
 
 ## Vocabularies and severity
 
@@ -212,7 +205,7 @@ On normalized log rows, `error_rate()` counts exactly `severity>=error`. Its bac
 | Duration | `us`, `ms`, `s`, `m`, `h`, only on `duration`; converted to milliseconds. Examples: `500ms`, `1.5s`, `250us`, `2m`, `1h`. Negative, compound and overflowing durations are rejected. |
 | Timestamp | Quoted RFC 3339 or `YYYY-MM-DD HH:MM:SS`, optional fraction/offset; no offset means UTC. Time comparisons retain nanoseconds through TIMESTAMPTZ_NS. |
 | Existence | `k:*` is IS NOT NULL; `-k:*` is IS NULL. |
-| Free text | Case-insensitive substring of log body or span operation; explicit field required on metrics. |
+| Free text | Case-insensitive substring of log body or span operation; explicit field required on metrics. A lone `$name` searches for the variable's value and prints as `body ~ $name` or `operation ~ $name`. |
 
 Contains emits `contains(lower(field), lower(value))`; map values first cast to VARCHAR. SQL LIKE/ILIKE require quoted patterns; ESCAPE is not expressible, so use `~` when `%` should be literal.
 
@@ -292,7 +285,7 @@ All rule: a filter that mentions a variable set to All is removed; keep fixed co
 
 Logs/traces use logs/spans respectively and forbid measures, grouping, buckets and histogram. Log_patterns uses `count() by body_template`, optionally a bucket. Timeseries needs a bucket and at most one grouping field, with one measure when grouped. Tables allow three grouping fields; bars two, with one measure when grouped by two. Stat/gauge need one measure and no grouping/bucket; gauge needs min/max. Scatter needs two measures and one or two grouping fields. State_timeline needs one measure, one grouping field, a bucket and thresholds.
 
-Traces are `(namespace, trace_id)` candidates with at least one matching span in the window, ranked by matching spans' max(duration_ms), or min(start_time) for `sort +start`. Limit applies to candidates; the engine reads at most 1,001 for truncation detection. Each returns one root span, or its earliest span in the window if the root is outside it, with error status if any span in the trace errored. Displayed service and duration are root service and root duration. A child can match while the returned root has different values.
+Traces are `(namespace, trace_id)` candidates with at least one matching span in the window, ranked by matching spans' max(duration_ms), or min(start_time) for `sort +start`. Limit applies to candidates; the engine reads at most 1,001 for truncation detection. Each returns one root span, or its earliest span in the window if the root is outside it, with error status if any span in the trace errored. Displayed service and duration are root service and root duration. A child can match while the returned root has different values. A prefix-negated filter (`-service:checkout`, `not operation~health`) excludes whole traces instead: a trace with any span in the window that the term matches is not listed, so `-service:load-generator` also drops traces that pass through load-generator. SQL's own negatives (`service!=checkout`, `not in`) and negation inside `or` stay per span, and `-k:*` keeps its meaning (`k is null`).
 
 Trace sorts: descending `duration` (stored duration_ms), `errors`, or ascending `+start`. `sort errors` is the legacy combined key: it also filters to error spans, then orders by duration. Prefer `status:error` with `sort duration`. Logs sort by `time` or `+time`; log_patterns by `count`. Aggregate sorts name a measure alias. Default/desc is descending; +/asc is ascending; choose one direction. Bucketed families use time order and options.top for series selection; sort/limit are accepted with a notice when ignored.
 
@@ -313,11 +306,11 @@ Format returns complete text and exactness `exact` or `normalized`, with notices
 ```fanql
 spans where kind:server | error_rate() by service every 1m
 spans where service:checkout duration>500ms sort duration limit 50
-spans where service:$service (status:error or status:unset) | count() by http_route
-spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route
+spans where service:$service (status:error or status:unset) | count() by http.route
+spans where kind:server | count_if(http.response.status_code>=500) / count() * 100 as pct_5xx by http.route
 spans where kind:server | (count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex
 spans | histogram(duration) by service
-spans where service:checkout status:error -http.target:/healthz | count() by http_route
+spans where service:checkout status:error -url.path:/healthz | count() by http.route
 spans where user.id:* | count_distinct(user.id) by service
 logs where service:api severity:error timeout sort time limit 200
 logs where severity>=warn | count() by body_template sort count limit 10

@@ -19,10 +19,10 @@ function validationProblem(scheme: "light" | "dark") {
   // Mantine Alert's default variant paints a translucent semantic background;
   // its message uses --mantine-color-black/white according to the scheme.
   document.body.insertAdjacentHTML("beforeend", `<div role="dialog" style="background-color: ${resolve("var(--mantine-color-body)")}">
-    <div data-panel-sql-editor><div role="alert" style="background-color: ${resolve("var(--mantine-color-bad-light)")}">
-      <div style="color: ${resolve(`var(--mantine-color-${scheme === "light" ? "black" : "white"})`)}"><ul><li class="panel-sql-problem"></li></ul></div>
+    <div data-explore><div role="alert" style="background-color: ${resolve("var(--mantine-color-bad-light)")}">
+      <div style="color: ${resolve(`var(--mantine-color-${scheme === "light" ? "black" : "white"})`)}"><ul><li class="sql-problem"></li></ul></div>
     </div></div></div>`);
-  const problem = document.querySelector<HTMLElement>(".panel-sql-problem")!;
+  const problem = document.querySelector<HTMLElement>(".sql-problem")!;
   problem.append("panels[0].sql", ": ", 'Binder Error: Referenced column "missing_column" not found in FROM clause!');
   // happy-dom has no layout: provide two wrapped text rectangles and the actual
   // browser hit-test result. The browser suite uses native geometry instead.
@@ -33,49 +33,49 @@ function validationProblem(scheme: "light" | "dark") {
 
 it.each(["light", "dark"] as const)("proves wrapped validation text against the alert and opaque dialog in %s", scheme => {
   const { problem } = validationProblem(scheme);
-  const [proof] = proveEditorText([".panel-sql-problem"]);
+  const [proof] = proveEditorText([".sql-problem"]);
   expect(proof.samples.map(sample => sample.text)).toEqual(Array.from(problem.childNodes, text => text.textContent));
   expect(proof.samples).toHaveLength(3);
   expect(proof.ratio).toBeGreaterThanOrEqual(4.5);
   expect(proof.samples[0].bg).toBe(scheme === "light" ? "#fbd9dc" : "#380d11");
   expect(proof.samples[0].fg).toBe(scheme === "light" ? "#000000" : "#ffffff");
   problem.style.color = proof.samples[0].bg!;
-  expect(proveEditorText([".panel-sql-problem"])[0].ratio).toBeCloseTo(1);
+  expect(proveEditorText([".sql-problem"])[0].ratio).toBeCloseTo(1);
 });
 
 it("leaves validation text unresolved when any wrapped run is covered, offscreen or has no geometry", () => {
   const { hit } = validationProblem("light");
   const tooltip = document.createElement("div"); tooltip.className = "cm-tooltip"; document.body.append(tooltip);
-  hit.mockReturnValueOnce(document.querySelector(".panel-sql-problem")).mockReturnValueOnce(tooltip);
-  expect(proveEditorText([".panel-sql-problem"])[0].ratio).toBeNull();
+  hit.mockReturnValueOnce(document.querySelector(".sql-problem")).mockReturnValueOnce(tooltip);
+  expect(proveEditorText([".sql-problem"])[0].ratio).toBeNull();
   vi.mocked(Range.prototype.getClientRects).mockReturnValue([new DOMRect(-10, 460, 100, 20)] as unknown as DOMRectList);
-  expect(proveEditorText([".panel-sql-problem"])[0].ratio).toBeNull();
+  expect(proveEditorText([".sql-problem"])[0].ratio).toBeNull();
   vi.mocked(Range.prototype.getClientRects).mockReturnValue([] as unknown as DOMRectList);
-  expect(proveEditorText([".panel-sql-problem"])[0].ratio).toBeNull();
+  expect(proveEditorText([".sql-problem"])[0].ratio).toBeNull();
 });
 
 it.each([
   ['[role="dialog"]', "background-color: transparent"],
   ['[role="alert"]', "background-image: linear-gradient(white, black)"],
   ['[role="alert"]', "opacity: 0.5"],
-  [".panel-sql-problem", "filter: brightness(0.5)"],
+  [".sql-problem", "filter: brightness(0.5)"],
 ])("leaves validation text with unsupported styles unresolved on %s (%s)", (selector, style) => {
   validationProblem("light");
   document.querySelector(selector)!.setAttribute("style", style);
-  expect(proveEditorText([".panel-sql-problem"])[0].ratio).toBeNull();
+  expect(proveEditorText([".sql-problem"])[0].ratio).toBeNull();
 });
 
 it("only proves validation items in the SQL dialog and rejects selected validation text", () => {
   const { problem } = validationProblem("light");
   const range = document.createRange(); range.selectNodeContents(problem);
   window.getSelection()!.addRange(range);
-  expect(proveEditorText([".panel-sql-problem"])[0].ratio).toBeNull();
+  expect(proveEditorText([".sql-problem"])[0].ratio).toBeNull();
   window.getSelection()!.removeAllRanges();
   document.body.append(problem);
-  expect(proveEditorText([".panel-sql-problem"])[0].ratio).toBeNull();
-  document.querySelector("[data-panel-sql-editor]")!.append(problem);
+  expect(proveEditorText([".sql-problem"])[0].ratio).toBeNull();
+  document.querySelector("[data-explore]")!.append(problem);
   document.querySelector('[role="dialog"]')!.removeAttribute("role");
-  expect(proveEditorText([".panel-sql-problem"])[0].ratio).toBeNull();
+  expect(proveEditorText([".sql-problem"])[0].ratio).toBeNull();
 });
 
 it("measures every text run and uses the weakest token as the line's proof", () => {

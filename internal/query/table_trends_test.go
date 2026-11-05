@@ -16,7 +16,7 @@ func TestStructuredTableSparklineRejectsDimension(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := Dashboard{Name: "Invalid trend", Panels: []Panel{{ID: "p", Title: "P", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}}, Options: &Options{Columns: []ColumnFormat{{Field: "service", Format: "sparkline"}}}}}}
 	Normalize(&d)
-	_, problems, err := Check(t.Context(), e.engine, &d)
+	_, problems, err := checkWith(t.Context(), e.engine, &d, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestTableTrendsMultipleMeasuresDimensionsAndWindow(t *testing.T) {
 	d.Panels = d.Panels[2:3]
 	p := &d.Panels[0]
 	p.Viz = "table"
-	p.Query.By = []string{"service", "http_route"}
+	p.Query.By = []string{"service", "attributes['http.route']"}
 	p.Query.Measures = []string{"count()", "avg(duration_ms) as latency"}
 	p.Options = &Options{Columns: []ColumnFormat{{Field: "count", Format: "sparkline"}, {Field: "latency", Format: "sparkline"}}}
 	start, end := fixtureStart.Add(30*time.Second), fixtureStart.Add(31*time.Minute+30*time.Second)

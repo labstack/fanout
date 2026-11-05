@@ -70,11 +70,11 @@ func TestEndpointPanelUsesExactNanosecondBoundaries(t *testing.T) {
 	end := start.Add(time.Minute)
 	spans := []telemetry.Span{}
 	for i, n := range []int64{start.UnixNano() - 1, start.UnixNano(), end.UnixNano() - 1, end.UnixNano()} {
-		spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: fmt.Sprint(i), SpanID: fmt.Sprint(i), HTTPMethod: "GET", HTTPRoute: "/cart", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: fixtureStart.UnixNano(), DurationMS: float64(i + 1)})
+		spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: fmt.Sprint(i), SpanID: fmt.Sprint(i), Attributes: map[string]any{"http.request.method": "GET", "http.route": "/cart"}, StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: fixtureStart.UnixNano(), DurationMS: float64(i + 1)})
 	}
 	commit(t, repo, spans, nil)
 	e := NewExecutor(engine, 30)
-	spec := Dashboard{Name: "Endpoints", Time: Time{From: &start, To: &end}, Panels: []Panel{{ID: "p", Title: "Calls", Viz: "table", Query: &Spec{From: "spans", Where: []string{"namespace = 'shop'", "service = 'checkout'"}, Measures: []string{"count()", "p95(duration_ms)"}, By: []string{"http_route"}}}}}
+	spec := Dashboard{Name: "Endpoints", Time: Time{From: &start, To: &end}, Panels: []Panel{{ID: "p", Title: "Calls", Viz: "table", Query: &Spec{From: "spans", Where: []string{"namespace = 'shop'", "service = 'checkout'"}, Measures: []string{"count()", "p95(duration_ms)"}, By: []string{"attributes['http.route']"}}}}}
 	for _, warm := range []bool{false, true} {
 		if warm {
 			if _, err := engine.RefreshReadCaches(t.Context()); err != nil {

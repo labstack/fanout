@@ -1,26 +1,12 @@
 package engine
 
-import (
-	"math"
-	"strings"
-)
+import "strings"
 
-// JSON cannot encode nonfinite doubles. Keep them as the ProtoJSON strings
-// NaN, Infinity and -Infinity at the product boundary; storage remains typed.
-func jsonFloat(value float64) any {
-	switch {
-	case math.IsNaN(value):
-		return "NaN"
-	case math.IsInf(value, 1):
-		return "Infinity"
-	case math.IsInf(value, -1):
-		return "-Infinity"
-	default:
-		return value
-	}
-}
-
-func normalizeJSONNumbers(text string) string {
+// NormalizeJSON makes the JSON text of a serialized column parseable. DuckDB
+// writes nonfinite doubles as bare NaN, Infinity and -Infinity, which JSON
+// cannot encode; they become the ProtoJSON strings of the same names. Storage
+// remains typed.
+func NormalizeJSON(text string) string {
 	var output strings.Builder
 	quoted, escaped := false, false
 	start := 0

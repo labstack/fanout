@@ -47,7 +47,7 @@ func FuzzCompileFormatCompile(f *testing.F) {
 		d := query.Dashboard{Name: "Round trip", Variables: vars, Panels: []query.Panel{{ID: "p", Title: "p", Viz: checkViz, Query: &c.Query}}}
 		// Compile leaves raw SQL validation to the panel gate. The property
 		// applies to executable panel queries, including raw SQL and comments.
-		if _, problems, err := query.Check(t.Context(), engine, &d); err != nil {
+		if _, problems, err := query.NewExecutor(engine, 30).Check(t.Context(), &d); err != nil {
 			t.Fatal(err)
 		} else if len(problems) != 0 {
 			return
@@ -290,7 +290,7 @@ func FuzzFormatRoundTrip(f *testing.F) {
 		query.Normalize(&dashboard)
 		// JSON mutation can produce syntactically invalid SQL in a shape-valid
 		// Query. The round-trip promise applies only to the gate's accepted input.
-		if _, problems, err := query.Check(t.Context(), engine, &dashboard); err != nil {
+		if _, problems, err := query.NewExecutor(engine, 30).Check(t.Context(), &dashboard); err != nil {
 			t.Fatal(err)
 		} else if len(problems) != 0 {
 			return

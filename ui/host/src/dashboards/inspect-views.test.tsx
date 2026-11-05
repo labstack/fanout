@@ -70,14 +70,28 @@ it.each([
  {viz:"timeseries",drill:"logs",hint:"click for matching logs"},
  {viz:"timeseries",drill:"traces",hint:"click for exemplar traces"},
  {viz:"heatmap",drill:"traces",hint:"click for exemplar traces"},
+ {viz:"bar",drill:"traces",hint:"click for exemplar traces"},
+ {viz:"scatter",drill:"traces",hint:"click for exemplar traces"},
  {viz:"bar",click:{set_variable:"service"},hint:"click to filter by service"},
  {viz:"scatter",click:{set_variable:"operation"},hint:"click to filter by operation"},
- {viz:"table",drill:"traces",hint:"click to open trace"},
+ {viz:"table",drill:"traces",hint:"click for exemplar traces"},
  {viz:"traces",hint:"click to open trace"},
 ] as const)("subtitle maps the actual interaction (%j)",async sample=>{
  const {hint,...settings}=sample;
  const h=await render({id:"p",title:"Panel",...settings});
  expect(h.querySelector('[data-panel-subtitle]')?.textContent).toContain(hint);
+});
+it("gives a traces-drill table no hint until its columns are known",async()=>{
+ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
+ const panel:Panel={id:"p",title:"Panel",viz:"table",drill:"traces"};
+ await act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title={panel.title} result={undefined} loading height={300} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()}/></MantineProvider>));
+ expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("table");
+});
+it("says a table row with a trace_id opens that trace",async()=>{
+ const frame={columns:[{name:"trace_id",type:"string" as const,role:"dimension" as const},{name:"calls",type:"number" as const,role:"measure" as const}],values:[["abc"],[1]],rows:1};
+ const h=await render({id:"p",title:"Panel",viz:"table",drill:"traces"},{...result,frame});
+ expect(h.querySelector('[data-panel-subtitle]')?.textContent).toBe("table · click to open trace");
 });
 it.each(["scatter","histogram"] as const)("%s reserves grid space for titles outside the data",viz=>{
  const frame={columns:[{name:"operation",type:"string" as const,role:"dimension" as const},{name:"calls",type:"number" as const,role:"measure" as const},{name:"p95",type:"number" as const,role:"measure" as const}],values:[["GET"],[100],[50]],rows:1};

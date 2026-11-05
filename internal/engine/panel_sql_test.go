@@ -26,10 +26,6 @@ func TestTelemetrySQLRejectsCatalogMacrosAndSideEffects(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "not available to telemetry SQL") {
 					t.Fatalf("function boundary for %s: %v", statement, err)
 				}
-				response := d.ExecuteSQL(t.Context(), SQLRequest{Query: statement})
-				if !strings.Contains(response.Error, "not available to telemetry SQL") {
-					t.Fatalf("direct SQL function boundary: %+v", response)
-				}
 			})
 		}
 	}
@@ -110,9 +106,8 @@ func TestSnapshotExecutionMatchesDescribedColumnBindings(t *testing.T) {
 		"SELECT telemetry.logs.body AS b FROM telemetry.logs",
 	} {
 		t.Run(statement, func(t *testing.T) {
-			response := d.ExecuteSQL(t.Context(), SQLRequest{Query: statement})
-			if response.Error != "" || len(response.Results) != 1 || response.Results[0]["b"] != "fixture body" {
-				t.Fatalf("direct SQL: %+v", response)
+			if rows := mustRunTelemetrySQL(t, ctx, d, statement, 10); len(rows) != 1 || rows[0]["b"] != "fixture body" {
+				t.Fatalf("panel SQL: %+v", rows)
 			}
 			prepared, _, err := d.PrepareTelemetrySQL(t.Context(), statement, statement, 10)
 			if err != nil {
@@ -204,6 +199,49 @@ func TestPrepareTelemetrySQLGuardsAndProjects(t *testing.T) {
 	}
 	if service != "checkout" || duration != 1 || !strings.Contains(attributes, `"http.route"`) {
 		t.Fatalf("row = %q %q %v", service, attributes, duration)
+	}
+}
+
+// The host's span details read event offsets with a list lambda and the
+// typed event attributes as JSON; both must pass the boundary and its
+// canonical rendering.
+func TestPrepareTelemetrySQLProjectsEventLists(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	n := at.UnixNano()
+	span := telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: "t", SpanID: "a", StartUnixNanos: n, EndUnixNanos: n + 1e9, DurationMS: 1000, IngestedAt: n, Events: []telemetry.Event{
+		{TimeUnixNanos: n + 123456789, Name: "exception", Attributes: map[string]any{"exception.type": "E", "attempt": int64(2)}},
+		{TimeUnixNanos: n + 7, Name: "retry"},
+	}}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "events", Spans: []telemetry.Span{span}}); err != nil {
+		t.Fatal(err)
+	}
+	render := func(query string) string {
+		node, err := d.ParseSQL(t.Context(), query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rendered, err := d.RenderSQL(t.Context(), node)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rendered
+	}
+	query := "SELECT [epoch_ns(t) - start_unix_nano for t in event_times] AS event_offsets, event_names, event_attributes FROM spans WHERE start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS"
+	prepared, serialized, err := d.PrepareTelemetrySQL(t.Context(), render(query), render(strings.ReplaceAll(query, "?", "NULL")), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(serialized) != 3 || !serialized[0] || !serialized[1] || !serialized[2] {
+		t.Fatalf("serialized = %v", serialized)
+	}
+	ctx := queryrows.WithWindow(context.Background(), queryrows.Window{Start: at, End: at.Add(time.Hour)})
+	var offsets, names, attributes string
+	if err := d.QueryRowScan(ctx, []any{&offsets, &names, &attributes}, prepared, at, at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if offsets != "[123456789,7]" || names != `["exception","retry"]` || attributes != `[{"attempt":2,"exception.type":"E"},null]` {
+		t.Fatalf("row = %s %s %s", offsets, names, attributes)
 	}
 }
 

@@ -32,22 +32,33 @@
         "http.route": "/orders",
         "http.status_code": 503
       },
-      "EventsJSON": "[{\"time_unix_nano\":1790856000000000020,\"name\":\"exception\",\"attributes\":{\"exception.message\":\"late\",\"exception.type\":\"Timeout\"}}]",
-      "LinksJSON": "[{\"trace_id\":\"05\",\"span_id\":\"06\",\"trace_state\":\"a=b\",\"attributes\":{\"link\":\"value\"}}]",
+      "Events": [
+        {
+          "TimeUnixNanos": 1790856000000000020,
+          "Name": "exception",
+          "Attributes": {
+            "exception.message": "late",
+            "exception.type": "Timeout"
+          }
+        }
+      ],
+      "Links": [
+        {
+          "TraceID": "05",
+          "SpanID": "06",
+          "TraceState": "a=b",
+          "Attributes": {
+            "link": "value"
+          }
+        }
+      ],
       "TraceState": "vendor=state",
       "Flags": 257,
       "ScopeName": "http",
       "ScopeVersion": "1.0",
       "IngestedAt": 0,
-      "HTTPMethod": "GET",
-      "HTTPStatusCode": "503",
-      "HTTPRoute": "/orders",
-      "DBSystem": "",
-      "RPCMethod": "",
       "RPCService": "",
       "PeerService": "",
-      "ServiceVersion": "v1",
-      "DeploymentEnv": "prod",
       "ExceptionType": "Timeout",
       "ExceptionMessage": "late"
     },
@@ -82,22 +93,33 @@
         "http.route": "/orders",
         "http.status_code": 503
       },
-      "EventsJSON": "[{\"time_unix_nano\":1790856000000000020,\"name\":\"exception\",\"attributes\":{\"exception.message\":\"late\",\"exception.type\":\"Timeout\"}}]",
-      "LinksJSON": "[{\"trace_id\":\"05\",\"span_id\":\"06\",\"trace_state\":\"a=b\",\"attributes\":{\"link\":\"value\"}}]",
+      "Events": [
+        {
+          "TimeUnixNanos": 1790856000000000020,
+          "Name": "exception",
+          "Attributes": {
+            "exception.message": "late",
+            "exception.type": "Timeout"
+          }
+        }
+      ],
+      "Links": [
+        {
+          "TraceID": "05",
+          "SpanID": "06",
+          "TraceState": "a=b",
+          "Attributes": {
+            "link": "value"
+          }
+        }
+      ],
       "TraceState": "vendor=state",
       "Flags": 257,
       "ScopeName": "jobs",
       "ScopeVersion": "2.0",
       "IngestedAt": 0,
-      "HTTPMethod": "GET",
-      "HTTPStatusCode": "503",
-      "HTTPRoute": "/orders",
-      "DBSystem": "",
-      "RPCMethod": "",
       "RPCService": "",
       "PeerService": "",
-      "ServiceVersion": "v1",
-      "DeploymentEnv": "prod",
       "ExceptionType": "Timeout",
       "ExceptionMessage": "late"
     },
@@ -131,22 +153,33 @@
         "http.route": "/orders",
         "http.status_code": 503
       },
-      "EventsJSON": "[{\"time_unix_nano\":1790856000000000020,\"name\":\"exception\",\"attributes\":{\"exception.message\":\"late\",\"exception.type\":\"Timeout\"}}]",
-      "LinksJSON": "[{\"trace_id\":\"05\",\"span_id\":\"06\",\"trace_state\":\"a=b\",\"attributes\":{\"link\":\"value\"}}]",
+      "Events": [
+        {
+          "TimeUnixNanos": 1790856000000000020,
+          "Name": "exception",
+          "Attributes": {
+            "exception.message": "late",
+            "exception.type": "Timeout"
+          }
+        }
+      ],
+      "Links": [
+        {
+          "TraceID": "05",
+          "SpanID": "06",
+          "TraceState": "a=b",
+          "Attributes": {
+            "link": "value"
+          }
+        }
+      ],
       "TraceState": "vendor=state",
       "Flags": 257,
       "ScopeName": "http",
       "ScopeVersion": "1.0",
       "IngestedAt": 0,
-      "HTTPMethod": "GET",
-      "HTTPStatusCode": "503",
-      "HTTPRoute": "/orders",
-      "DBSystem": "",
-      "RPCMethod": "",
       "RPCService": "",
       "PeerService": "",
-      "ServiceVersion": "v2",
-      "DeploymentEnv": "test",
       "ExceptionType": "Timeout",
       "ExceptionMessage": "late"
     },
@@ -180,22 +213,33 @@
         "http.route": "/orders",
         "http.status_code": 503
       },
-      "EventsJSON": "[{\"time_unix_nano\":1790856000000000020,\"name\":\"exception\",\"attributes\":{\"exception.message\":\"late\",\"exception.type\":\"Timeout\"}}]",
-      "LinksJSON": "[{\"trace_id\":\"05\",\"span_id\":\"06\",\"trace_state\":\"a=b\",\"attributes\":{\"link\":\"value\"}}]",
+      "Events": [
+        {
+          "TimeUnixNanos": 1790856000000000020,
+          "Name": "exception",
+          "Attributes": {
+            "exception.message": "late",
+            "exception.type": "Timeout"
+          }
+        }
+      ],
+      "Links": [
+        {
+          "TraceID": "05",
+          "SpanID": "06",
+          "TraceState": "a=b",
+          "Attributes": {
+            "link": "value"
+          }
+        }
+      ],
       "TraceState": "vendor=state",
       "Flags": 257,
       "ScopeName": "jobs",
       "ScopeVersion": "2.0",
       "IngestedAt": 0,
-      "HTTPMethod": "GET",
-      "HTTPStatusCode": "503",
-      "HTTPRoute": "/orders",
-      "DBSystem": "",
-      "RPCMethod": "",
       "RPCService": "",
       "PeerService": "",
-      "ServiceVersion": "v2",
-      "DeploymentEnv": "test",
       "ExceptionType": "Timeout",
       "ExceptionMessage": "late"
     }
@@ -351,15 +395,30 @@
       "Unit": "ms",
       "Type": "gauge",
       "Temporality": "",
-      "Monotonic": false,
       "StartTimeUnixNanos": 1790855940000000009,
       "ServiceName": "api",
+      "Flags": 0,
       "Value": 12,
-      "HistBoundsJSON": "",
-      "HistCountsJSON": "",
-      "HistCount": 0,
-      "HistSum": 0,
-      "ExemplarsJSON": "",
+      "Count": 0,
+      "Sum": 0,
+      "Min": 0,
+      "Max": 0,
+      "HasSum": false,
+      "HasMin": false,
+      "HasMax": false,
+      "Bounds": null,
+      "Counts": null,
+      "Exponential": false,
+      "Scale": 0,
+      "ZeroCount": 0,
+      "ZeroThreshold": 0,
+      "PositiveOffset": 0,
+      "PositiveCounts": null,
+      "NegativeOffset": 0,
+      "NegativeCounts": null,
+      "Quantiles": null,
+      "QuantileValues": null,
+      "Exemplars": null,
       "Attributes": {
         "bytes": "AP8=",
         "flag": true,
@@ -390,17 +449,32 @@
       "Name": "sum",
       "Description": "",
       "Unit": "",
-      "Type": "sum",
+      "Type": "counter",
       "Temporality": "delta",
-      "Monotonic": true,
       "StartTimeUnixNanos": 1790855940000000009,
       "ServiceName": "api",
+      "Flags": 0,
       "Value": 12,
-      "HistBoundsJSON": "",
-      "HistCountsJSON": "",
-      "HistCount": 0,
-      "HistSum": 0,
-      "ExemplarsJSON": "",
+      "Count": 0,
+      "Sum": 0,
+      "Min": 0,
+      "Max": 0,
+      "HasSum": false,
+      "HasMin": false,
+      "HasMax": false,
+      "Bounds": null,
+      "Counts": null,
+      "Exponential": false,
+      "Scale": 0,
+      "ZeroCount": 0,
+      "ZeroThreshold": 0,
+      "PositiveOffset": 0,
+      "PositiveCounts": null,
+      "NegativeOffset": 0,
+      "NegativeCounts": null,
+      "Quantiles": null,
+      "QuantileValues": null,
+      "Exemplars": null,
       "Attributes": {
         "bytes": "AP8=",
         "flag": true,
@@ -433,15 +507,35 @@
       "Unit": "",
       "Type": "histogram",
       "Temporality": "cumulative",
-      "Monotonic": false,
       "StartTimeUnixNanos": 0,
       "ServiceName": "api",
+      "Flags": 0,
       "Value": 0,
-      "HistBoundsJSON": "[1]",
-      "HistCountsJSON": "[1,1]",
-      "HistCount": 2,
-      "HistSum": 0,
-      "ExemplarsJSON": "",
+      "Count": 2,
+      "Sum": 0,
+      "Min": 0,
+      "Max": 0,
+      "HasSum": false,
+      "HasMin": false,
+      "HasMax": false,
+      "Bounds": [
+        1
+      ],
+      "Counts": [
+        1,
+        1
+      ],
+      "Exponential": false,
+      "Scale": 0,
+      "ZeroCount": 0,
+      "ZeroThreshold": 0,
+      "PositiveOffset": 0,
+      "PositiveCounts": null,
+      "NegativeOffset": 0,
+      "NegativeCounts": null,
+      "Quantiles": null,
+      "QuantileValues": null,
+      "Exemplars": null,
       "Attributes": {
         "bytes": "AP8=",
         "flag": true,
@@ -472,17 +566,34 @@
       "Name": "exponential",
       "Description": "",
       "Unit": "",
-      "Type": "exponential_histogram",
+      "Type": "histogram",
       "Temporality": "delta",
-      "Monotonic": false,
       "StartTimeUnixNanos": 0,
       "ServiceName": "worker",
+      "Flags": 0,
       "Value": 0,
-      "HistBoundsJSON": "[-5e-324,0,1,2]",
-      "HistCountsJSON": "[0,0,0,1,0]",
-      "HistCount": 1,
-      "HistSum": 0,
-      "ExemplarsJSON": "",
+      "Count": 1,
+      "Sum": 0,
+      "Min": 0,
+      "Max": 0,
+      "HasSum": false,
+      "HasMin": false,
+      "HasMax": false,
+      "Bounds": null,
+      "Counts": null,
+      "Exponential": true,
+      "Scale": 0,
+      "ZeroCount": 0,
+      "ZeroThreshold": 0,
+      "PositiveOffset": 0,
+      "PositiveCounts": [
+        1
+      ],
+      "NegativeOffset": 0,
+      "NegativeCounts": [],
+      "Quantiles": null,
+      "QuantileValues": null,
+      "Exemplars": null,
       "Attributes": {
         "bytes": "AP8=",
         "flag": true,
@@ -514,15 +625,34 @@
       "Unit": "",
       "Type": "summary",
       "Temporality": "",
-      "Monotonic": false,
       "StartTimeUnixNanos": 0,
       "ServiceName": "worker",
+      "Flags": 0,
       "Value": 0,
-      "HistBoundsJSON": "[0.5]",
-      "HistCountsJSON": "[3]",
-      "HistCount": 1,
-      "HistSum": 3,
-      "ExemplarsJSON": "",
+      "Count": 1,
+      "Sum": 3,
+      "Min": 0,
+      "Max": 0,
+      "HasSum": true,
+      "HasMin": false,
+      "HasMax": false,
+      "Bounds": null,
+      "Counts": null,
+      "Exponential": false,
+      "Scale": 0,
+      "ZeroCount": 0,
+      "ZeroThreshold": 0,
+      "PositiveOffset": 0,
+      "PositiveCounts": null,
+      "NegativeOffset": 0,
+      "NegativeCounts": null,
+      "Quantiles": [
+        0.5
+      ],
+      "QuantileValues": [
+        3
+      ],
+      "Exemplars": null,
       "Attributes": {
         "bytes": "AP8=",
         "flag": true,

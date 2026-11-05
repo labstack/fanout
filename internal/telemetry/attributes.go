@@ -26,3 +26,25 @@ func ValueBytes(value any) int {
 		return 16
 	}
 }
+
+// ListBytes accounts for a span's events and links like ValueBytes does for
+// maps, without serializing them.
+func (s *Span) ListBytes() int {
+	total := 48 * (len(s.Events) + len(s.Links))
+	for _, e := range s.Events {
+		total += len(e.Name) + ValueBytes(e.Attributes)
+	}
+	for _, l := range s.Links {
+		total += len(l.TraceID) + len(l.SpanID) + len(l.TraceState) + ValueBytes(l.Attributes)
+	}
+	return total
+}
+
+// ListBytes accounts for a metric point's buckets, quantiles and exemplars.
+func (m *Metric) ListBytes() int {
+	total := 8 * (len(m.Bounds) + len(m.Counts) + len(m.PositiveCounts) + len(m.NegativeCounts) + len(m.Quantiles) + len(m.QuantileValues))
+	for _, e := range m.Exemplars {
+		total += 64 + len(e.TraceID) + len(e.SpanID) + ValueBytes(e.Attributes)
+	}
+	return total
+}

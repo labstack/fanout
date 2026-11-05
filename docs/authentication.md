@@ -98,7 +98,8 @@ login links are unavailable in that mode.
 All user-management routes require an administrator. User projections, including
 `GET /api/auth/me` and `GET /api/users`, expose `display_name` and `status`.
 Status is either `active` or `suspended`; roles remain `viewer`, `operator`,
-and `admin`.
+and `admin`. `GET /api/users` returns `{"users": [...]}`, including an empty array
+when there are no users.
 
 - `POST /api/users` provisions an account with `email`, `display_name`, and
   `role`. New accounts have status `active`.

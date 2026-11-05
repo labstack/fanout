@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
@@ -60,7 +61,21 @@ func (e *disconnectQueryEngine) QueryContext(ctx context.Context, _ string, _ ..
 	return nil, err
 }
 
+// A disconnect interrupts a panel's DuckDB query when no one will read its
+// result later: with the result cache disabled, or for a no-cache request.
+// A cacheable run outlives its callers instead; see
+// TestResultCacheAbandonedRunsCompleteAndAreReused.
 func TestHTTPDisconnectCancelsPanelDuckDBQuery(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		ttl     time.Duration
+		noCache bool
+	}{{"cache disabled", 0, false}, {"no-cache request", 10 * time.Second, true}} {
+		t.Run(tc.name, func(t *testing.T) { testDisconnectCancelsPanel(t, tc.ttl, tc.noCache) })
+	}
+}
+
+func testDisconnectCancelsPanel(t *testing.T, ttl time.Duration, noCache bool) {
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 4, RollupInterval: time.Hour}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
@@ -86,8 +101,17 @@ func TestHTTPDisconnectCancelsPanelDuckDBQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewWithIntelligence(nil, nil, query.NewExecutor(engine, 30), nil, "test")
-	httpServer := httptest.NewServer(server.HTTPHandler())
+	panels := query.NewExecutor(engine, 30)
+	panels.SetCacheTTL(ttl)
+	server := NewWithIntelligence(nil, nil, panels, nil, "test")
+	handler := server.HTTPHandler()
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if noCache {
+			// What the HTTP API does for Cache-Control: no-cache.
+			r = r.WithContext(query.WithoutCachedResults(r.Context()))
+		}
+		handler.ServeHTTP(w, r)
+	}))
 	defer httpServer.Close()
 	defer close(engine.release)
 	client := mcp.NewClient(&mcp.Implementation{Name: "disconnect", Version: "test"}, nil)

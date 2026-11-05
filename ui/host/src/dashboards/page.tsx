@@ -1,12 +1,13 @@
-import { Alert, Box, Button, Center, Group, Loader, Stack, Text, Title } from "@mantine/core";
-import { WarningCircle } from "@phosphor-icons/react";
+import { ActionIcon, Alert, Box, Button, Center, Group, Loader, Stack, Text, Title, Tooltip } from "@mantine/core";
+import { Copy, WarningCircle } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
 import { createDashboardPrompt, useFanoutApp, type TurnOptions } from "../app-context";
 import { ApiError, dashboardsKey, getDashboard, listDashboards, queryExemplars, getTrace, resolveVariables } from "./api";
 import { PanelGrid } from "./grid";
 import { DrillDrawer } from "./drill";
+import { DuplicateDialog } from "./duplicate-dialog";
 import { parseDrill } from "./drill-state";
 import { effectiveTime, type DashboardSearch } from "./search";
 import { Toolbar } from "./toolbar";
@@ -26,12 +27,15 @@ import { resolvedVariables } from "../../../panels/variables";
 import { drillSelection } from "./panel-handlers";
 import { retryQuery } from "./query-policy";
 import type { DrillClient } from "./drill-client";
-const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace };
+import { spanExtras } from "./trace/span-extras";
+const NewDashboard = lazy(() => import("./new-dashboard").then(module => ({ default: module.NewDashboard })));
+const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace, span: spanExtras };
 
 const zoomOut: Record<string, string> = { "5m": "15m", "15m": "1h", "1h": "3h", "3h": "6h", "6h": "12h", "12h": "24h", "24h": "2d", "2d": "7d", "7d": "30d", "30d": "30d" };
 
 export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashboardId?: string; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; onOpen(id: string, replace?: boolean): void }) {
   const { agentAvailable, openChat } = useFanoutApp();
+  const [creating, setCreating] = useState(false);
   const list = useQuery({ queryKey: dashboardsKey, queryFn: listDashboards, staleTime: 15_000 });
   useEffect(() => {
     if (dashboardId || !list.data?.length) return;
@@ -43,7 +47,11 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
   if (!dashboardId && list.data?.length === 0) return <Center mih="50vh"><Stack align="center" gap="xs">
     <Title order={1} fz={24}>No dashboards yet</Title>
     <Text c="dimmed" size="sm" ta="center">Create a dashboard to explore your services.</Text>
-    {agentAvailable && <Button mt="sm" size="sm" onClick={() => openChat(createDashboardPrompt)}>Create with AI</Button>}
+    <Group mt="sm" gap="xs">
+      <Button size="sm" onClick={() => setCreating(true)}>New dashboard</Button>
+      {agentAvailable && <Button size="sm" variant="default" onClick={() => openChat(createDashboardPrompt)}>Create with AI</Button>}
+    </Group>
+    {creating && <Suspense fallback={null}><NewDashboard onClose={() => setCreating(false)} onCreated={id => { setCreating(false); onOpen(id); }} /></Suspense>}
   </Stack></Center>;
   if (!dashboardId || record.isLoading) return <Center mih="50vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading your dashboard…</Text></Center>;
   if (record.error instanceof ApiError && record.error.code === "not_found") {
@@ -54,12 +62,13 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
     </Stack></Center>;
   }
   if (record.error || !record.data) return <Center mih="50vh"><Text c="dimmed" size="sm">Your dashboard is unavailable. Try refreshing.</Text></Center>;
-  return <Loaded key={record.data.id} id={record.data.id} version={record.data.version} spec={record.data.spec} search={search} onSearch={onSearch} agentAvailable={agentAvailable} openChat={openChat} />;
+  return <Loaded key={record.data.id} id={record.data.id} version={record.data.version} spec={record.data.spec} search={search} onSearch={onSearch} onOpen={onOpen} agentAvailable={agentAvailable} openChat={openChat} />;
 }
 
-function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; agentAvailable: boolean; openChat(prompt?: string, options?: TurnOptions): void }) {
+function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; onOpen(id: string): void; agentAvailable: boolean; openChat(prompt?: string, options?: TurnOptions): void }) {
   // Loading this owner-scoped record proves manage-own capability on the server.
   const canManage = true;
+  const [duplicating, setDuplicating] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const region = useRef<HTMLElement>(null);
@@ -126,7 +135,10 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
     <Stack gap="sm" mb="md">
       <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
         <Box miw={0}>
-          <Title order={1} fz={28} lts="-0.02em">{spec.name}</Title>
+          <Group gap="xs" wrap="nowrap">
+            <Title order={1} fz={28} lts="-0.02em">{spec.name}</Title>
+            {canManage && <Tooltip label="Duplicate dashboard"><ActionIcon variant="subtle" color="gray" aria-label="Duplicate dashboard" onClick={() => setDuplicating(true)}><Copy size={16} /></ActionIcon></Tooltip>}
+          </Group>
           {spec.description && <Text c="dimmed" size="sm" mt={2}>{spec.description}</Text>}
         </Box>
         <Toolbar selecting={ranges.size > 0} time={time} refresh={refresh} compare={compare} editing={search.edit === "1"} fetching={data.fetching} updatedAt={data.updatedAt}
@@ -151,6 +163,9 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
       {data.annotationError && <Alert color="warn" title="Annotations unavailable">{data.annotationError}</Alert>}
       {data.annotations?.truncated && <Text size="xs" c="warn" role="status">Annotation history is limited.</Text>}
     </Stack>
+    {!loadError && data.skippedAt !== null && <Alert color="gray" variant="light" mb="md" role="status" data-refresh-skipped>
+      The server was busy, so the latest refresh was skipped. Marked panels show data from {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(data.skippedAt)}.
+    </Alert>}
     {loadError && <Alert color="bad" icon={<WarningCircle size={18} weight="fill" />} mb="md" title={options.error ? "Variables could not be loaded" : "Panels could not be loaded"}>
       {loadError.message}
       {loadError instanceof ApiError && <ul>{loadError.problems.map((problem, index) =>
@@ -163,7 +178,8 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
         if (selected) onSearch({ ...search, vars: selected.vars, drill: JSON.stringify(selected.target) }, false);
       }} />
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={parseDrill(search.drill)} onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined }, false)} />
-    <HistoryDrawer id={id} currentVersion={version} opened={historyOpen} onClose={() => setHistoryOpen(false)} onRestored={record => {
+    {duplicating && <DuplicateDialog spec={spec} onClose={() => setDuplicating(false)} onCreated={next => { setDuplicating(false); onOpen(next); }} />}
+    <HistoryDrawer id={id} currentVersion={version} currentSpec={spec} opened={historyOpen} onClose={() => setHistoryOpen(false)} onRestored={record => {
       setRestoreRefresh(record.version);
       const ids = new Set(record.spec.panels.map(panel => panel.id));
       const drill = parseDrill(search.drill);

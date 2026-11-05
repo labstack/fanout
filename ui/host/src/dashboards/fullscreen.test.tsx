@@ -88,14 +88,22 @@ it.each(["empty", "error"] as const)("preserves %s state and separate answer/edi
   }
 });
 
+// The dashboard asks /api/queries/run for a stream; tests describe its results
+// as one JSON body, sent here one result per line.
+async function streamed(init: RequestInit | undefined, response: Response): Promise<Response> {
+  if (new Headers(init?.headers).get("accept") !== "application/x-ndjson" || !response.ok) return response;
+  const { results } = await response.json() as { results: unknown[] };
+  return new Response(results.map((result) => JSON.stringify(result) + "\n").join(""), { headers: { "content-type": "application/x-ndjson" } });
+}
+
 it.each(["Back", "Escape then Back"])("opens shared URL state (%s) without a query or lost filters", async mode => {
   let queries = 0;
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), "http://localhost").pathname;
     if (path === "/api/dashboards") return Response.json({ dashboards: [{ id: "board", name: "Observed" }] });
     if (path === "/api/dashboards/board") return Response.json({ id: "board", version: 7, spec: { ...spec, time: { ...spec.time, refresh: "off" } } });
-    if (path === "/api/queries/run") { queries++; return Response.json({ results: [result] }); }
-    if (path === "/api/annotations") return Response.json({ deploys: [], anomalies: [] });
+    if (path === "/api/queries/run") { queries++; return streamed(init, Response.json({ results: [result] })); }
+    if (path === "/api/annotations/query") return Response.json({ deploys: [], anomalies: [] });
     return Response.json({ options: {} });
   }));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

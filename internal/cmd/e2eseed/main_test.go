@@ -17,6 +17,7 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/querytest"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/query"
@@ -80,7 +81,10 @@ func TestAllPanelsFixtureValidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = engine.Close() })
-	if _, problems, err := query.Check(t.Context(), engine, &spec); err != nil || len(problems) != 0 {
+	if err := querytest.RefreshSpanRollup(engine.DB); err != nil {
+		t.Fatal(err)
+	}
+	if _, problems, err := query.NewExecutor(engine, 30).Check(t.Context(), &spec); err != nil || len(problems) != 0 {
 		t.Fatalf("fixture check: %v; %v", err, problems)
 	}
 	types := map[string]bool{}
@@ -447,7 +451,10 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = engine.Close() })
-	if _, problems, err := query.Check(t.Context(), engine, &spec); err != nil || len(problems) != 0 {
+	if err := querytest.RefreshSpanRollup(engine.DB); err != nil {
+		t.Fatal(err)
+	}
+	if _, problems, err := query.NewExecutor(engine, 30).Check(t.Context(), &spec); err != nil || len(problems) != 0 {
 		t.Fatalf("fixture check: %v; %v", err, problems)
 	}
 	from := base.Add(-24 * time.Hour)
@@ -480,7 +487,28 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 	}
 	t.Run("system scenarios through OTLP", func(t *testing.T) {
 		system := dashboard.DefaultSpec()
-		// Execute the system SQL panels and the existing external-peer reader.
+		// Topology reads completed edge summaries, including external peers.
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { defer close(done); engine.RunRollups(ctx) }()
+		defer func() { cancel(); <-done }()
+		horizon, _, _ := repo.PublicationBounds()
+		// Bound only a hang: CI runs packages side by side, and the wait ends as
+		// soon as the edge rollup reaches the horizon.
+		deadline := time.Now().Add(2 * time.Minute)
+		for {
+			var n int64
+			if err := engine.DB.QueryRow(`SELECT coalesce(max(last_ingested_unix_nano),0) FROM rollup_state WHERE cache_key='edge_rollup_v2'`).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n >= horizon {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("peer rollup did not complete")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 		system.Panels = system.Panels[8:]
 		system.Panels = append(system.Panels[:2], system.Panels[3:]...)
 		executor := query.NewExecutor(engine, 30)
@@ -531,3 +559,5 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 		})
 	})
 }
+
+func (*fixtureSubmitter) Admit(context.Context, int) error { return nil }

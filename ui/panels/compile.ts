@@ -2,11 +2,11 @@ import { displayLabel } from "./labels";
 import { htmlTooltip } from "./escape";
 import { chartTheme, seriesSlot, statusHex } from "../chart";
 import { fonts } from "../tokens";
-import { toCategories, toSeries } from "./frame";
+import { groupName, toCategories, toSeries } from "./frame";
 import { hiddenSeriesNote, isOtherSeries, visibleSeries, wrappingLegend } from "./series";
 import { statusFor } from "./thresholds";
 import type { Frame, Panel, PanelResult, Status } from "./types";
-import { formatAxis, formatLabel, formatTimeAxis, formatValue, valueAxis, valueAxisTicks } from "./units";
+import { formatAxis, formatTimeAxis, formatValue, valueAxis, valueAxisTicks } from "./units";
 import { lineStyle, markStyle } from "./style";
 
 export type ChartTheme = { dark: boolean; text: string; muted: string; grid: string; surface: string; border: string; status: { ok: string; warn: string; bad: string }; font: string };
@@ -187,7 +187,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     lineStyle: { width: 1, type: "dashed", color: theme.muted },
     itemStyle: { color: theme.muted },
   })) : [];
-  const axes = units.map((axisUnit, i) => ({ ...(panel.options?.scale === "log" ? { splitNumber: valueAxisTicks(plotHeight) } : bounds[i]), type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatAxis(axisUnit) } }));
+  const axes = units.map((axisUnit, i) => ({ ...(panel.options?.scale === "log" ? { splitNumber: valueAxisTicks(plotHeight) } : bounds[i]), type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatAxis(axisUnit, panel.options?.scale === "log" ? undefined : bounds[i]) } }));
   return layoutEndLabels({
     ...baseOption(theme, unit),
     tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue([...current, ...previousSeries].find(s => s.name === name || `${s.name} · previous` === name)?.unit ?? panel.unit, value), true) },
@@ -238,18 +238,19 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: C
   const multi = series.length > 1;
   const split = Boolean(frame.periods?.["Before deploy"] || frame.periods?.["Since deploy"]);
   const measure = (text: string) => size.measureText?.(text, `11px ${theme.font}`) ?? Array.from(text).length * 6.6;
-  const categoryWidth = Math.min(size.width * .4, Math.max(40, ...categories.map(measure)));
-  const legendLayout = wrappingLegend(series.map(s => s.name), size.width, multi && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
-  const axes = units.map((axisUnit, i) => ({ ...valueAxis(Math.min(0, ...series.filter(s => (s.unit ?? panel.unit) === axisUnit).flatMap(s => s.values.filter((v): v is number => v !== null))), Math.max(0, ...series.filter(s => (s.unit ?? panel.unit) === axisUnit).flatMap(s => s.values.filter((v): v is number => v !== null))), axisUnit, size.width - categoryWidth - 80), type: "value", position: i === 0 ? "bottom" : "top", offset: Math.max(0, i - 1) * 36, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, formatter: (v: number) => formatLabel(axisUnit,v), hideOverlap: true } }));
+  // A few pixels over the widest label, so the chart's own measure does not cut a label that fits ours.
+  const categoryWidth = Math.min(size.width * .4, Math.max(40, ...categories.map(c => measure(groupName(c)))) + 4);
+  const legendLayout = wrappingLegend(series.map(s => groupName(s.name)), size.width, multi && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
+  const axes = units.map((axisUnit, i) => { const values = series.filter(s => (s.unit ?? panel.unit) === axisUnit).flatMap(s => s.values.filter((v): v is number => v !== null)); const bounds = valueAxis(Math.min(0, ...values), Math.max(0, ...values), axisUnit, size.width - categoryWidth - 80); return { ...bounds, type: "value", position: i === 0 ? "bottom" : "top", offset: Math.max(0, i - 1) * 36, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, formatter: formatAxis(axisUnit, bounds), hideOverlap: true } }; });
   return {
     ...baseOption(theme, unit),
-    tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue(series.find(s => s.name === name)?.unit ?? panel.unit, value)), axisPointer: { type: "shadow" } },
+    tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue(series.find(s => groupName(s.name) === name)?.unit ?? panel.unit, value)), axisPointer: { type: "shadow" } },
     legend: legendLayout.option,
     grid: { left: 8, right: 56, top: (multi ? legendLayout.top : 8) + Math.max(0, units.length - 1) * 36, bottom: hidden ? 24 : 8, containLabel: true },
-    yAxis: { type: "category", inverse: true, data: categories, splitLine: {show:false}, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, width: categoryWidth, overflow: "truncate", formatter: (text: string) => middleEllipsis(text,categoryWidth,measure) } },
+    yAxis: { type: "category", inverse: true, data: categories.map(groupName), splitLine: {show:false}, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, width: categoryWidth, overflow: "truncate", formatter: (text: string) => middleEllipsis(text,categoryWidth,measure) } },
     xAxis: axes.length === 1 ? axes[0] : axes,
     series: series.map((s, i) => ({
-      name: s.name,
+      name: groupName(s.name),
       interactive: true,
       xAxisIndex: units.indexOf(s.unit ?? panel.unit),
       tooltip: { valueFormatter: (value: number) => formatValue(s.unit ?? panel.unit, value) },
@@ -258,7 +259,7 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: C
       barMaxWidth: split && s.name === "Before deploy" ? 7 : 14,
       barGap: "20%",
       itemStyle: { ...markStyle(split ? s.name === "Before deploy" ? theme.muted : seriesSlot(0,theme.dark) : colorFor(s.name, i, theme),theme), borderRadius: [0, 4, 4, 0] },
-      label: { show: split ? s.name === "Since deploy" : !multi || i === 0, position: "right", color: theme.text, fontFamily: theme.font, fontSize: 11, formatter: ({ value }: { value: number }) => formatLabel(s.unit ?? panel.unit, value) },
+      label: { show: split ? s.name === "Since deploy" : !multi || i === 0, position: "right", color: theme.text, fontFamily: theme.font, fontSize: 11, formatter: ({ value }: { value: number }) => formatAxis(s.unit ?? panel.unit)(value) },
     })),
     graphic: hiddenSeriesNote(hidden, theme.muted),
   };
