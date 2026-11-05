@@ -39,8 +39,8 @@
 
 - Keep credentials, private telemetry, local workstation paths, and private AI
   session links out of tracked files, commit messages, and pull request descriptions.
-  The Privacy workflow (`scripts/check-private-links.sh`) enforces this; squash
-  merges take the pull request title and description, not branch commit messages.
+  `.gitleaks.toml` holds the rules; lefthook and the Leaks workflow enforce them.
+  Squash merges take the pull request title and description.
 - Keep local agent caches, indexes, evaluation records, and browser evidence out
   of both Git and the Docker build context. Git ignores do not exclude Docker inputs.
 - Design proposals live in `docs/proposals/NNNN-slug.md` and decision records

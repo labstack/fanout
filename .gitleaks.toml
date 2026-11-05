@@ -1,20 +1,24 @@
-# Default rules, plus known non-secrets: a fixed test-only auth code secret,
-# a redaction fixture, a cache key name, and content hashes in fixtures.
+# Secret and privacy rules for this public repository: gitleaks's default
+# secret rules plus links and paths that must never be published. Add a rule
+# here to extend every check (lefthook and CI read this file).
 [extend]
 useDefault = true
 
-[[allowlists]]
-description = "test-only fake secrets and cache key names"
-regexes = [
-  '''^0123456789abcdef0123456789abcdef$''',
-  '''^sk-live-abc123$''',
-  '''^edge_rollup_v2_rawmax$''',
-]
+[[rules]]
+id = "private-ai-session-link"
+description = "Private AI session link or session trailer"
+regex = '''(?i)(claude\.ai/(code|chat|share|project)/|Claude-Session:|chatgpt\.com/(c|share|codex)/)'''
+keywords = ["claude", "chatgpt"]
 
+[[rules]]
+id = "local-workstation-path"
+description = "Local workstation home directory path"
+regex = '''(/Users|/home)/[A-Za-z0-9_.-]+/'''
+keywords = ["/users/", "/home/"]
+
+# Test fixtures hold content hashes and fake secrets, not credentials. Only the
+# generic key rule is relaxed there; the privacy rules still apply.
 [[allowlists]]
-description = "content hashes in fixtures and the retired Atlas checksum file"
-paths = [
-  '''^ui/host/e2e/data/mcp\.json$''',
-  '''^ui/host/tests/go-fragments/[^/]+\.json$''',
-  '''^internal/db/migrations/atlas\.sum$''',
-]
+description = "Test fixtures"
+targetRules = ["generic-api-key"]
+paths = ['''_test\.go$''', '''ui/host/e2e/data/''', '''ui/host/tests/go-fragments/''']
