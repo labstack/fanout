@@ -3,13 +3,23 @@
 # AI session link or a local workstation path. This repository is public.
 #
 #   scripts/check-private-links.sh [<base> <head>]
+#   scripts/check-private-links.sh --message <file>
 #
 # With <base> and <head>, commit messages in base..head are checked too.
-# PR_TEXT, when set, is the pull request title and description.
+# PR_TEXT, when set, is the pull request title and description. --message
+# checks one commit message file only (the commit-msg hook).
 set -euo pipefail
 
 pattern='claude\.ai/(code|chat|share|project)|Claude-Session:|chatgpt\.com/(c|share|codex)/|/Users/[A-Za-z0-9_.-]+/|/home/[A-Za-z0-9_.-]+/'
 found=0
+
+if [[ "${1:-}" == --message ]]; then
+  if grep -nE "$pattern" "$2"; then
+    echo "error: commit message names a private session link or local path" >&2
+    exit 1
+  fi
+  exit 0
+fi
 
 if git grep -nIE "$pattern" -- . ':!scripts/check-private-links.sh'; then
   echo "error: tracked files name a private session link or local path" >&2

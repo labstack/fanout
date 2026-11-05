@@ -39,8 +39,17 @@ pre-commit:
       glob: "{ui/host/**/*.{ts,tsx},ui/panels/**/*.{ts,tsx},ui/*.ts}"
       run: cd ui/host && bun run lint
 
+commit-msg:
+  jobs:
+    - name: private-links
+      run: bash scripts/check-private-links.sh --message {1}
+
 pre-push:
   jobs:
+    # Runs on every push, before anything is public: a private session link or
+    # local path in a pushed commit cannot be taken back. CI repeats it.
+    - name: private-links
+      run: bash scripts/check-private-links.sh origin/main HEAD
     - name: check
       # Observed to skip with "no matching push files" on some pushes: lefthook
       # filters pre-push jobs by its own changed-file detection and skips when
