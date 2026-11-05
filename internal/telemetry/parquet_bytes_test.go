@@ -24,7 +24,9 @@ var updateFiles = flag.Bool("update-files", false, "rewrite testdata/format*.sha
 // signal's file for a fixed set of rows must match the digest recorded in
 // testdata. Pages are written uncompressed, so a codec build cannot change the
 // bytes; the digest covers row order, every leaf's levels and values, page
-// layout and the footer.
+// layout and the footer. parquet-go's amd64 assembly and arm64 encoders may
+// choose different but equivalent run encodings, so each architecture records
+// its own digest.
 func TestParquetBytesMatchRecordedDigest(t *testing.T) {
 	spans, logs, metrics := digestRows(700)
 	dir := t.TempDir()
@@ -45,7 +47,7 @@ func TestParquetBytesMatchRecordedDigest(t *testing.T) {
 			}
 			sum := sha256.Sum256(data)
 			digest := hex.EncodeToString(sum[:]) + "\n"
-			golden := filepath.Join("testdata", fmt.Sprintf("format%d-%s.sha256", batchMetadataVersion, s.Name))
+			golden := filepath.Join("testdata", fmt.Sprintf("format%d-%s-%s.sha256", batchMetadataVersion, s.Name, runtime.GOARCH))
 			if *updateFiles {
 				if err := os.WriteFile(golden, []byte(digest), 0o644); err != nil {
 					t.Fatal(err)
