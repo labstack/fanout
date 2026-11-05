@@ -111,19 +111,27 @@ func TestExponentialHistogramUsesNonzeroZeroThresholdAndFoldsOverlaps(t *testing
 	}
 }
 
-// Every list operation of the derivation is linear in buckets, so a point
-// with a million overflowing buckets folds them quickly.
+// Every list operation of the derivation is linear in buckets, so ten times
+// the overflowing buckets takes about ten times as long. The bound compares two
+// sizes instead of a wall-clock limit, which a loaded or race-instrumented
+// runner exceeds; a quadratic step would take about a hundred times as long.
 func TestExponentialHistogramWithManyOverflowingBucketsConvertsInLinearTime(t *testing.T) {
-	positive := make([]uint64, 1_000_000)
-	for i := range positive {
-		positive[i] = 1
+	convert := func(n int) ([]float64, []uint64, time.Duration) {
+		positive := make([]uint64, n)
+		for i := range positive {
+			positive[i] = 1
+		}
+		started := time.Now()
+		bounds, counts := exponentialBuckets(t, telemetry.Histogram{Scale: -10, PositiveCounts: positive})
+		return bounds, counts, time.Since(started)
 	}
-	started := time.Now()
-	bounds, counts := exponentialBuckets(t, telemetry.Histogram{Scale: -10, PositiveCounts: positive})
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
-		t.Fatalf("conversion took %s", elapsed)
+	convert(100_000) // warm up allocation and code paths
+	_, _, small := convert(100_000)
+	bounds, counts, large := convert(1_000_000)
+	if ratio := float64(large) / float64(max(small, time.Microsecond)); ratio > 30 {
+		t.Fatalf("1M buckets took %s, %.0fx the %s for 100k", large, ratio, small)
 	}
-	if !reflect.DeepEqual(bounds, []float64{-math.SmallestNonzeroFloat64, 0, 1}) || !reflect.DeepEqual(counts, []uint64{0, 0, 0, uint64(len(positive))}) {
+	if !reflect.DeepEqual(bounds, []float64{-math.SmallestNonzeroFloat64, 0, 1}) || !reflect.DeepEqual(counts, []uint64{0, 0, 0, 1_000_000}) {
 		t.Fatalf("bounds=%v counts=%v", bounds, counts)
 	}
 }
