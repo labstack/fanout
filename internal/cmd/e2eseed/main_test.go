@@ -493,7 +493,9 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 		go func() { defer close(done); engine.RunRollups(ctx) }()
 		defer func() { cancel(); <-done }()
 		horizon, _, _ := repo.PublicationBounds()
-		deadline := time.Now().Add(30 * time.Second)
+		// Bound only a hang: CI runs packages side by side, and the wait ends as
+		// soon as the edge rollup reaches the horizon.
+		deadline := time.Now().Add(2 * time.Minute)
 		for {
 			var n int64
 			if err := engine.DB.QueryRow(`SELECT coalesce(max(last_ingested_unix_nano),0) FROM rollup_state WHERE cache_key='edge_rollup_v2'`).Scan(&n); err != nil {
