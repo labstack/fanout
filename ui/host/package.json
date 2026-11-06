@@ -20,7 +20,7 @@
     "design:apps": "FANOUT_APPS_OUT=node_modules/.cache/fanout-catalog-apps bun run build:apps"
   },
   "dependencies": {
-    "@ag-ui/client": "1.0.2",
+    "@ag-ui/client": "1.0.4",
     "@codemirror/autocomplete": "6.20.3",
     "@codemirror/commands": "6.11.1",
     "@codemirror/lang-sql": "6.10.0",
