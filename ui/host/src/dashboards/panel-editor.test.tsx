@@ -8,6 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DashboardSpec } from "../../../panels/types";
 import PanelEditor from "./panel-editor";
 
+// These tests check editor queries and saves; happy-dom has no canvas context.
+vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label }: { label: string }) => <div role="img" aria-label={label} /> }));
+
 const spec: DashboardSpec = { version: 1, name: "Checkout", time: { range: "3h" }, variables: [{ name: "service", kind: "custom", options: ["checkout"], default: "checkout" }], panels: [
   { id: "panel", title: "Requests", viz: "table", query: { from: "spans", measures: ["count()"], by: ["service"] } },
 ] };
