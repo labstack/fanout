@@ -41,5 +41,6 @@ it("keeps fictional OTLP trace IDs distinct when shortened and correlated with l
   expect(traceDetail.data.trace_id).toBe(rows("traces")[0].trace_id);
   expect(traceDetail.data.spans.every(span => /^[0-9a-f]{16}$/.test(span.span_id))).toBe(true);
   expect(traceDetail.data.logs[0]).toMatchObject({ trace_id: traceIDs[0], body: rows("logs")[0].body });
+  expect(rows("patterns").reduce((sum, row) => sum + Number(row.count), 0)).toBeLessThanOrEqual(Number(rows("health")[0].log_count));
   expect(rows("patterns").some(row => row.body_template === "Inventory reservation timed out after <*> ms")).toBe(true);
 });
