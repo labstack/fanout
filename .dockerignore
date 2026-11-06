@@ -61,3 +61,4 @@ docs/
 
 # OS
 .DS_Store
+.wrangler/

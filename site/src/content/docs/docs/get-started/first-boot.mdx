@@ -45,6 +45,11 @@ Open the URL, create the administrator, and **save the ingest token shown after
 setup**. The raw token is displayed once; Fanout stores only its hash and cannot
 show it again.
 
+An administrator can issue a replacement in **Connect telemetry → Ingest token** in the account menu, or
+with `POST /api/settings/ingest/token/rotate`. Save the new token when it is
+shown. Rotation invalidates the old token immediately and cuts off existing
+exporters until you update their credentials.
+
 The setup form sends `email`, `display_name`, and `setup_token` to
 `POST /api/auth/setup`. The first administrator starts with status `active`.
 
@@ -57,7 +62,13 @@ installation and rebuild with a fresh data directory before repeating setup.
 Local mode has no passwords. Once SMTP is configured, active users receive
 short-lived codes by email. Without SMTP, run `fanout login-link <email>` with
 the server's environment and data directory to mint a 15-minute, single-use
-link for an existing active user. OIDC deployments use the provider's flow instead.
+link for an existing active user. For Docker, use:
+
+```sh
+docker exec fanout fanout login-link admin@example.com
+```
+
+OIDC deployments use the provider's flow instead.
 
 ## Next
 

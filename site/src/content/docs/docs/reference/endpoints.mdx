@@ -56,7 +56,9 @@ behind `operations:read` rather than `telemetry:read`.
 
 | Path | Purpose |
 |---|---|
-| `/mcp` | The MCP endpoint external agents connect to |
+| `/mcp` | External MCP clients; OAuth access token |
+| `/api/mcp` | Browser MCP; browser session and `telemetry:read` |
+| `/api/auth/oauth/*` | Browser authorization and connected-agent management; browser session |
 | `/.well-known/*` | OAuth discovery for MCP clients |
 | `/oauth/register`, `/oauth/token` | OAuth client registration and token issue |
 
@@ -78,6 +80,24 @@ without falling through to the browser application. The HTTP handler accepts
 protobuf and gzip, with a 64 MiB decompressed body limit.
 
 See [send your first telemetry](/docs/get-started/send-telemetry).
+
+## Restrict the network surface
+
+Keep the backend listener private when a proxy serves the browser publicly.
+To keep ingest private, deny `/v1`, `/v1/*` and
+`/opentelemetry.proto.collector.*` at the public proxy. Verify both OTLP
+transports from outside the private network.
+
+Never ship the shared ingest token in browser or mobile code. Send public-client
+telemetry through a Collector or gateway you control. That gateway handles
+client authentication, rate limits and privacy controls, then forwards to
+private Fanout. Propagate `traceparent` and `tracestate` to correlate backend
+requests.
+
+For gRPC, forward HTTP/2 to the backend: h2c for plaintext or HTTP/2 over TLS.
+Set `FANOUT_PUBLIC_URL` to the public HTTPS origin. Preserve the public Host
+header for MCP and trust forwarded client IPs only from configured proxy CIDRs.
+See [TLS](/docs/guides/tls) and [hardening](/docs/guides/hardening).
 
 ## What to alert on
 

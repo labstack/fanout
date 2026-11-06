@@ -44,15 +44,7 @@ capture related files from different moments.
 
 ## Upgrading
 
-1. Read the release notes and pin the target tag.
-2. Take a backup, and verify it.
-3. Stop Fanout, replace only the binary or image, keep the data directory.
-4. Start, then check `/readyz`, sign-in, both OTLP transports, and a few
-   representative queries.
-
-Migrations run forward at startup. A rollback to the previous binary after they
-have run is not assumed safe. Restore the pre-upgrade backup with the previous
-version instead.
+Follow [Upgrade](/docs/guides/upgrade) for release checks, format changes and rollback.
 
 ## Never delete an account from the control database
 

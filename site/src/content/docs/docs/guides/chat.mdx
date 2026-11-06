@@ -1,0 +1,55 @@
+---
+title: Use the built-in agent
+description: Configure a model provider and investigate telemetry in chat.
+summary: Provider setup, saved threads, search and panel explanations.
+read_when:
+  - You want to investigate telemetry with the built-in agent.
+status: preview
+---
+
+## Enable a provider
+
+Select one provider and supply its key before starting Fanout:
+
+```sh
+export FANOUT_AI_PROVIDER=anthropic
+export ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key
+```
+
+For OpenAI, use `FANOUT_AI_PROVIDER=openai` and `OPENAI_API_KEY_FILE` instead.
+The selected provider requires its key. An empty provider disables chat.
+Restart after changing settings.
+
+The default models are `claude-sonnet-5-5` for Anthropic and `gpt-6.1-sol` for
+OpenAI. Override with `FANOUT_AI_MODEL`. `ANTHROPIC_BASE_URL` and
+`OPENAI_BASE_URL` select a gateway or alternate endpoint. See
+[AI settings](/docs/reference/configuration/ai) for endpoint and model requirements.
+
+Requests send conversation and query evidence to the configured provider and
+can incur provider charges. Set usage budgets with that provider or your gateway.
+Every built-in role has `agent:run`, including viewers. This permission gates
+agent runs and thread APIs. See [roles](/docs/reference/roles).
+
+## Investigate in a thread
+
+Choose **New chat** in the navigation rail. Include a service, time window and
+symptom, for example: "Why did checkout latency rise in the last hour?"
+Continue in that thread to keep the conversation context. The agent can query
+telemetry and build [dashboards](/docs/guides/dashboards).
+
+Threads belong to the signed-in user. Select a saved chat in the rail to reopen
+it. Use **Search** at the bottom of the rail, or press **⌘K** (**Ctrl+K** on
+other keyboards), to find chats, dashboards and services. A service result
+starts an investigation for that service.
+
+Open a chat's menu to **Rename** it or **Delete** it. Confirm deletion in the
+dialog. Renaming accepts a nonempty title of up to 120 characters.
+
+## Explain a panel
+
+Open a dashboard panel's menu and choose **Explain in chat**. Fanout opens chat
+with the panel context. Explanation requests are answer-only; the agent can
+read evidence and suggest corrections, but cannot save changes during that run.
+
+Review the evidence before acting. Narrow the service or time window if a run
+hits its step limit or five-minute time limit.

@@ -35,6 +35,32 @@ logs where service:checkout severity>=warn
 Use service names present in your telemetry. See the
 [FanQL reference](/docs/reference/fanql) for syntax, fields and functions.
 
+## Use the Builder tab
+
+Select **Builder** to choose a source, measures, filters, grouping fields,
+time buckets and a row limit. **Query** and **Builder** edit the same FanQL
+query. Builder changes appear under **As FanQL**. Select **Run** to execute.
+Complex filters and measures remain as chips; edit them in **Query**.
+If the Query tab says the text is read-only, keep editing in Builder.
+
+## Use the SQL tab
+
+Select **SQL** to write a separate statement. Switching tabs does not convert
+FanQL to SQL. Run one read-only `SELECT` with a time filter, for example:
+
+```sql
+SELECT service, count(*) AS spans
+FROM spans
+WHERE $__window(start_time)
+GROUP BY service
+```
+
+Explore shows SQL results as a table. See the
+[guarded SQL rules](/docs/guides/dashboards#use-guarded-sql) and
+[rollup relations](/docs/reference/mcp#panel-sql-relations) for limits and
+rollup columns. The `get_telemetry_schema` MCP tool lists the columns of
+`spans`, `logs` and `metrics`.
+
 ## Read diagnostics
 
 When a query has problems, the editor marks the affected text and lists messages

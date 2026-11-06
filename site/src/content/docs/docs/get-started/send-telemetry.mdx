@@ -18,6 +18,11 @@ same port as the application: `7520` by default. Both require the ingest token.
 The raw ingest token is shown once, immediately after you create the first
 administrator. It is `fo_`-prefixed, and Fanout stores only its hash.
 
+An administrator can issue a replacement in **Connect telemetry → Ingest token** in the account menu, or
+with `POST /api/settings/ingest/token/rotate`. Save the new token when it is
+shown. Rotation invalidates the old token immediately and cuts off existing
+exporters until you update their credentials.
+
 Send it as a bearer token; this is the only accepted ingest credential form:
 
 ```text
@@ -42,6 +47,25 @@ For OTLP/HTTP, keep the same endpoint and set
 proxy terminates TLS. A general OTLP endpoint is a base URL; signal-specific
 variables such as `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` must include their path
 (`/v1/traces`, `/v1/metrics` or `/v1/logs`).
+
+OTLP/HTTP requires `Content-Type: application/x-protobuf`. JSON payloads return
+HTTP 415 after authentication. The JavaScript `*-otlp-http` exporter packages
+send JSON. Choose `@opentelemetry/exporter-trace-otlp-proto` for traces and the
+matching `*-otlp-proto` packages for metrics and logs. Setting a protocol variable
+does not change an explicitly constructed JSON exporter.
+
+## Common SDKs
+
+Use the endpoint and bearer header above for each SDK. Select the transport
+supported by the exporter you install.
+
+| SDK | Protocol and environment notes |
+|---|---|
+| [JavaScript](https://opentelemetry.io/docs/languages/js/exporters/) | Use the `*-otlp-proto` packages for HTTP protobuf, or `*-otlp-grpc` in Node.js. For SDK-managed exporter selection, set `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. |
+| [Python](https://opentelemetry.io/docs/languages/python/exporters/) | Install the HTTP protobuf or gRPC exporter. For automatic instrumentation, select `http/protobuf` or `grpc` with `OTEL_EXPORTER_OTLP_PROTOCOL`. |
+| [Go](https://opentelemetry.io/docs/languages/go/exporters/) | Import `otlptracehttp` for protobuf HTTP or `otlptracegrpc` for gRPC, and the matching metric/log packages. These read endpoint and header environment variables; the imported package selects the transport. |
+| [Java](https://opentelemetry.io/docs/languages/java/configuration/) | With SDK autoconfiguration or the Java agent, set `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` or `grpc`, plus endpoint and headers. |
+| [.NET](https://opentelemetry.io/docs/languages/dotnet/exporters/) | Use the OTLP exporter with `HttpProtobuf` or `Grpc`. Configure endpoint and headers through exporter options or supported OTLP environment variables. |
 
 ## Configure a Collector
 

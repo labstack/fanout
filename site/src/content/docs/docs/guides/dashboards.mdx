@@ -1,12 +1,36 @@
 ---
 title: Build and refine dashboards
-description: Build a telemetry dashboard from chat, refine its panels, and share the current view.
-summary: Chat authoring, fifteen panel types, variables, comparison, view links, saved versions and keyboard controls.
+description: Build dashboards with the panel editor or chat, refine panels, and share the current view.
+summary: Panel editing, chat authoring, fifteen panel types, variables, comparison, view links and saved versions.
 read_when:
-  - You want to build or change a dashboard from chat.
+  - You want to build or change a dashboard with or without chat.
   - You want to inspect a failed panel, share a view or restore a saved version.
 status: preview
 ---
+
+## Build without chat
+
+Choose **New dashboard** in the sidebar or on the empty dashboards page.
+Enter a dashboard name, then use the panel editor's **Query**, **Builder** or
+**SQL** tab. Run the query and select **Create dashboard** to save it with its
+first panel. Query and Builder offer compatible visualizations; SQL starts
+with a table.
+
+On an existing dashboard, choose **Edit layout**, then **Add panel**. To change
+a panel, open its menu and choose **Edit panel**. The editor uses the dashboard's
+current time window and variables. Set the panel title, run the query and select
+**Add panel** or **Save panel**. A new panel needs data before saving; an edited
+panel can save after a successful empty result.
+
+These controls work without an AI provider. See
+[Explore](/docs/guides/explore) for the query tabs.
+
+Delete an owned dashboard through `DELETE /api/dashboards/:id` with the
+`Fanout-Confirm-Delete` header set to its ID. A script also needs the request
+headers in [Call account APIs from a script](/docs/concepts/authentication#call-account-apis-from-a-script).
+The browser has no dashboard delete control.
+
+## Build from chat
 
 Open chat and describe the system view you need. For example: "Build a dashboard
 of checkout latency and errors by service." Fanout reads the telemetry schema,
@@ -18,7 +42,7 @@ To refine the result, name the panel and the change: "On the checkout latency
 panel, add a warning threshold at 500 ms." Use the receipt's changes and version
 history to inspect what changed.
 
-## Build, check and refine
+### Check and refine
 
 Chat needs a configured AI provider. When it is available, you can start in chat
 or use **Create with AI** on the empty dashboards page. Describe the question,
@@ -88,6 +112,8 @@ panel can apply a variable filter when clicked, or open matching logs or exempla
 traces. Deploy markers and anomaly bands provide context; they do not establish
 the cause of a change.
 
+## Use guarded SQL
+
 For queries that need it, a panel can use guarded SQL: one read-only `SELECT`
 over approved telemetry relations, with a required time-window filter. It
 cannot call edit distances such as `levenshtein` or the Jaro similarities,
@@ -113,8 +139,8 @@ another type, so `"200"` reads as the number 200, and they need no cast. A
 subquery or CTE that projects only the map, such as
 `WITH s AS (SELECT attributes FROM spans)`, reads values as sent there. Other
 keys read as sent, and `SELECT *` returns the `attributes` and `resource` maps.
-SQL is an authoring escape hatch. **Spec** is a read-only inspection view;
-there is no SQL or chart-style editor there.
+**Spec** is a read-only inspection view. Use the panel menu's **Edit panel**
+to change its query or SQL and choose a compatible visualization.
 
 ### Discover resources observed in the window
 

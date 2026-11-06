@@ -119,6 +119,26 @@ For OTLP/HTTP, set the exporter protocol to `http/protobuf` and give it the base
 endpoint, `http://fanout:7520`. Exporters derive `/v1/traces`, `/v1/metrics`
 and `/v1/logs` from it themselves.
 
+The raw token is shown once after setup or rotation. If it is lost, an
+administrator can issue a replacement in **Connect telemetry → Ingest token** in the account menu, or
+with `POST /api/settings/ingest/token/rotate`. Save the new token when it is
+shown. Rotation invalidates the old token immediately and cuts off existing
+exporters until you update their credentials.
+
+### HTTP 415: unsupported media type
+
+OTLP/HTTP requires `Content-Type: application/x-protobuf`; JSON returns 415.
+JavaScript `*-otlp-http` packages send JSON. Use the `*-otlp-proto` packages,
+such as `@opentelemetry/exporter-trace-otlp-proto`, or a gRPC exporter in Node.js.
+See [Common SDKs](/docs/get-started/send-telemetry#common-sdks) for language setup.
+
+### HTTP 429 or gRPC RESOURCE_EXHAUSTED
+
+Fanout throttles whole exports under ingest pressure. Enable exporter retries
+and honor HTTP `Retry-After` or gRPC `RetryInfo`. Check disk space, compaction
+backlog and query pressure. See [ingest admission](/docs/concepts/storage#rollups-follow-durable-publication)
+for thresholds and metrics.
+
 ## Someone cannot sign in and SMTP is not configured
 
 SMTP is optional. Creating a local user without it succeeds and reports
@@ -128,13 +148,15 @@ mints a link directly:
 
 ```sh
 fanout login-link user@example.com
+# For Docker:
+docker exec fanout fanout login-link user@example.com
 ```
 
 The link expires after 15 minutes, works once, and is recorded in the
 authentication audit history. It is available in `local` auth mode only.
 
 A configured SMTP relay that fails delivery returns an error. See
-[authentication operations](https://github.com/labstack/fanout/blob/main/docs/authentication.md#adding-local-users-without-smtp)
+[account recovery](/docs/concepts/authentication#recover-local-sign-in)
 for invitation responses and account recovery.
 
 :::caution[Preserve the account]

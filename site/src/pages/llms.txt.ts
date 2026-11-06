@@ -12,7 +12,7 @@ import { getCollection } from "astro:content";
 // The landing page and docs home share the "index" group, listed explicitly
 // so neither is dropped from an index whose heading promises every one.
 const ROOT = "index";
-const ORDER = [ROOT, "get-started", "guides", "reference", "concepts", "privacy"];
+const ORDER = [ROOT, "get-started", "guides", "reference", "concepts", "help", "privacy"];
 
 function groupOf(id: string): string {
   if (id === "docs") return ROOT;
@@ -25,6 +25,7 @@ const GROUP_TITLES: Record<string, string> = {
   guides: "Guides",
   reference: "Reference",
   concepts: "Concepts",
+  help: "Help and contributions",
   privacy: "Site terms",
 };
 
