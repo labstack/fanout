@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
@@ -131,7 +132,7 @@ func TestHTTPIngestAuthentication(t *testing.T) {
 	})
 	t.Run("wrong token", func(t *testing.T) {
 		f := newHTTPIngestFixture(t, true)
-		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), "foi_wrong", http.StatusUnauthorized)
+		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), "foi_"+strings.Repeat("A", 43), http.StatusUnauthorized)
 	})
 	t.Run("legacy Fanout header", func(t *testing.T) {
 		f := newHTTPIngestFixture(t, true)

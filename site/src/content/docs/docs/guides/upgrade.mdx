@@ -42,3 +42,11 @@ See [storage](/docs/concepts/storage) for the current format contract.
 
 This release also renames API and MCP contracts without aliases. Update scripts
 and clients using the release notes and [HTTP routes](/docs/reference/api).
+
+## When a release changes credential formats
+
+Ingest tokens use the `foi_` prefix. Fanout rejects tokens issued with the
+earlier `fo_` prefix. After upgrading, an administrator rotates the token in
+**Connect telemetry → Ingest token** and updates every collector. Unused login
+links issued before the upgrade stop working; request a new one. Connected MCP
+agents keep their OAuth tokens.

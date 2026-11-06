@@ -18,7 +18,7 @@ same port as the application: `7520` by default. Both require the ingest token.
 The raw ingest token is shown once, immediately after you create the first
 administrator. It is `foi_` followed by 43 unpadded base64url characters (32 random bytes).
 Fanout stores only its SHA-256 digest. Existing `fo_` tokens are rejected;
-rotate the ingest token in Settings and update every collector.
+rotate the ingest token in **Connect telemetry → Ingest token** and update every collector.
 
 An administrator can issue a replacement in **Connect telemetry → Ingest token** in the account menu, or
 with `POST /api/settings/ingest/token/rotate`. Save the new token when it is

@@ -35,5 +35,5 @@ keywords = ["/users/", "/home/"]
 [[rules]]
 id = "fanout-bearer-secret"
 description = "Fanout opaque bearer secret"
-regex = '''\bfo[iacr]_[A-Za-z0-9_-]{43}\b'''
+regex = '''fo[iacr]_[A-Za-z0-9_-]{43}\b'''
 keywords = ["foi_", "foa_", "for_", "foc_"]

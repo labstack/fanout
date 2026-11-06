@@ -22,7 +22,7 @@ stderr containing a **setup URL**:
 
 Setup credential behavior:
 
-- The credential carries 128 bits of entropy and lives only in memory. It is
+- The credential carries 256 bits of entropy and lives only in memory. It is
   never written to the database.
 - It is consumed the moment the first administrator is committed, before any
   other setup work. A later failure in that request does not leave a live

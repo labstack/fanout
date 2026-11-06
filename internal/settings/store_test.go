@@ -78,7 +78,7 @@ func TestGenerateAndCheckIngestToken(t *testing.T) {
 	if !CheckIngestToken(token, hash) {
 		t.Fatal("CheckIngestToken returned false for the generated token")
 	}
-	if CheckIngestToken("foi_other", hash) {
+	if CheckIngestToken("foi_"+strings.Repeat("A", 43), hash) {
 		t.Fatal("CheckIngestToken returned true for the wrong token")
 	}
 }
