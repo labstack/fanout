@@ -18,8 +18,11 @@ const panel = (id: string): Story => { const p = panels.find(p => p.id === id)!;
 export const Requests: Story = panel("requests");
 export const Latency: Story = panel("latency");
 export const Health: Story = { ...panel("health"), parameters: { a11y: { config: { rules: healthRules } } }, play: async ({ canvas, userEvent, args }) => {
-  await userEvent.click(await canvas.findByRole("button", { name: /checkout/ }));
+  const checkout = await canvas.findByRole("button", { name: /checkout/ });
+  await userEvent.click(checkout);
   await expect(args.onSelect).toHaveBeenCalledWith("checkout");
+  await userEvent.click(canvas.getByText("System health", { exact: true }));
+  await expect(checkout).not.toHaveFocus();
 } };
 export const Traffic: Story = panel("traffic");
 export const ErrorRate: Story = panel("errors");
@@ -41,7 +44,11 @@ export const Data: Story = { play: async ({ canvas, userEvent }) => {
   await expect(await canvas.findByRole("table")).toBeVisible();
 } };
 
-export const Invalid: Story = { args: { result: invalidResult }, play: async ({ canvas, userEvent, args }) => {
+export const Invalid: Story = { args: { result: invalidResult }, play: async ({ canvas }) => {
+  await expect(canvas.getByText("Unknown field: request_total")).toBeVisible();
+  await expect(canvas.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+} };
+export const InvalidDataTab: Story = { args: { result: invalidResult }, play: async ({ canvas, userEvent, args }) => {
   await expect(canvas.getByText("Unknown field: request_total")).toBeVisible();
   await expect(canvas.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   await userEvent.click(canvas.getByRole("button", { name: /^Data$/ }));

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, waitFor } from "storybook/test";
 import { Product, pageParameters } from "../catalog/product";
-import { exploreQuery, exploreTypo } from "../catalog/fixtures";
+import { exploreQuery, exploreTypo, exploreInvalid } from "../catalog/fixtures";
 
 const path = (q: string) => `/explore?q=${encodeURIComponent(q)}`;
 const meta = {
@@ -16,7 +16,11 @@ export const Ready: Story = { play: async ({ canvas }) => {
 } };
 export const Empty: Story = { args: { path: "/explore" } };
 export const Builder: Story = { args: { path: `${path(exploreQuery)}&tab=builder` } };
-export const Diagnostics: Story = { args: { path: path(exploreTypo) }, play: async ({ canvas, userEvent }) => {
+export const Diagnostics: Story = { args: { path: path(exploreTypo) }, play: async ({ canvas }) => {
+  await expect(await canvas.findByRole("alert")).toHaveTextContent("Unknown measure: countt");
+  await expect(canvas.getByRole("textbox", { name: "FanQL query" })).toHaveAttribute("aria-invalid", "true");
+} };
+export const DiagnosticsFixed: Story = { args: { path: path(exploreTypo) }, play: async ({ canvas, userEvent }) => {
   const editor = await canvas.findByRole("textbox", { name: "FanQL query" });
   await expect(await canvas.findByRole("alert")).toHaveTextContent("Unknown measure: countt");
   await expect(editor).toHaveAttribute("aria-invalid", "true");
@@ -24,7 +28,7 @@ export const Diagnostics: Story = { args: { path: path(exploreTypo) }, play: asy
   await expect(editor).toHaveTextContent(exploreQuery);
   await expect(editor).toHaveAttribute("aria-invalid", "false");
 } };
-export const InvalidPanel: Story = { parameters: { scenario: { explore: "invalid" } }, play: async ({ canvas }) => {
+export const InvalidPanel: Story = { args: { path: path(exploreInvalid) }, parameters: { scenario: { explore: "invalid" } }, play: async ({ canvas }) => {
   await expect(await canvas.findByRole("alert")).toHaveTextContent("Unknown field: request_total");
   await waitFor(() => expect(canvas.getByRole("textbox", { name: "FanQL query" })).toHaveAttribute("aria-invalid", "true"));
   await expect(canvas.getByRole("button", { name: "Save to dashboard" })).toHaveAttribute("aria-disabled", "true");

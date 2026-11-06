@@ -8,4 +8,7 @@ export const Toggle: Story = { play: async ({ canvas, userEvent, globals }) => {
   const next = globals.colorScheme === "dark" ? "light" : "dark";
   await userEvent.click(await canvas.findByRole("button", { name: `Switch to ${next} theme` }));
   await expect(await canvas.findByRole("button", { name: `Switch to ${globals.colorScheme} theme` })).toBeVisible();
+  await userEvent.click(canvas.getByRole("button", { name: `Switch to ${globals.colorScheme} theme` }));
+  await expect(await canvas.findByRole("button", { name: `Switch to ${next} theme` })).toBeVisible();
+  await userEvent.tab();
 } };

@@ -1,7 +1,7 @@
 import type { Message } from "@ag-ui/client";
 import type { Status, Viewer } from "../auth";
 import type { DashboardSummary } from "../dashboards/api";
-import { answer, answeredMessages, dashboard, dashboardSummary, health, healthContent, results, savedMessages, services, invalidResult, exploreQuery, exploreTypo, ingestToken } from "./fixtures";
+import { answer, answeredMessages, dashboard, dashboardSummary, health, healthContent, results, savedMessages, services, serviceSpans, invalidResult, exploreQuery, exploreInvalid, exploreTypo, ingestToken } from "./fixtures";
 
 export type Scenario = {
   signedOut?: boolean;
@@ -140,6 +140,7 @@ export function makeService(scenario: Scenario = {}, staticFetch: typeof fetch =
       if (body.text === exploreTypo) return json({ code: "invalid_fanql", message: "The query has problems", problems: [{ path: "text", message: "Unknown measure: countt", span: { start: 8, end: 14 }, fix_its: [{ label: "count", span: { start: 8, end: 14 }, text: "count" }] }] }, 400);
       // Only recorded catalog inputs are accepted; this is no alternate parser.
       if (body.source === "logs" || body.source === "spans") return json({ query: { from: body.source, limit: 1000 }, canonical: body.text, notices: [], viz: { compatible: [{ viz: body.viz, requires: [] }], edits: [] } });
+      if (body.text === exploreInvalid) return json({ query: { from: "spans", measures: ["sum(request_total)"], by: ["service"] }, canonical: exploreInvalid, notices: [], viz: { compatible: [{ viz: "bar", requires: [] }], edits: [] } });
       if (body.text !== exploreQuery) return fail(`Unrecorded FanQL: ${body.text}`);
       return json({ query: { from: "spans", measures: ["count()"], by: ["service"] }, canonical: exploreQuery, notices: [], viz: { compatible: [{ viz: "bar", requires: [] }, { viz: "table", requires: [] }], edits: [] } });
     }
@@ -164,7 +165,7 @@ export function makeService(scenario: Scenario = {}, staticFetch: typeof fetch =
     if (path === "/api/settings/ingest/token/rotate" && method === "POST") return json({ token_required: true, suggested_endpoint: "telemetry.example.test:443", tls_configured: true, header_name: "authorization", ingest_token: ingestToken });
     if (path === "/api/settings/ingest" && method === "GET") return json({ token_required: true, suggested_endpoint: "telemetry.example.test:443", tls_configured: true, header_name: "authorization" });
     if (path === "/api/auth/oauth/connections" && method === "GET") return json({ connections: [{ client_id: "local-agent", client_name: "Operations assistant", connected_at: dashboard.created_at }] });
-    if (path === "/api/telemetry/schema" && method === "GET") return json({ services: services.map(value => ({ value, count: 12000 })), signals: { spans: { columns: [{ name: "service", type: "string" }, { name: "duration_ms", type: "number" }] }, logs: { columns: [{ name: "body", type: "string" }, { name: "severity", type: "string" }] }, metrics: { columns: [{ name: "name", type: "string" }] } }, sql_relations: {}, measures: ["count"], buckets: ["auto", "5m"] });
+    if (path === "/api/telemetry/schema" && method === "GET") return json({ services: services.map((value, i) => ({ value, count: serviceSpans[i] })), signals: { spans: { columns: [{ name: "service", type: "string" }, { name: "duration_ms", type: "number" }] }, logs: { columns: [{ name: "body", type: "string" }, { name: "severity", type: "string" }] }, metrics: { columns: [{ name: "name", type: "string" }] } }, sql_relations: {}, measures: ["count"], buckets: ["auto", "5m"] });
     if (path === "/api/mcp") {
       if (method === "GET") return new Response(null, { status: 405 });
       if (method === "DELETE") return new Response(null, { status: 204 });

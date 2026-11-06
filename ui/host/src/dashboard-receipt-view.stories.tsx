@@ -1,3 +1,4 @@
+import { Box } from "@mantine/core";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, waitFor } from "storybook/test";
 import { savedReceipt, invalidReceipt, correctedReceipt, savedInvalidReceipt } from "./catalog/fixtures";
@@ -5,7 +6,7 @@ import { RouterFrame } from "./catalog/router-frame";
 import { DashboardReceiptView } from "./dashboard-receipt-view";
 const meta = {
   id: "components-dashboard-receipt", title: "Components/Dashboard receipt", component: DashboardReceiptView,
-  args: { receipt: savedReceipt }, decorators: [Story => <RouterFrame><Story /></RouterFrame>],
+  args: { receipt: savedReceipt }, decorators: [Story => <RouterFrame><Box maw={640} mx="auto"><Story /></Box></RouterFrame>],
 } satisfies Meta<typeof DashboardReceiptView>;
 export default meta;
 type Story = StoryObj<typeof meta>;

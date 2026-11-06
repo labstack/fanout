@@ -9,12 +9,12 @@ import Rail from "./rail";
 function RailFrame({ children }: { children: ReactNode }) {
   const client = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }), []);
   useEffect(() => () => client.clear(), [client]);
-  return <QueryClientProvider client={client}><Box w={256} h={700} p="sm">{children}</Box></QueryClientProvider>;
+  return <QueryClientProvider client={client}><Box mih="100dvh" bg="var(--mantine-color-body)"><Box w={256} h="100dvh" p="sm">{children}</Box></Box></QueryClientProvider>;
 }
 const meta = {
   id: "layout-rail", title: "Layout/Rail", component: Rail,
   args: { agentAvailable: true, activeThreadID: "commerce-review", onNewChat: fn(), onSelectThread: fn(), onDeletedThread: fn(), onSelectDashboard: fn(), onCreateDashboard: fn(), onNewDashboard: fn(), onNavigate: fn() },
-  parameters: { a11y: { config: { rules: railRules } } },
+  parameters: { layout: "fullscreen", a11y: { config: { rules: railRules } } },
   decorators: [Story => <RailFrame><Story /></RailFrame>],
 } satisfies Meta<typeof Rail>;
 export default meta;

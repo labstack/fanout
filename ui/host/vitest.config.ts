@@ -15,7 +15,7 @@ export default defineConfig({
       plugins: [storybookTest({ configDir: ".storybook", ...(cell && { initialGlobals: { colorScheme: cell.colorScheme, pace: "fast", viewport: { value: cell.viewport, isRotated: false } } }) })],
       test: {
         name: cell ? `catalog-${cell.colorScheme}-${cell.viewport}` : "catalog",
-        browser: { enabled: true, provider: playwright(), headless: true, instances: [{ browser: "chromium" as const }] },
+        browser: { enabled: true, provider: playwright({ contextOptions: { timezoneId: "UTC" } }), headless: true, instances: [{ browser: "chromium" as const }] },
       },
     })),
   },

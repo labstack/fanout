@@ -1,3 +1,4 @@
+import type { Result, TraceDetail } from "../../../contracts";
 import type { Message } from "@ag-ui/client";
 import type { DashboardRecord, DashboardSummary } from "../dashboards/api";
 import type { PanelFragment } from "../../../panels/fragment";
@@ -8,6 +9,26 @@ import type { SaveReceipt } from "../dashboard-tool-result";
 
 export const storyNow = Date.parse("2026-10-21T19:45:00Z");
 export const services = ["checkout", "cart", "accounting", "payment"];
+export const serviceSpans = [28420, 42160, 12680, 25640];
+const serviceErrors = [1.24, 0.08, 0.04, 0.12];
+const serviceP95 = [342, 78, 126, 184];
+// Fictional OTLP IDs; even their displayed 16-character prefixes are distinct.
+export const traceIDs = ["1111111111111111aaaaaaaaaaaaaaaa", "2222222222222222bbbbbbbbbbbbbbbb", "3333333333333333cccccccccccccccc"];
+export const traceDetail: Result<TraceDetail> = {
+  summary: "Checkout completed after a payment authorization retry.",
+  provenance: { window: "1h", generated_at: new Date(storyNow).toISOString(), complete: true },
+  data: {
+    trace_id: traceIDs[0], duration_ms: 342, has_error: false, services,
+    spans: [
+      { span_id: "11111111aaaaaaaa", service: "checkout", operation: "POST /checkout", kind: "server", start: new Date(storyNow - 60342).toISOString(), duration_ms: 342, status: "STATUS_CODE_OK" },
+      { span_id: "22222222bbbbbbbb", parent_span_id: "11111111aaaaaaaa", service: "cart", operation: "GET /cart", kind: "server", start: new Date(storyNow - 60330).toISOString(), duration_ms: 28, status: "STATUS_CODE_OK" },
+      { span_id: "33333333cccccccc", parent_span_id: "11111111aaaaaaaa", service: "payment", operation: "POST /authorize", kind: "server", start: new Date(storyNow - 60300).toISOString(), duration_ms: 300, status: "STATUS_CODE_OK" },
+      { span_id: "44444444dddddddd", parent_span_id: "33333333cccccccc", service: "accounting", operation: "POST /entries", kind: "server", start: new Date(storyNow - 60050).toISOString(), duration_ms: 42, status: "STATUS_CODE_OK" },
+    ],
+    logs: [{ time: new Date(storyNow - 60000).toISOString(), severity: "WARN", service: "checkout", body: "Payment authorization retried after 300 ms", trace_id: traceIDs[0], span_id: "11111111aaaaaaaa" }],
+    span_count: 4, service_count: 4, truncated: false,
+  },
+};
 const column = (name: string, type: Column["type"] = "number", role: Column["role"] = "measure", unit?: string): Column => ({ name, type, role, unit });
 const dimension = (name: string) => column(name, "string", "dimension");
 const time = column("time", "time", "time");
@@ -17,12 +38,12 @@ function frame(columns: Column[], rows: Cell[][]): Frame {
 const times = Array.from({ length: 12 }, (_, i) => storyNow - (11 - i) * 300_000);
 const healthFrame: Frame = {
   ...frame([dimension("service"), dimension("health"), column("spans", "number", "measure", "count"), column("error_rate", "number", "measure", "percent"), column("p50_ms", "number", "measure", "ms"), column("p95_ms", "number", "measure", "ms"), column("log_count"), column("metric_count")], [
-    ["checkout", "degraded", 28420, 1.24, 86, 342, 3860, 720],
-    ["cart", "healthy", 42160, 0.08, 24, 78, 2140, 720],
-    ["accounting", "healthy", 12680, 0.04, 42, 126, 860, 720],
-    ["payment", "healthy", 25640, 0.12, 63, 184, 1740, 720],
+    ["checkout", "degraded", serviceSpans[0], serviceErrors[0], 86, serviceP95[0], 3860, 720],
+    ["cart", "healthy", serviceSpans[1], serviceErrors[1], 24, serviceP95[1], 2140, 720],
+    ["accounting", "healthy", serviceSpans[2], serviceErrors[2], 42, serviceP95[2], 860, 720],
+    ["payment", "healthy", serviceSpans[3], serviceErrors[3], 63, serviceP95[3], 1740, 720],
   ]),
-  health: { health: "degraded", counts: { healthy: 3, degraded: 1, unhealthy: 0 }, service_count: 4, total_spans: 108900, error_rate: 0.38, error_trend: [0.12, 0.11, 0.14, 0.13, 0.18, 0.24, 0.32, 0.41, 0.48, 0.44, 0.40, 0.38] },
+  health: { health: "degraded", counts: { healthy: 3, degraded: 1, unhealthy: 0 }, service_count: 4, total_spans: 108900, error_rate: 0.39, error_trend: [0.12, 0.11, 0.14, 0.13, 0.18, 0.24, 0.32, 0.41, 0.48, 0.44, 0.40, 0.39] },
 };
 
 export const panels: Panel[] = [
@@ -43,29 +64,34 @@ export const panels: Panel[] = [
   { id: "topology", title: "Service dependencies", viz: "service_map" },
 ];
 
-const latencyRows = times.flatMap((at, i) => services.map((service, j) => [at, service, [188, 60, 108, 166][j] + (j === 0 ? i * 14 : (i % 4) * 6)]));
-const buckets = [16, 32, 64, 128, 256, 512];
+const latencyRows = times.flatMap((at, i) => services.map((service, j) => [at, service, j === 0 ? (at <= Date.parse("2026-10-21T19:20:00Z") ? 188 : 342) : [188, 60, 108, 166][j] + (i % 4) * 6]));
+const buckets = [0, 32, 64, 128, 256, 512];
+// Each five-minute slice contains 9,075 spans. The rollout shifts traffic
+// into the slower buckets; summing the slices produces the hourly histogram.
+const beforeRollout = [2400, 3100, 2300, 1100, 150, 25];
+const afterRollout = [2200, 2850, 2150, 1300, 500, 75];
+const densityRows = times.flatMap(at => buckets.map((b, j) => [at, b, j === 0 ? 32 : b * 2, (at <= Date.parse("2026-10-21T19:20:00Z") ? beforeRollout : afterRollout)[j]]));
 const frames: Record<string, Frame> = {
   requests: frame([column("count", "number", "measure", "count")], [[108900]]),
   latency: frame([time, dimension("service"), column("p95", "number", "measure", "ms")], latencyRows),
   health: healthFrame,
-  traffic: frame([dimension("service"), column("count", "number", "measure", "count")], services.map((service, i) => [service, [28420, 42160, 12680, 25640][i]])),
-  errors: frame([column("error_rate", "number", "measure", "percent")], [[0.38]]),
-  services: frame([dimension("service"), column("requests", "number", "measure", "count"), column("p95", "number", "measure", "ms"), column("error_rate", "number", "measure", "percent")], services.map((service, i) => [service, [28420, 42160, 12680, 25640][i], [342, 78, 126, 184][i], [1.24, 0.08, 0.04, 0.12][i]])),
-  density: frame([time, column("bucket_lower", "number", "dimension", "ms"), column("bucket_upper", "number", "dimension", "ms"), column("count", "number", "measure", "count")], times.flatMap((at, i) => buckets.map((b, j) => [at, b, b * 2, Math.round(500 / (j + 1) + i * 4)]))),
-  distribution: frame([column("bucket_lower", "number", "dimension", "ms"), column("bucket_upper", "number", "dimension", "ms"), column("count", "number", "measure", "count")], buckets.map((b, i) => [b, b * 2, [420, 1480, 2860, 1860, 640, 180][i]])),
-  correlation: frame([dimension("service"), column("requests", "number", "measure", "count"), column("p95", "number", "measure", "ms")], services.map((service, i) => [service, [28420, 42160, 12680, 25640][i], [342, 78, 126, 184][i]])),
+  traffic: frame([dimension("service"), column("count", "number", "measure", "count")], services.map((service, i) => [service, serviceSpans[i]])),
+  errors: frame([column("error_rate", "number", "measure", "percent")], [[0.39]]),
+  services: frame([dimension("service"), column("requests", "number", "measure", "count"), column("p95", "number", "measure", "ms"), column("error_rate", "number", "measure", "percent")], services.map((service, i) => [service, serviceSpans[i], serviceP95[i], serviceErrors[i]])),
+  density: frame([time, column("bucket_lower", "number", "dimension", "ms"), column("bucket_upper", "number", "dimension", "ms"), column("count", "number", "measure", "count")], densityRows),
+  distribution: frame([column("bucket_lower", "number", "dimension", "ms"), column("bucket_upper", "number", "dimension", "ms"), column("count", "number", "measure", "count")], buckets.map((b, i) => [b, i === 0 ? 32 : b * 2, densityRows.filter(row => row[1] === b).reduce((sum, row) => sum + row[3], 0)])),
+  correlation: frame([dimension("service"), column("requests", "number", "measure", "count"), column("p95", "number", "measure", "ms")], services.map((service, i) => [service, serviceSpans[i], serviceP95[i]])),
   timeline: frame([time, dimension("service"), column("p95", "number", "measure", "ms")], latencyRows),
   logs: frame([time, dimension("severity"), dimension("service"), dimension("body"), dimension("trace_id"), dimension("namespace")], [
-    [storyNow - 60000, "WARN", "checkout", "Payment authorization retried after 300 ms", "trace-checkout-001", "shop"],
-    [storyNow - 120000, "INFO", "checkout", "Order completed in 184 ms", "trace-checkout-002", "shop"],
-    [storyNow - 180000, "ERROR", "checkout", "Inventory reservation timed out after 500 ms", "trace-checkout-003", "shop"],
+    [storyNow - 60000, "WARN", "checkout", "Payment authorization retried after 300 ms", traceIDs[0], "shop"],
+    [storyNow - 120000, "INFO", "checkout", "Order completed in 184 ms", traceIDs[1], "shop"],
+    [storyNow - 180000, "ERROR", "checkout", "Inventory reservation timed out after 500 ms", traceIDs[2], "shop"],
   ]),
-  patterns: frame([dimension("body_template"), column("count", "number", "measure", "count"), column("trend", "json", "dimension")], [["Payment authorization retried after <*> ms", 42, "[2,3,4,8,12,13]"], ["Order completed in <*> ms", 28420, "[4100,4600,4800,4720,5020,5180]"]]),
-  traces: frame([dimension("trace_id"), dimension("namespace"), dimension("service"), dimension("operation"), column("duration_ms", "number", "measure", "ms"), dimension("status"), column("start", "time", "time")], [["trace-checkout-001", "shop", "checkout", "POST /checkout", 342, "STATUS_CODE_OK", storyNow - 60000], ["trace-checkout-003", "shop", "checkout", "POST /checkout", 512, "STATUS_CODE_ERROR", storyNow - 180000]]),
+  patterns: frame([dimension("body_template"), column("count", "number", "measure", "count"), column("trend", "json", "dimension")], [["Payment authorization retried after <*> ms", 42, "[2,3,4,8,12,13]"], ["Order completed in <*> ms", 28420, "[4100,4600,4800,4720,5020,5180]"], ["Inventory reservation timed out after <*> ms", 64, "[1,2,3,14,20,24]"]]),
+  traces: frame([dimension("trace_id"), dimension("namespace"), dimension("service"), dimension("operation"), column("duration_ms", "number", "measure", "ms"), dimension("status"), column("start", "time", "time")], [[traceIDs[0], "shop", "checkout", "POST /checkout", 342, "STATUS_CODE_OK", storyNow - 60342], [traceIDs[2], "shop", "checkout", "POST /checkout", 512, "STATUS_CODE_ERROR", storyNow - 180000]]),
   topology: frame([dimension("kind"), dimension("service"), dimension("caller"), dimension("callee"), dimension("edge_type"), column("calls"), column("average_ms", "number", "measure", "ms"), column("error_rate", "number", "measure", "percent"), dimension("health"), column("p95_ms", "number", "measure", "ms"), column("spans")], [
-    ...services.map((service, i) => ["node", service, "", "", "", null, null, [1.24, 0.08, 0.04, 0.12][i], i === 0 ? "degraded" : "healthy", [342, 78, 126, 184][i], 12000]),
-    ...[["checkout", "cart", 28], ["checkout", "payment", 86], ["payment", "accounting", 42]].map(([caller, callee, ms]) => ["edge", "", caller, callee, "call", 12400, ms, 0.12, "", null, null]),
+    ...services.map((service, i) => ["node", service, "", "", "", null, null, serviceErrors[i], i === 0 ? "degraded" : "healthy", serviceP95[i], serviceSpans[i]]),
+    ...[["checkout", "cart", 28, 28420, 0.08], ["checkout", "payment", 86, 25640, 0.12], ["payment", "accounting", 42, 12680, 0.04]].map(([caller, callee, ms, calls, errorRate]) => ["edge", "", caller, callee, "call", calls, ms, errorRate, "", null, null]),
   ]),
 };
 
@@ -115,6 +141,7 @@ export const invalidReceipt = receiptForTurn(mixedPreviewMessages, userMessage.i
 export const correctedReceipt = receiptForTurn([...mixedPreviewMessages, ...savedMessages.slice(1)], userMessage.id)!;
 
 export const exploreQuery = "spans | count() by service";
+export const exploreInvalid = "spans | sum(request_total) by service";
 export const exploreTypo = "spans | countt() by service";
 // A visibly fictional token, never usable as an operator credential.
 export const ingestToken = "foi_catalog_example_not_a_real_token";

@@ -23,8 +23,8 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Answer: Story = {};
-export const Markdown: Story = { args: { messages: [userMessage, { id: "markdown-001", role: "assistant", content: "### Latency by service\n\n| Service | p95 |\n| --- | --- |\n| checkout | 342 ms |\n| cart | 78 ms |\n\n```sql\nSELECT service, count(*) FROM spans GROUP BY service\n```" }] } };
-export const Composer: Story = { args: { messages: [] }, play: async ({ canvas, userEvent, args }) => {
+export const Markdown: Story = { args: { messages: [userMessage, { id: "markdown-001", role: "assistant", content: "### Latency by service\n\n| Service | p95 |\n| --- | --- |\n| checkout | 342 ms |\n| cart | 78 ms |\n| accounting | 126 ms |\n| payment | 184 ms |\n\nCheckout needs attention; the other three services are within their latency budgets." }] } };
+export const Composer: Story = { args: { messages: [] }, beforeEach: ({ args }) => { args.onInput = fn(); }, play: async ({ canvas, userEvent, args }) => {
   const input = canvas.getByRole("textbox", { name: "Message Fanout" });
   let typed = "";
   for (const character of "How is checkout?") {

@@ -15,6 +15,7 @@ import { fanoutCssVariables } from "../../theme";
 import { makeService, type CatalogService, type Scenario } from "../src/catalog/requests";
 import { createID } from "../src/id";
 import { storyNow } from "../src/catalog/fixtures";
+import { pinUTC } from "./utc";
 import { assertTextLayout } from "./checks";
 import { assertScrollbarsClear } from "./scrollbars";
 import { viewportOptions } from "./viewports";
@@ -46,9 +47,10 @@ const preview: Preview = {
     return () => { renderedStories.delete(context); return unmount?.(); };
   },
   beforeEach: context => {
+    const restoreTimezone = pinUTC();
     const RealDate = Date;
     globalThis.Date = new Proxy(RealDate, {
-      construct: (target, args) => Reflect.construct(target, args.length ? args : [storyNow]),
+      construct: (target, args) => Reflect.construct(target, args.length > 1 ? [RealDate.UTC(...args as [number, number, number?, number?, number?, number?, number?])] : args.length ? args : [storyNow]),
       apply: () => new RealDate(storyNow).toString(),
       get: (target, key, receiver) => key === "now" ? () => storyNow : Reflect.get(target, key, receiver),
     });
@@ -71,7 +73,7 @@ const preview: Preview = {
       await context.renderToCanvas();
     };
     if (context.parameters.__isPortableStory) channel.on(UPDATE_STORY_ARGS, onUpdate);
-    return () => { service.dispose(); services.delete(context); globalThis.Date = RealDate; channel.off(UPDATE_STORY_ARGS, onUpdate); };
+    return () => { service.dispose(); services.delete(context); globalThis.Date = RealDate; restoreTimezone(); channel.off(UPDATE_STORY_ARGS, onUpdate); };
   },
   afterEach: async context => {
     await document.fonts.ready;
