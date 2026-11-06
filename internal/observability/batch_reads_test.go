@@ -34,9 +34,9 @@ func newCompletedReadTest(t *testing.T) (*engine.Duck, *telemetrystore.Repositor
 const rawTraceQuery = `SELECT trace_id FROM spans
 WHERE start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
 AND (? = '' OR namespace = ?) AND trace_id <> '' AND (? = '' OR service = ?)
-GROUP BY trace_id
+GROUP BY namespace,trace_id
 ORDER BY MAX(CASE WHEN status = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) DESC,
- MAX(end_unix_nano) - MIN(start_unix_nano) DESC, trace_id ASC
+ MAX(end_unix_nano) - MIN(start_unix_nano) DESC, trace_id ASC, namespace ASC
 LIMIT 1`
 
 func rawTraceID(t testing.TB, d *engine.Duck, scope Scope, service string) (string, error) {

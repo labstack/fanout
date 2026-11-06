@@ -100,7 +100,7 @@ func TestRollupPanelsRejectNormalizedEquality(t *testing.T) {
 	e := newFixtureExecutor(t)
 	scope := Scope{Vars: map[string]Value{"s": {Values: []string{" checkout "}}}}
 	for _, where := range []string{"namespace = ' shop '", "service = ' checkout '", "service = $s"} {
-		if _, _, err := rollupFilterValue(t.Context(), e.engine, Filter{Source: where}, scope); err == nil {
+		if _, _, err := rollupFilterValue(checkedRollupFilter(t, e, where), scope); err == nil {
 			t.Fatalf("scope normalization would change equality: %s", where)
 		}
 	}
@@ -111,13 +111,13 @@ func TestRollupPanelsScopesAndSelection(t *testing.T) {
 	for _, viz := range []string{"health", "service_map"} {
 		p := Panel{ID: "p", Title: "P", Viz: viz, Query: &Spec{From: "spans"}}
 		scope := Scope{Start: fixtureStart, End: fixtureStart.Add(time.Hour), Vars: map[string]Value{"s": {Values: []string{"checkout"}}}}
-		field, value, err := rollupFilterValue(t.Context(), e.engine, Filter{Source: "$s = service"}, scope)
+		field, value, err := rollupFilterValue(checkedRollupFilter(t, e, "$s = service"), scope)
 		if err != nil || field != "service" || value != "checkout" {
 			t.Fatalf("variable: %s %s %v", field, value, err)
 		}
 		for _, v := range []Value{{All: true}, {Values: []string{"checkout", "payment"}}, {Values: []string{""}}} {
 			scope.Vars["s"] = v
-			if _, _, err := rollupFilterValue(t.Context(), e.engine, Filter{Source: "service = $s"}, scope); err == nil {
+			if _, _, err := rollupFilterValue(checkedRollupFilter(t, e, "service = $s"), scope); err == nil {
 				t.Fatalf("accepted %+v", v)
 			}
 		}
@@ -232,4 +232,14 @@ func TestHealthPanelReadsOnlySummaryAndTrendForScopedRollups(t *testing.T) {
 	if !reflect.DeepEqual(out[0].Frame.Health.ErrorTrend, []float64{10, 0}) || out[0].Frame.Health.ErrorRate != 2.5 {
 		t.Fatalf("scoped health percentages: %+v", out[0].Frame.Health)
 	}
+}
+
+func checkedRollupFilter(t *testing.T, e *Executor, source string) Filter {
+	t.Helper()
+	sig, _ := lookupSignal("spans")
+	f, err := checkFilter(t.Context(), e.engine, sig, map[string]Variable{"s": {Name: "s", Kind: "custom", Options: []string{"checkout"}}}, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
 }

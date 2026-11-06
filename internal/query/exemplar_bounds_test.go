@@ -15,11 +15,21 @@ import (
 
 type exemplarProbeEngine struct {
 	Engine
-	query func(context.Context, string, ...any) (queryrows.Rows, error)
+	summaries func(context.Context, []telemetry.TraceIdentity, int64, int64) ([]telemetry.TraceTotals, error)
+	query     func(context.Context, string, ...any) (queryrows.Rows, error)
 }
 
 func (e exemplarProbeEngine) QueryContext(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
 	return e.query(ctx, text, args...)
+}
+
+func (e exemplarProbeEngine) TraceSummaries(ctx context.Context, ids []telemetry.TraceIdentity, start, end int64) ([]telemetry.TraceTotals, error) {
+	if e.summaries != nil {
+		return e.summaries(ctx, ids, start, end)
+	}
+	return e.Engine.(interface {
+		TraceSummaries(context.Context, []telemetry.TraceIdentity, int64, int64) ([]telemetry.TraceTotals, error)
+	}).TraceSummaries(ctx, ids, start, end)
 }
 
 func exemplarDashboard(from string) Dashboard {
@@ -378,7 +388,7 @@ func TestExemplarSampleKeepsRootOrderingAndTraceErrors(t *testing.T) {
 	req.From, req.To = fixtureStart.Add(time.Minute), fixtureStart.Add(2*time.Minute)
 	req.Dimensions = map[string]string{"service": "selected"}
 	got, err := e.Exemplars(t.Context(), req)
-	if err != nil || len(got.Traces) != 1 || !got.Truncated {
+	if err != nil || len(got.Traces) != 1 || got.Truncated {
 		t.Fatalf("sample: %+v %v", got, err)
 	}
 	root := got.Traces[0]

@@ -701,3 +701,49 @@ func TestReadCacheBudgetsAllSignalsAndReportsInventoryWork(t *testing.T) {
 		t.Fatalf("remaining batch: %v %v", markers, err)
 	}
 }
+
+func TestRetirementRepairsOnlyMatchingNamespaceIdentity(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Now().UTC().Truncate(time.Hour)
+	old, now := at.Add(-2*time.Hour).UnixNano(), at.UnixNano()
+	for _, batch := range []telemetrystore.Batch{
+		{ID: "retire-a", Spans: []telemetry.Span{{Namespace: "a", TraceID: "shared", ServiceName: "retired", StartUnixNanos: old, EndUnixNanos: old + 1, IngestedAt: old, StatusCode: "STATUS_CODE_ERROR"}}},
+		{ID: "keep-a", Spans: []telemetry.Span{{Namespace: "a", TraceID: "shared", ServiceName: "api", StartUnixNanos: now, EndUnixNanos: now + 10, IngestedAt: now}}},
+		{ID: "keep-b", Spans: []telemetry.Span{{Namespace: "b", TraceID: "shared", ServiceName: "worker", StartUnixNanos: now + 20, EndUnixNanos: now + 30, IngestedAt: now, StatusCode: "STATUS_CODE_ERROR"}}},
+	} {
+		if err := commitRestoredFixture(repo, t.Context(), batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := repo.PruneParquet(t.Context(), d, at.Add(-time.Hour).UnixNano(), 8); err != nil || count != 1 {
+		t.Fatalf("prune=%d: %v", count, err)
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		namespace, service string
+		start, end         int64
+		hasError           int
+	}{
+		{"a", "api", now, now + 10, 0},
+		{"b", "worker", now + 20, now + 30, 1},
+	} {
+		var service string
+		var start, maxStart, end int64
+		var hasError int
+		if err := d.DB.QueryRow(`SELECT service,min_start,max_start,max_end,has_error FROM read_trace_candidates WHERE namespace=? AND trace_id='shared'`, want.namespace).Scan(&service, &start, &maxStart, &end, &hasError); err != nil {
+			t.Fatal(err)
+		}
+		if service != want.service || start != want.start || maxStart != want.start || end != want.end || hasError != want.hasError {
+			t.Fatalf("namespace=%s service=%s bounds=%d/%d/%d error=%d", want.namespace, service, start, maxStart, end, hasError)
+		}
+	}
+	var count int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM read_trace_candidates WHERE trace_id='shared'`).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("candidates=%d: %v", count, err)
+	}
+}

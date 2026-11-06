@@ -25,7 +25,7 @@ import (
 // anomaly_log is not one of them: it holds detector output that nothing can
 // rebuild, so the drop keeps it. Its table is created once; any change to its
 // schema must be a separate, explicit migration step.
-const readCacheVersion = 17
+const readCacheVersion = 18
 
 const (
 	readCacheBatchLimit = 64
@@ -280,7 +280,7 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		return err
 	}
 	if len(changed) > 0 {
-		if err := exec(`CREATE OR REPLACE TEMP TABLE cache_retired_traces AS SELECT DISTINCT trace_id FROM read_trace_parts WHERE batch_id IN (` + idsSQL(changed) + `)`); err != nil {
+		if err := exec(`CREATE OR REPLACE TEMP TABLE cache_retired_traces AS SELECT DISTINCT namespace,trace_id FROM read_trace_parts WHERE batch_id IN (` + idsSQL(changed) + `)`); err != nil {
 			return 0, err
 		}
 	}
@@ -294,10 +294,10 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 	if len(changed) > 0 {
 		// Retention can change a trace's extrema or error flag. Compaction whose
 		// complete replacement is cached preserves them and bypasses this repair.
-		if err := exec(`DELETE FROM read_trace_candidates WHERE trace_id IN (SELECT trace_id FROM cache_retired_traces) AND trace_id NOT IN (SELECT trace_id FROM read_trace_parts)`); err != nil {
+		if err := exec(`DELETE FROM read_trace_candidates WHERE (namespace,trace_id) IN (SELECT namespace,trace_id FROM cache_retired_traces) AND (namespace,trace_id) NOT IN (SELECT namespace,trace_id FROM read_trace_parts)`); err != nil {
 			return 0, err
 		}
-		if err := exec(`MERGE INTO read_trace_candidates c USING (` + traceCandidateSelect + ` FROM read_trace_parts WHERE trace_id IN (SELECT trace_id FROM cache_retired_traces) GROUP BY trace_id) AS excluded ON c.trace_id=excluded.trace_id
+		if err := exec(`MERGE INTO read_trace_candidates c USING (` + traceCandidateSelect + ` FROM read_trace_parts WHERE (namespace,trace_id) IN (SELECT namespace,trace_id FROM cache_retired_traces) GROUP BY namespace,trace_id) AS excluded ON c.namespace=excluded.namespace AND c.trace_id=excluded.trace_id
    WHEN MATCHED THEN UPDATE SET namespace=excluded.namespace,service=excluded.service,min_start=excluded.min_start,max_start=excluded.max_start,max_end=excluded.max_end,has_error=excluded.has_error
    WHEN NOT MATCHED THEN INSERT ` + traceCandidateColumns); err != nil {
 			return 0, err
@@ -359,10 +359,9 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		if err := exec(`INSERT INTO read_trace_parts SELECT * FROM cache_new_trace_parts`); err != nil {
 			return 0, err
 		}
-		candidates := traceCandidateSelect + ` FROM cache_new_trace_parts GROUP BY trace_id`
-		if err := exec(`MERGE INTO read_trace_candidates c USING (` + candidates + `) AS excluded ON c.trace_id=excluded.trace_id
+		candidates := traceCandidateSelect + ` FROM cache_new_trace_parts GROUP BY namespace,trace_id`
+		if err := exec(`MERGE INTO read_trace_candidates c USING (` + candidates + `) AS excluded ON c.namespace=excluded.namespace AND c.trace_id=excluded.trace_id
    WHEN MATCHED THEN UPDATE SET
-   namespace=CASE WHEN c.namespace=excluded.namespace THEN excluded.namespace END,
    service=CASE WHEN c.service=excluded.service THEN excluded.service END,
    min_start=least(c.min_start,excluded.min_start),
    max_start=greatest(c.max_start,excluded.max_start),
@@ -466,18 +465,18 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 	}
 	interior := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
 	if len(partialFiles) > 0 {
-		tail += " UNION ALL SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", partialFiles, batches)) + ") WHERE " + windowPredicate("start_time", w) + " AND trace_id IN (SELECT trace_id FROM (" + partial + "))"
+		tail += " UNION ALL SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", partialFiles, batches)) + ") WHERE " + windowPredicate("start_time", w) + " AND (namespace,trace_id) IN (SELECT namespace,trace_id FROM (" + partial + "))"
 		// A partial trace may also have in-window contributions in other batches.
 		// Include these parts as candidates; boundary rows merge them in the kernel.
-		sources["trace_candidates"] = `SELECT trace_id,min(min_start) AS min_start,max(max_end) AS max_end,max(has_error) AS has_error FROM read_trace_parts WHERE ` + scope + ` AND ` + interior + ` GROUP BY trace_id`
+		sources["trace_candidates"] = `SELECT namespace,trace_id,min(min_start) AS min_start,max(max_end) AS max_end,max(has_error) AS has_error FROM read_trace_parts WHERE ` + scope + ` AND ` + interior + ` GROUP BY namespace,trace_id`
 	} else {
 		// Every overlapping cached file lies inside the window, so a partial
 		// trace's other spans are in files outside it. Its in-window parts are
 		// still a candidate; the kernel needs one row per trace, and partial
 		// traces are disjoint from the fully contained index rows.
-		sources["trace_candidates"] = "SELECT trace_id,min_start,max_end,has_error FROM (" + index + ") WHERE " + full +
-			` UNION ALL SELECT trace_id,min(min_start),max(max_end),max(has_error) FROM read_trace_parts WHERE ` + scope + ` AND ` + interior +
-			` AND trace_id IN (SELECT trace_id FROM (` + partial + `)) GROUP BY trace_id`
+		sources["trace_candidates"] = "SELECT namespace,trace_id,min_start,max_end,has_error FROM (" + index + ") WHERE " + full +
+			` UNION ALL SELECT namespace,trace_id,min(min_start),max(max_end),max(has_error) FROM read_trace_parts WHERE ` + scope + ` AND ` + interior +
+			` AND (namespace,trace_id) IN (SELECT namespace,trace_id FROM (` + partial + `)) GROUP BY namespace,trace_id`
 	}
 	sources["trace_tail"] = tail
 	return nil
@@ -594,10 +593,10 @@ func (d *Duck) transferBatchCacheLocked(ctx context.Context, output string, inpu
 // million traces that alone outgrew a 1 GB memory limit.
 const traceCandidateColumns = `VALUES (excluded.trace_id,excluded.namespace,excluded.service,excluded.min_start,excluded.max_start,excluded.max_end,excluded.has_error)`
 
-// One candidate row per trace is sufficient while the requested namespace and
-// service are unambiguous. Mixed scopes are NULL and use exact batch parts.
+// One candidate per namespace and trace. Mixed services are NULL and use exact
+// batch parts for a service selection.
 const traceCandidateSelect = `SELECT trace_id,
- CASE WHEN min(namespace)=max(namespace) THEN min(namespace) END AS namespace,
+ namespace,
  CASE WHEN min(service)=max(service) THEN min(service) END AS service,
  min(min_start) AS min_start,max(max_start) AS max_start,max(max_end) AS max_end,max(has_error) AS has_error`
 
@@ -666,8 +665,8 @@ func (d *Duck) traceCandidateSource(ctx context.Context, db snapshotSQL, batches
 	}
 	index := `SELECT * FROM read_trace_candidates`
 	if len(changed) > 0 {
-		dirty := `SELECT trace_id FROM read_trace_parts WHERE batch_id IN (` + idsSQL(changed) + `)`
-		index += ` WHERE trace_id NOT IN (` + dirty + `) UNION ALL ` + traceCandidateSelect + ` FROM read_trace_parts WHERE batch_id IN (` + idsSQL(cachedIDs) + `) AND trace_id IN (` + dirty + `) GROUP BY trace_id`
+		dirty := `SELECT namespace,trace_id FROM read_trace_parts WHERE batch_id IN (` + idsSQL(changed) + `)`
+		index += ` WHERE (namespace,trace_id) NOT IN (` + dirty + `) UNION ALL ` + traceCandidateSelect + ` FROM read_trace_parts WHERE batch_id IN (` + idsSQL(cachedIDs) + `) AND (namespace,trace_id) IN (` + dirty + `) GROUP BY namespace,trace_id`
 	}
 	var exact, possible, ambiguous []string
 	for _, field := range []struct{ name, value string }{{"namespace", w.Namespace}, {"service", w.Service}} {
@@ -679,12 +678,12 @@ func (d *Duck) traceCandidateSource(ctx context.Context, db snapshotSQL, batches
 		possible = append(possible, "("+match+" OR "+field.name+" IS NULL)")
 		ambiguous = append(ambiguous, field.name+" IS NULL")
 	}
-	projection := `trace_id,min_start,max_start,max_end,has_error`
+	projection := `namespace,trace_id,min_start,max_start,max_end,has_error`
 	if len(exact) == 0 {
 		return "SELECT " + projection + " FROM (" + index + ")", nil
 	}
 	result := "SELECT " + projection + " FROM (" + index + ") WHERE " + strings.Join(exact, " AND ")
-	mixed := "SELECT trace_id FROM (" + index + ") WHERE " + strings.Join(possible, " AND ") + " AND (" + strings.Join(ambiguous, " OR ") + ")"
+	mixed := "SELECT namespace,trace_id FROM (" + index + ") WHERE " + strings.Join(possible, " AND ") + " AND (" + strings.Join(ambiguous, " OR ") + ")"
 	// Most traces belong to a single namespace/service. Do not put a retained
 	// batch-parts aggregation in the ranking/join plan when this snapshot has no
 	// ambiguous candidates for the requested scope. The probe shares its read
@@ -697,7 +696,7 @@ func (d *Duck) traceCandidateSource(ctx context.Context, db snapshotSQL, batches
 		return result, nil
 	}
 	scope := "batch_id IN (" + idsSQL(cachedIDs) + ") AND " + strings.Join(exact, " AND ")
-	return result + ` UNION ALL SELECT trace_id,min(min_start),max(max_start),max(max_end),max(has_error) FROM read_trace_parts WHERE ` + scope + ` AND trace_id IN (` + mixed + `) GROUP BY trace_id`, nil
+	return result + ` UNION ALL SELECT namespace,trace_id,min(min_start),max(max_start),max(max_end),max(has_error) FROM read_trace_parts WHERE ` + scope + ` AND (namespace,trace_id) IN (` + mixed + `) GROUP BY namespace,trace_id`, nil
 }
 
 func minTime(a, b time.Time) time.Time {
