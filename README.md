@@ -168,9 +168,9 @@ runbook](docs/operations.md).
 
 ## Performance
 
-Fanout v2026.10.8-alpha accepted **415,859 mixed OpenTelemetry items/s**
-over 303.5 seconds on a Hetzner Cloud ccx33 (8 dedicated vCPUs, 32 GB RAM), with
-telemetrygen on a separate ccx33. The ingest run on 16 October 2026 passed every
+Fanout v2026.11.0-alpha accepted **507,311 mixed OpenTelemetry items/s**
+over 306.8 seconds on a Hetzner Cloud ccx33 (8 dedicated vCPUs, 32 GB RAM), with
+telemetrygen on a separate ccx33. The ingest run on 6 November 2026 passed every
 quality gate. See the [performance methodology](https://fanout.run/docs/concepts/performance).
 [Fanout Bench](https://github.com/labstack/fanout-bench) reproduces the measurement on your hardware.
 
