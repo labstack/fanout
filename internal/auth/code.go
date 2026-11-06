@@ -14,15 +14,15 @@ import (
 
 	"github.com/labstack/fanout/internal/db/generated"
 	appid "github.com/labstack/fanout/internal/id"
+	"github.com/labstack/fanout/internal/secret"
 )
 
 const (
-	codeTTL             = 5 * time.Minute
-	loginLinkTTL        = 15 * time.Minute
-	loginLinkTokenBytes = 16
-	maxAttempts         = 3
-	purposeEmailCode    = "email_code"
-	purposeLoginLink    = "login_link"
+	codeTTL          = 5 * time.Minute
+	loginLinkTTL     = 15 * time.Minute
+	maxAttempts      = 3
+	purposeEmailCode = "email_code"
+	purposeLoginLink = "login_link"
 )
 
 // GenerateCode returns a random 6-digit code.
@@ -34,13 +34,9 @@ func GenerateCode() (string, error) {
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
-// GenerateLoginLinkToken returns a credential with 128 bits of entropy.
+// GenerateLoginLinkToken returns a credential with 256 bits of entropy.
 func GenerateLoginLinkToken() (string, error) {
-	buf := make([]byte, loginLinkTokenBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("auth: generate login link token: %w", err)
-	}
-	return hex.EncodeToString(buf), nil
+	return secret.NewSecret()
 }
 
 // HashCode produces an HMAC-SHA256 hex digest of the code.
@@ -188,6 +184,9 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 // email it was issued for. Login links are purpose-bound and cannot be used as
 // ordinary email verification codes.
 func (s *CodeStore) VerifyLoginLink(token string) (string, bool, error) {
+	if !secret.ValidSecret(token, "") {
+		return "", false, nil
+	}
 	ctx := context.Background()
 	row, err := s.q.GetUnusedLoginLink(ctx, HashCode(token, s.secret))
 	if errors.Is(err, sql.ErrNoRows) {

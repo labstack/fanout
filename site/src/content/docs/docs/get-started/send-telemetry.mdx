@@ -16,7 +16,9 @@ same port as the application: `7520` by default. Both require the ingest token.
 ## The ingest token
 
 The raw ingest token is shown once, immediately after you create the first
-administrator. It is `fo_`-prefixed, and Fanout stores only its hash.
+administrator. It is `foi_` followed by 43 unpadded base64url characters (32 random bytes).
+Fanout stores only its SHA-256 digest. Existing `fo_` tokens are rejected;
+rotate the ingest token in **Connect telemetry → Ingest token** and update every collector.
 
 An administrator can issue a replacement in **Connect telemetry → Ingest token** in the account menu, or
 with `POST /api/settings/ingest/token/rotate`. Save the new token when it is
@@ -26,7 +28,7 @@ exporters until you update their credentials.
 Send it as a bearer token; this is the only accepted ingest credential form:
 
 ```text
-Authorization: Bearer fo_<token>
+Authorization: Bearer foi_<token>
 ```
 
 Ingest is available after administrator setup. Exporters require the ingest
@@ -37,7 +39,7 @@ token; browser sessions and MCP OAuth tokens cannot authorize exports.
 ```sh
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:7520
 export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20fo_<token>"
+export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20foi_<token>"
 export OTEL_SERVICE_NAME=checkout
 export OTEL_RESOURCE_ATTRIBUTES=service.namespace=storefront
 ```
