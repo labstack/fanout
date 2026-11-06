@@ -75,6 +75,8 @@
     "fast-uri": "3.1.8",
     "hono": "4.13.7",
     "ip-address": "10.7.1",
-    "nanoid": "3.3.18"
+    "nanoid": "3.3.18",
+    "glob": "14.0.2",
+    "minimatch": "11.0.1"
   }
 }
