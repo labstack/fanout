@@ -36,7 +36,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 			return Result[TraceDetail]{}, fmt.Errorf("query recent trace: %w", queryErr)
 		}
 		if rows.Next() {
-			if err := rows.Scan(&traceID); err != nil {
+			if err := rows.Scan(&scope.Namespace, &traceID, new(int)); err != nil {
 				rows.Close()
 				return Result[TraceDetail]{}, fmt.Errorf("scan recent trace: %w", err)
 			}

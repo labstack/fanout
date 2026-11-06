@@ -9,6 +9,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	_ "github.com/duckdb/duckdb-go/v2"
+	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -110,6 +111,30 @@ func TestTraceWholeTraceIsNotReportedAsTruncated(t *testing.T) {
 	}
 	if result.Data.SpanCount != 1 {
 		t.Errorf("span_count = %d, want 1", result.Data.SpanCount)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRecentTraceKeepsSelectedNamespace(t *testing.T) {
+	svc, mock, repo := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "namespaces", Spans: []telemetry.Span{
+		{Namespace: "a", TraceID: "shared", SpanID: "a", ServiceName: "checkout", StartUnixNanos: start.UnixNano(), DurationMS: 1},
+		{Namespace: "b", TraceID: "shared", SpanID: "b", ServiceName: "other", StartUnixNanos: start.UnixNano(), DurationMS: 9, StatusCode: "STATUS_CODE_ERROR"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(queryrows.CompletedTraceQuery)).WithArgs(start, end, "", "", "checkout", "checkout", 1).WillReturnRows(sqlmock.NewRows([]string{"namespace", "trace_id", "has_error"}).AddRow("a", "shared", 0))
+	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).WithArgs("shared", start, end, "a", "a", 10).WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
+	got, err := svc.Trace(t.Context(), Scope{Start: start, End: end}, "", "checkout", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Data.SpanCount != 1 || got.Data.HasError || len(got.Data.Spans) != 1 || got.Data.Spans[0].SpanID != "a" {
+		t.Fatalf("namespace merged: %+v", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

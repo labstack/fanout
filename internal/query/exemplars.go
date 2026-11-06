@@ -371,7 +371,7 @@ func (e *Executor) exemplarTraceScope(ctx context.Context, p *Panel, filters []F
 		if scope.dropped(f) {
 			continue
 		}
-		field, value, err := rollupFilterValue(ctx, e.engine, f, scope)
+		field, value, err := rollupFilterValue(f, scope)
 		if err != nil {
 			if isOperational(err) {
 				return w, false, false, err
@@ -390,14 +390,17 @@ func (e *Executor) indexedExemplars(ctx context.Context, w queryrows.Window, pan
 	if err != nil {
 		return out, exemplarError(ctx, err)
 	}
-	var ids []string
+	var ids []telemetry.TraceIdentity
+	var scopedErrors []int
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id telemetry.TraceIdentity
+		var hasError int
+		if err := rows.Scan(&id.Namespace, &id.TraceID, &hasError); err != nil {
 			rows.Close()
 			return out, exemplarError(ctx, err)
 		}
 		ids = append(ids, id)
+		scopedErrors = append(scopedErrors, hasError)
 	}
 	err = rows.Err()
 	rows.Close()
@@ -412,25 +415,32 @@ func (e *Executor) indexedExemplars(ctx context.Context, w queryrows.Window, pan
 		ids = ids[:20]
 	}
 	reader, ok := e.engine.(interface {
-		Trace(context.Context, telemetry.TraceQuery) ([]telemetry.IndexedSpan, telemetry.TraceTotals, error)
+		TraceSummaries(context.Context, []telemetry.TraceIdentity, int64, int64) ([]telemetry.TraceTotals, error)
 	})
 	if !ok {
 		return out, fmt.Errorf("indexed trace reader unavailable")
 	}
-	for _, id := range ids {
-		_, totals, err := reader.Trace(ctx, telemetry.TraceQuery{TraceID: id, Namespace: w.Namespace, StartNanos: panelStart.UnixNano(), EndNanos: panelEnd.UnixNano(), Limit: 1})
-		if err != nil {
-			return out, exemplarError(ctx, err)
-		}
-		if totals.Root == nil {
+	totals, err := reader.TraceSummaries(ctx, ids, panelStart.UnixNano(), panelEnd.UnixNano())
+	if err != nil {
+		return out, exemplarError(ctx, err)
+	}
+	for i, id := range ids {
+		if totals[i].Root == nil {
+			// Retention may remove an identity between ranking and this read.
+			out.Truncated = true
 			continue
 		}
-		root := totals.Root
+		root := totals[i].Root
+		// Error priority and display both describe the selected service/window,
+		// independently of the root's service and the rest of the trace.
 		status := root.StatusCode
-		if totals.HasError {
+		if status == "STATUS_CODE_ERROR" {
+			status = "STATUS_CODE_OK"
+		}
+		if scopedErrors[i] != 0 {
 			status = "STATUS_CODE_ERROR"
 		}
-		out.Traces = append(out.Traces, Exemplar{TraceID: id, Namespace: root.Namespace, Service: root.ServiceName, Operation: root.Name, DurationMS: root.DurationMS, Status: status, Start: time.Unix(0, root.StartUnixNanos).UTC()})
+		out.Traces = append(out.Traces, Exemplar{TraceID: id.TraceID, Namespace: id.Namespace, Service: root.ServiceName, Operation: root.Name, DurationMS: root.DurationMS, Status: status, Start: time.Unix(0, root.StartUnixNanos).UTC()})
 	}
 	return out, nil
 }

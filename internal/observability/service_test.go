@@ -188,7 +188,7 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	end := start.Add(time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(queryrows.CompletedTraceQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout", 1).
-		WillReturnRows(sqlmock.NewRows([]string{"trace_id"}).AddRow("trace-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"namespace", "trace_id", "has_error"}).AddRow("prod", "trace-1", 1))
 	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "trace-fixture", Spans: []telemetry.Span{
 		{Namespace: "prod", TraceID: "trace-1", SpanID: "root", ServiceName: "checkout", Name: "POST /pay", Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 200, StatusCode: "STATUS_CODE_ERROR", StatusMsg: "declined"},
 		{Namespace: "prod", TraceID: "trace-1", SpanID: "child", ParentSpanID: "root", ServiceName: "payments", Name: "charge", Kind: "CLIENT", StartUnixNanos: start.Add(20 * time.Millisecond).UnixNano(), DurationMS: 80, StatusCode: "OK"},

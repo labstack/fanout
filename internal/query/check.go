@@ -226,7 +226,7 @@ func checkWith(ctx context.Context, parser Parser, d *Dashboard, memo *checkMemo
 					for name := range earlier {
 						sample.Vars[name] = Value{Values: []string{"check"}}
 					}
-					if _, _, err := rollupFilterValue(ctx, parser, f, sample); err != nil {
+					if _, _, err := rollupFilterValue(f, sample); err != nil {
 						if isOperational(err) {
 							return nil, nil, err
 						}

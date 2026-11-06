@@ -15,14 +15,10 @@ type RollupReader interface {
 }
 
 func (e *Executor) SetRollupReader(reader RollupReader) { e.rollups = reader }
-func rollupFilterValue(ctx context.Context, parser Parser, f Filter, scope Scope) (string, string, error) {
-	tree, err := parser.ParseSQL(ctx, "SELECT 1 FROM spans WHERE ("+f.Source+")")
-	if err != nil {
-		return "", "", err
-	}
-	// Parse the author's source, not the canonical filter with its injected
-	// parameter casts. Explicit casts cannot be represented by a string scope.
-	return rollupNodeValue(SQLExpression(tree["where_clause"]), scope)
+func rollupFilterValue(f Filter, scope Scope) (string, string, error) {
+	// Use the checked author's tree, before canonical parameter casts. Explicit
+	// casts cannot be represented by a string scope.
+	return rollupNodeValue(f.ScopeEquality, scope)
 }
 
 func rollupNodeValue(node *SQLExpr, scope Scope) (string, string, error) {
@@ -74,7 +70,7 @@ func (e *Executor) runRollupPanel(ctx context.Context, p *Panel, filters []Filte
 		if scope.dropped(f) {
 			continue
 		}
-		field, value, err := rollupFilterValue(ctx, e.engine, f, scope)
+		field, value, err := rollupFilterValue(f, scope)
 		if err != nil {
 			return nil, "", err
 		}

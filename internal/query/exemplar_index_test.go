@@ -38,7 +38,14 @@ func TestIndexedExemplarsRankTracesAndTruncate(t *testing.T) {
 		t.Fatal(err)
 	}
 	queries := 0
-	probe := exemplarProbeEngine{Engine: duck, query: func(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
+	rootPasses := 0
+	probe := exemplarProbeEngine{Engine: duck, summaries: func(ctx context.Context, ids []telemetry.TraceIdentity, start, end int64) ([]telemetry.TraceTotals, error) {
+		rootPasses++
+		if len(ids) != 20 {
+			t.Fatalf("root identities=%d", len(ids))
+		}
+		return duck.TraceSummaries(ctx, ids, start, end)
+	}, query: func(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
 		queries++
 		w, ok := queryrows.ReadWindow(ctx)
 		if text != queryrows.CompletedTraceQuery || !ok || w.Kind != queryrows.TraceCandidateRead || w.Namespace != "shop" || w.Service != "checkout" || args[len(args)-1] != 21 {
@@ -59,8 +66,8 @@ func TestIndexedExemplarsRankTracesAndTruncate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if queries != 1 {
-		t.Fatalf("candidate statements=%d", queries)
+	if queries != 1 || rootPasses != 1 {
+		t.Fatalf("candidate statements=%d root passes=%d", queries, rootPasses)
 	}
 	if len(got.Traces) != 20 || !got.Truncated || got.Traces[0].TraceID != "trace-00" || got.Traces[1].TraceID != "trace-01" || got.Traces[2].TraceID != "trace-20" {
 		t.Fatalf("ranking/cap: %+v", got)
@@ -175,5 +182,108 @@ func TestExemplarIndexEligibility(t *testing.T) {
 		if err != nil || got != tc.want {
 			t.Fatalf("where=%v dimensions=%v eligible=%v err=%v", tc.where, tc.dimensions, got, err)
 		}
+	}
+}
+
+func TestIndexedExemplarsKeepNamespacesSeparate(t *testing.T) {
+	duck, repo := newTestEngine(t)
+	n := fixtureStart.Add(time.Minute).UnixNano()
+	commit(t, repo, []telemetry.Span{
+		{Namespace: "a", ServiceName: "checkout", TraceID: "shared", SpanID: "root-a", Name: "root a", StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, StatusCode: "STATUS_CODE_OK"},
+		{Namespace: "b", ServiceName: "other", TraceID: "shared", SpanID: "root-b", Name: "root b", StartUnixNanos: n - 1, EndUnixNanos: n + 9000000, DurationMS: 9, StatusCode: "STATUS_CODE_ERROR"},
+		{Namespace: "b", ServiceName: "checkout", TraceID: "shared", SpanID: "child-b", ParentSpanID: "root-b", Name: "checkout b", StartUnixNanos: n, EndUnixNanos: n + 2000000, DurationMS: 2, StatusCode: "STATUS_CODE_OK"},
+		{Namespace: "c", ServiceName: "other", TraceID: "shared", SpanID: "root-c", Name: "wrong root", StartUnixNanos: n - 1, EndUnixNanos: n + 9000000, DurationMS: 9, StatusCode: "STATUS_CODE_ERROR"},
+		{Namespace: "a", ServiceName: "other", TraceID: "shared", SpanID: "child", ParentSpanID: "root-a", StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, StatusCode: "STATUS_CODE_ERROR"},
+	}, nil)
+	e := NewExecutor(duck, 30)
+	defer e.Close()
+	req := exemplarRequest(exemplarDashboard("spans"))
+	req.Dimensions = map[string]string{"service": "checkout"}
+	for _, cached := range []bool{false, true} {
+		if cached {
+			if _, err := duck.RefreshReadCaches(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := e.exemplars(t.Context(), req, fixtureStart.Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Traces) != 2 || got.Traces[0].Namespace != "b" || got.Traces[1].Namespace != "a" || got.Traces[0].Operation != "root b" || got.Traces[1].Operation != "root a" || got.Traces[1].Status != "STATUS_CODE_OK" || got.Traces[0].Status != "STATUS_CODE_OK" {
+			t.Fatalf("cached=%v: %+v", cached, got)
+		}
+	}
+}
+
+func TestIndexedExemplarsReportMissingRoots(t *testing.T) {
+	duck, repo := newTestEngine(t)
+	n := fixtureStart.Add(time.Minute).UnixNano()
+	commit(t, repo, []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", TraceID: "retired", SpanID: "root", StartUnixNanos: n, EndUnixNanos: n + 1}}, nil)
+	calls := 0
+	probe := exemplarProbeEngine{Engine: duck, query: duck.QueryContext, summaries: func(_ context.Context, ids []telemetry.TraceIdentity, start, end int64) ([]telemetry.TraceTotals, error) {
+		calls++
+		if len(ids) != 1 || ids[0] != (telemetry.TraceIdentity{Namespace: "shop", TraceID: "retired"}) {
+			t.Fatalf("identities: %+v", ids)
+		}
+		return make([]telemetry.TraceTotals, len(ids)), nil
+	}}
+	e := NewExecutor(probe, 30)
+	defer e.Close()
+	req := exemplarRequest(exemplarDashboard("spans"))
+	req.Dimensions = map[string]string{"service": "checkout"}
+	got, err := e.exemplars(t.Context(), req, fixtureStart.Add(time.Hour))
+	if err != nil || !got.Truncated || len(got.Traces) != 0 || calls != 1 {
+		t.Fatalf("missing roots: %+v calls=%d err=%v", got, calls, err)
+	}
+}
+
+func TestExemplarIndexSelectionEligibility(t *testing.T) {
+	e := newFixtureExecutor(t)
+	for _, tc := range []struct {
+		name, from, viz, where string
+		value                  Value
+		dimension              string
+		want                   bool
+	}{
+		{name: "multi value", from: "spans", viz: "bar", where: "service IN $s", value: Value{Values: []string{"checkout", "frontend"}}, dimension: "checkout", want: false},
+		{name: "empty list", from: "spans", viz: "bar", where: "service IN $s", value: Value{Values: []string{}}, dimension: "checkout", want: false},
+		{name: "logs", from: "logs", viz: "bar", dimension: "checkout", want: false},
+		{name: "health service", from: "spans", viz: "health", dimension: "checkout", want: true},
+		{name: "map service", from: "spans", viz: "service_map", dimension: "checkout", want: true},
+		{name: "health unscoped", from: "spans", viz: "health", want: false},
+		{name: "map unscoped", from: "spans", viz: "service_map", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := exemplarDashboard(tc.from)
+			d.Panels[0].Viz = tc.viz
+			if tc.viz == "health" || tc.viz == "service_map" {
+				d.Panels[0].Query.Measures = nil
+				d.Panels[0].Query.By = nil
+			}
+			d.Variables = []Variable{{Name: "s", Kind: "custom", Multi: true, Options: []string{"checkout", "frontend"}}}
+			if tc.where != "" {
+				d.Panels[0].Query.Where = []string{tc.where}
+			}
+			Normalize(&d)
+			checked, err := e.check(t.Context(), &d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dimensions := map[string]string{}
+			if tc.dimension != "" {
+				dimensions["service"] = tc.dimension
+			}
+			_, got, _, err := e.exemplarTraceScope(t.Context(), &d.Panels[0], checked.Filters["p"], Scope{Vars: map[string]Value{"s": tc.value}}, dimensions, nil)
+			if err != nil || got != tc.want {
+				t.Fatalf("eligible=%v want=%v err=%v", got, tc.want, err)
+			}
+		})
+	}
+	d := exemplarDashboard("spans")
+	d.Panels[0].Viz = "timeseries"
+	req := exemplarRequest(d)
+	req.Dimensions = map[string]string{"service": "Other (3)"}
+	if _, err := e.exemplars(t.Context(), req, fixtureStart.Add(time.Hour)); err == nil {
+		t.Fatal("accepted Other group")
 	}
 }
