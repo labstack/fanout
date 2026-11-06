@@ -230,3 +230,11 @@ func TestTelemetrySchemaReportsBusy(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestPreviewRetainsPanelProblemsWhenVariablesFailLater(t *testing.T) {
+	s := newPanelServer(t)
+	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Variables: []query.Variable{{Name: "service", Kind: "query", From: "spans", Field: "service", Where: []string{"http_route = '/cart'"}}}, Panels: []query.Panel{{ID: "broken", Title: "Broken", Viz: "unknown"}}})
+	if err != nil || len(out.Panels) != 1 || out.Panels[0].Status != "invalid" || len(out.Panels[0].Problems) != 1 || out.Panels[0].Problems[0].Path != "panels[0].viz" || len(out.Problems) != 1 || out.Problems[0].Path != "variables[0].where[0]" {
+		t.Fatalf("preview: %+v %v", out, err)
+	}
+}

@@ -209,6 +209,7 @@ func (e *Executor) checkKeyed(ctx context.Context, d *Dashboard) (*Checked, cach
 func (e *Executor) checkRun(ctx context.Context, d *Dashboard) (*Checked, cacheKey, map[*Panel]Problems, error) {
 	checked, spec, err := e.checkKeyed(ctx, d)
 	invalid := map[*Panel]Problems{}
+	var collected Problems
 	reduced := *d
 	indices := make([]int, len(d.Panels))
 	for i := range indices {
@@ -235,8 +236,9 @@ func (e *Executor) checkRun(ctx context.Context, d *Dashboard) (*Checked, cacheK
 			mapped[i].Path = fmt.Sprintf("panels[%d]%s", original, suffix)
 		}
 		if !scoped {
-			return nil, spec, nil, mapped
+			return nil, spec, nil, append(mapped, collected...)
 		}
+		collected = append(collected, mapped...)
 		for i, problem := range mapped {
 			panel := owners[i]
 			invalid[panel] = append(invalid[panel], problem)
@@ -376,7 +378,12 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 	}
 	invalidResult := func(p *Panel) Result {
 		problems := PresentProblems(invalid[p])
-		return Result{ID: p.ID, Status: StatusInvalid, Problems: problems, Error: problems.Error()}
+		// Cards show repair guidance; structured diagnostics retain their paths.
+		display := slices.Clone(problems)
+		for i := range display {
+			display[i].Path = ""
+		}
+		return Result{ID: p.ID, Status: StatusInvalid, Problems: problems, Error: display.Error()}
 	}
 	validCount := 0
 	for _, p := range targets {

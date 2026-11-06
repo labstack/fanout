@@ -28,7 +28,7 @@ func (e *Executor) ResolveVariables(ctx context.Context, req ResolveRequest) (ma
 	defer cancel()
 	d := req.Dashboard
 	Normalize(&d)
-	checked, err := e.check(ctx, &d)
+	checked, _, _, err := e.checkRun(ctx, &d)
 	if err != nil {
 		return nil, err
 	}

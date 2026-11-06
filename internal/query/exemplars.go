@@ -134,7 +134,7 @@ func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.
 	defer cancel()
 	d := req.Dashboard
 	Normalize(&d)
-	checked, err := e.check(ctx, &d)
+	checked, _, invalid, err := e.checkRun(ctx, &d)
 	if err != nil {
 		return out, err
 	}
@@ -143,6 +143,9 @@ func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.
 		return out, Problems{{Path: "panel_id", Message: "panel does not exist in dashboard"}}
 	}
 	p := &d.Panels[index]
+	if problems := invalid[p]; len(problems) > 0 {
+		return out, problems
+	}
 	if p.Query == nil || p.Query.From == "metrics" {
 		return out, Problems{{Path: "panel_id", Message: "trace lineage needs a structured spans or logs panel"}}
 	}

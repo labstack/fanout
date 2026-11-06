@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -203,7 +204,7 @@ func TestRunIsolatesInvalidPanels(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := byID(results)
-		if len(results) != 2 || got["stale"].Status != "invalid" || !strings.Contains(got["stale"].Error, "http_route") || got["valid"].Status != StatusOK {
+		if len(results) != 2 || got["stale"].Status != "invalid" || !strings.Contains(got["stale"].Error, "http_route") || got["valid"].Status != StatusOK || strings.Contains(got["stale"].Error, "panels[") {
 			t.Fatalf("results = %+v", results)
 		}
 		if !stream && results[0].ID != "stale" {
@@ -387,5 +388,62 @@ func TestRunBoundsVariablePatterns(t *testing.T) {
 		if r.Error != "" {
 			t.Errorf("%s: %s", r.ID, r.Error)
 		}
+	}
+}
+
+func TestAuxiliaryReadsIgnoreInvalidSiblingPanels(t *testing.T) {
+	e := newFixtureExecutor(t)
+	d := shopDashboard()
+	want, err := e.ResolveVariables(t.Context(), ResolveRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, guidance, err := e.EmptyGuidance(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Panels = append(d.Panels, Panel{ID: "stale", Title: "Stale", Viz: "bar", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"http_route"}}})
+	options, err := e.ResolveVariables(t.Context(), ResolveRequest{Dashboard: d})
+	if err != nil || !reflect.DeepEqual(options, want) {
+		t.Fatalf("variables: %+v %v", options, err)
+	}
+	gotCode, gotGuidance, err := e.EmptyGuidance(t.Context(), RunRequest{Dashboard: d})
+	if err != nil || gotCode != code || gotGuidance != guidance {
+		t.Fatalf("guidance: %q %q %v", gotCode, gotGuidance, err)
+	}
+	req := ExemplarRequest{Dashboard: d, PanelID: "by_route", From: fixtureStart.Add(30 * time.Minute), To: fixtureStart.Add(31 * time.Minute), Dimensions: map[string]string{"attributes['http.route']": "/cart"}}
+	exemplars, err := e.Exemplars(t.Context(), req)
+	if err != nil || len(exemplars.Traces) != 1 {
+		t.Fatalf("exemplars: %+v %v", exemplars, err)
+	}
+	req.PanelID = "stale"
+	_, err = e.Exemplars(t.Context(), req)
+	var problems Problems
+	if !errors.As(err, &problems) || problems[0].Path != "panels[5].query.by[0]" {
+		t.Fatalf("selected invalid panel: %v", err)
+	}
+	d.Variables[0].Field = "http_route"
+	if _, err := e.ResolveVariables(t.Context(), ResolveRequest{Dashboard: d}); !errors.As(err, &problems) {
+		t.Fatalf("variable fault ignored: %v", err)
+	}
+	if _, _, err := e.EmptyGuidance(t.Context(), RunRequest{Dashboard: d}); !errors.As(err, &problems) {
+		t.Fatalf("guidance ignored variable fault: %v", err)
+	}
+}
+
+func TestRunRetainsEarlierPanelProblemsOnGlobalFailure(t *testing.T) {
+	e := newFixtureExecutor(t)
+	d := Dashboard{Name: "Mixed problems", Variables: []Variable{{Name: "service", Kind: "query", From: "spans", Field: "service", Where: []string{"http_route = '/cart'"}}}, Panels: []Panel{{ID: "broken", Title: "Broken", Viz: "unknown"}}}
+	_, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	var problems Problems
+	if !errors.As(err, &problems) {
+		t.Fatalf("expected problems: %v", err)
+	}
+	paths := map[string]bool{}
+	for _, p := range problems {
+		paths[p.Path] = true
+	}
+	if !paths["panels[0].viz"] || !paths["variables[0].where[0]"] {
+		t.Fatalf("lost diagnostics: %+v", problems)
 	}
 }
