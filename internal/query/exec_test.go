@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -184,14 +185,81 @@ func TestRunBindsHostileValuesAsData(t *testing.T) {
 	}
 }
 
+func TestRunIsolatesInvalidPanels(t *testing.T) {
+	e := newFixtureExecutor(t)
+	d := Dashboard{Name: "Stale", Time: Time{Range: "1h"}, Panels: []Panel{
+		{ID: "stale", Title: "Stale", Viz: "bar", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"http_route"}, Where: []string{"http_route = '/cart'"}}},
+		{ID: "valid", Title: "Valid", Viz: "stat", Query: &Spec{From: "spans", Measures: []string{"count()"}}},
+	}}
+	for _, stream := range []bool{false, true} {
+		var results []Result
+		var err error
+		if stream {
+			err = e.Stream(t.Context(), RunRequest{Dashboard: d}, func(r Result) { results = append(results, r) })
+		} else {
+			results, err = e.Run(t.Context(), RunRequest{Dashboard: d})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := byID(results)
+		if len(results) != 2 || got["stale"].Status != "invalid" || !strings.Contains(got["stale"].Error, "http_route") || got["valid"].Status != StatusOK {
+			t.Fatalf("results = %+v", results)
+		}
+		if !stream && results[0].ID != "stale" {
+			t.Fatalf("order = %+v", results)
+		}
+	}
+
+	// Selection retains request order, and invalid panels never enter the cache.
+	selected, err := e.Run(t.Context(), RunRequest{Dashboard: d, Panels: []string{"valid", "stale"}})
+	if err != nil || len(selected) != 2 || selected[0].ID != "valid" || selected[1].ID != "stale" || selected[1].Cached || len(selected[1].Problems) == 0 {
+		t.Fatalf("selection = %+v, %v", selected, err)
+	}
+	reduced := d
+	reduced.Panels = d.Panels[1:]
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: reduced})
+	if err != nil || results[0].Cached {
+		t.Fatalf("reduced spec shared cache: %+v, %v", results, err)
+	}
+	allInvalid := d
+	allInvalid.Panels = d.Panels[:1]
+	results, err = e.Run(t.Context(), RunRequest{Dashboard: allInvalid})
+	if err != nil || len(results) != 1 || results[0].Status != StatusInvalid {
+		t.Fatalf("all invalid = %+v, %v", results, err)
+	}
+	// Rechecking after a structural error must retain original panel paths.
+	mixed := d
+	mixed.Panels = append(slices.Clone(d.Panels), Panel{ID: "filter", Title: "Filter", Viz: "stat", Query: &Spec{From: "spans", Measures: []string{"count()"}, Where: []string{"http_route = '/cart'"}}})
+	results, err = e.Run(t.Context(), RunRequest{Dashboard: mixed})
+	if err != nil || len(results) != 3 || results[2].Status != StatusInvalid || len(results[2].Problems) == 0 || results[2].Problems[0].Path != "panels[2].query.where[0]" {
+		t.Fatalf("remapped results = %+v, %v", results, err)
+	}
+	// A structural panel fault must not hide database-backed variable faults.
+	allInvalid.Panels = []Panel{{ID: "broken", Title: "Broken", Viz: "unknown"}}
+	allInvalid.Variables = []Variable{{Name: "route", Kind: "query", From: "spans", Field: "service", Where: []string{"http_route = '/cart'"}}}
+	if _, err := e.Run(t.Context(), RunRequest{Dashboard: allInvalid}); err == nil {
+		t.Fatal("variable filter accepted")
+	}
+	var problems Problems
+	if err := e.Validate(t.Context(), &d); !errors.As(err, &problems) {
+		t.Fatalf("save validation = %v", err)
+	}
+	d.Variables = []Variable{{Name: "route", Kind: "query", From: "spans", Field: "http_route"}}
+	emitted := false
+	err = e.Stream(t.Context(), RunRequest{Dashboard: d}, func(Result) { emitted = true })
+	if !errors.As(err, &problems) || emitted {
+		t.Fatalf("global failure = %v, emitted = %v", err, emitted)
+	}
+}
+
 func TestRunRejectsInvalidSpecs(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
 	d.Panels[0].Query.Measures = []string{"p95(duraton_ms)"}
-	_, err := e.Run(t.Context(), RunRequest{Dashboard: d})
-	var problems Problems
-	if !errors.As(err, &problems) || problems[0].Path != "panels[0].query.measures[0]" {
-		t.Fatalf("err = %v", err)
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil || results[0].Status != StatusInvalid || results[0].Problems[0].Path != "panels[0].query.measures[0]" {
+		t.Fatalf("results = %+v, err = %v", results, err)
 	}
 	if _, err := e.Run(t.Context(), RunRequest{Dashboard: shopDashboard(), Panels: []string{"missing"}}); err == nil {
 		t.Fatal("unknown panel id accepted")

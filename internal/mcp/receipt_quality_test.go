@@ -97,7 +97,7 @@ func TestUnexecutedPanelRowsOmitTimingMeasurements(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, p := range value.Panels {
-			if _, ok := p["elapsed_ms"]; ok {
+			if _, ok := p["elapsed_ms"]; ok && p["status"] != "ok" {
 				t.Errorf("unexecuted %v serializes a timing: %s", p["status"], raw)
 			}
 		}

@@ -114,11 +114,11 @@ func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 	if out.Panels[1].Status != "invalid" || !strings.Contains(out.Panels[1].Problems[0].Message+out.Panels[1].Problems[0].Hint, "duration_ms") {
 		t.Fatalf("typo preview = %+v", out.Panels[1])
 	}
-	if out.Panels[0].Status != "not_run" {
-		t.Fatalf("a valid panel is not run while another is invalid: %+v", out.Panels[0])
+	if out.Panels[0].Status != "ok" {
+		t.Fatalf("valid panel did not run alongside invalid sibling: %+v", out.Panels[0])
 	}
-	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS != nil || out.Panels[1].ElapsedMS != nil {
-		t.Fatalf("invalid/not_run timing = %+v", out)
+	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS == nil || out.Panels[1].ElapsedMS != nil {
+		t.Fatalf("valid/invalid timing = %+v", out)
 	}
 	result, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}}})
 	if err != nil || out.Panels[0].Status != "ok" || out.Panels[0].Diagnosis == "" || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "requests counted nothing: No spans") {

@@ -387,8 +387,8 @@ func TestLogRowPanelsCapNewestRows(t *testing.T) {
 		t.Fatalf("cap: %+v", got)
 	}
 	d.Panels[0].Query.Where = []string{"body IN (SELECT body FROM logs)"}
-	if _, err := e.Run(t.Context(), RunRequest{Dashboard: d}); err == nil {
-		t.Fatal("row guard bypass")
+	if got, err := e.Run(t.Context(), RunRequest{Dashboard: d}); err != nil || len(got) != 1 || got[0].Status != StatusInvalid || len(got[0].Problems) == 0 {
+		t.Fatalf("row guard bypass: %+v %v", got, err)
 	}
 }
 
