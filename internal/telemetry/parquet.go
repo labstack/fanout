@@ -506,6 +506,9 @@ func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID strin
 // bounded by Limit. Deriving them here removes a second pass over every batch
 // file -- the thing that made trace_detail pay for its own correctness.
 type TraceTotals struct {
+	// Root prefers a parentless span, then start time and span ID, across all
+	// matching indexed ranges, independently of the detail page limit.
+	Root         *IndexedSpan
 	Spans        int
 	Services     int
 	DurationMS   float64
@@ -645,7 +648,14 @@ func readIndexedTrace(ctx context.Context, batch *storedBatch, match traceRange,
 			if end := row.StartUnixNano + int64(row.DurationMS*float64(time.Millisecond)); end > totals.MaxEndNano {
 				totals.MaxEndNano = end
 			}
-			selected.Add(row.span(), query.Limit)
+			span := row.span()
+			if totals.Root == nil {
+				totals.Root = new(IndexedSpan)
+			}
+			if totals.Spans == 1 || indexedRootEarlier(span, *totals.Root) {
+				*totals.Root = span
+			}
+			selected.Add(span, query.Limit)
 		}
 		remaining -= uint64(n)
 	}
@@ -678,6 +688,19 @@ func (h *indexedSpanHeap) Add(span IndexedSpan, limit int) {
 		(*h)[0] = span
 		heap.Fix(h, 0)
 	}
+}
+
+func indexedRootEarlier(left, right IndexedSpan) bool {
+	if (left.ParentSpanID == "") != (right.ParentSpanID == "") {
+		return left.ParentSpanID == ""
+	}
+	if left.StartUnixNanos != right.StartUnixNanos {
+		return left.StartUnixNanos < right.StartUnixNanos
+	}
+	if left.SpanID != right.SpanID {
+		return left.SpanID < right.SpanID
+	}
+	return left.Namespace < right.Namespace
 }
 
 func indexedSpanEarlier(left, right IndexedSpan) bool {

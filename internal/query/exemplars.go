@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 type SelectionBucket struct {
@@ -214,6 +215,17 @@ func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.
 		return out, err
 	}
 
+	indexedScope, indexed, empty, err := e.exemplarTraceScope(ctx, p, checked.Filters[p.ID], Scope{Start: lo, End: hi, Vars: vars}, req.Dimensions, req.Bucket)
+	if err != nil {
+		return out, err
+	}
+	if indexed {
+		if empty {
+			return out, nil
+		}
+		return e.indexedExemplars(ctx, indexedScope, start, end)
+	}
+
 	if p.Query.From == "logs" && p.Options != nil && p.Options.Highlight != "" {
 		where += " AND contains(lower(body),lower(?))"
 		args = append(args, p.Options.Highlight)
@@ -332,4 +344,93 @@ func exemplarError(ctx context.Context, err error) error {
 }
 func outsideSelection() error {
 	return Problems{{Path: "from", Message: "selection does not overlap the panel window"}}
+}
+
+// Only exact namespace/service equalities can use trace candidates. Every
+// remaining selection keeps its generic span/log predicates.
+func (e *Executor) exemplarTraceScope(ctx context.Context, p *Panel, filters []Filter, scope Scope, dimensions map[string]string, bucket *SelectionBucket) (queryrows.Window, bool, bool, error) {
+	w := queryrows.Window{Start: scope.Start, End: scope.End, Kind: queryrows.TraceCandidateRead}
+	if p.Query.From != "spans" || bucket != nil {
+		return w, false, false, nil
+	}
+	values := map[string]string{}
+	empty := false
+	add := func(field, value string) {
+		if prior, ok := values[field]; ok && prior != value {
+			empty = true
+		}
+		values[field] = value
+	}
+	for field, value := range dimensions {
+		if (field != "namespace" && field != "service") || value == "" {
+			return w, false, false, nil
+		}
+		add(field, value)
+	}
+	for _, f := range filters {
+		if scope.dropped(f) {
+			continue
+		}
+		field, value, err := rollupFilterValue(ctx, e.engine, f, scope)
+		if err != nil {
+			if isOperational(err) {
+				return w, false, false, err
+			}
+			return w, false, false, nil
+		}
+		add(field, value)
+	}
+	w.Namespace, w.Service = values["namespace"], values["service"]
+	return w, w.Service != "", empty, nil
+}
+
+func (e *Executor) indexedExemplars(ctx context.Context, w queryrows.Window, panelStart, panelEnd time.Time) (ExemplarResponse, error) {
+	out := ExemplarResponse{Traces: []Exemplar{}}
+	rows, err := e.engine.QueryContext(queryrows.WithWindow(ctx, w), queryrows.CompletedTraceQuery, w.Start, w.End, w.Namespace, w.Namespace, w.Service, w.Service, 21)
+	if err != nil {
+		return out, exemplarError(ctx, err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return out, exemplarError(ctx, err)
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return out, exemplarError(ctx, err)
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	out.Truncated = len(ids) > 20
+	if out.Truncated {
+		ids = ids[:20]
+	}
+	reader, ok := e.engine.(interface {
+		Trace(context.Context, telemetry.TraceQuery) ([]telemetry.IndexedSpan, telemetry.TraceTotals, error)
+	})
+	if !ok {
+		return out, fmt.Errorf("indexed trace reader unavailable")
+	}
+	for _, id := range ids {
+		_, totals, err := reader.Trace(ctx, telemetry.TraceQuery{TraceID: id, Namespace: w.Namespace, StartNanos: panelStart.UnixNano(), EndNanos: panelEnd.UnixNano(), Limit: 1})
+		if err != nil {
+			return out, exemplarError(ctx, err)
+		}
+		if totals.Root == nil {
+			continue
+		}
+		root := totals.Root
+		status := root.StatusCode
+		if totals.HasError {
+			status = "STATUS_CODE_ERROR"
+		}
+		out.Traces = append(out.Traces, Exemplar{TraceID: id, Namespace: root.Namespace, Service: root.ServiceName, Operation: root.Name, DurationMS: root.DurationMS, Status: status, Start: time.Unix(0, root.StartUnixNanos).UTC()})
+	}
+	return out, nil
 }

@@ -22,6 +22,12 @@ func (e exemplarProbeEngine) QueryContext(ctx context.Context, text string, args
 	return e.query(ctx, text, args...)
 }
 
+func (e exemplarProbeEngine) Trace(ctx context.Context, q telemetry.TraceQuery) ([]telemetry.IndexedSpan, telemetry.TraceTotals, error) {
+	return e.Engine.(interface {
+		Trace(context.Context, telemetry.TraceQuery) ([]telemetry.IndexedSpan, telemetry.TraceTotals, error)
+	}).Trace(ctx, q)
+}
+
 func exemplarDashboard(from string) Dashboard {
 	return Dashboard{Name: "Selection", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "P", Viz: "bar", Query: &Spec{From: from, Measures: []string{"count()"}, By: []string{"service"}}}}}
 }
@@ -378,7 +384,7 @@ func TestExemplarSampleKeepsRootOrderingAndTraceErrors(t *testing.T) {
 	req.From, req.To = fixtureStart.Add(time.Minute), fixtureStart.Add(2*time.Minute)
 	req.Dimensions = map[string]string{"service": "selected"}
 	got, err := e.Exemplars(t.Context(), req)
-	if err != nil || len(got.Traces) != 1 || !got.Truncated {
+	if err != nil || len(got.Traces) != 1 || got.Truncated {
 		t.Fatalf("sample: %+v %v", got, err)
 	}
 	root := got.Traces[0]
