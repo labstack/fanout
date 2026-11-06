@@ -2,6 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, within } from "@testing-library/dom";
 import { EditorView } from "@codemirror/view";
+import { forEachDiagnostic } from "@codemirror/lint";
 import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -221,6 +222,43 @@ describe("ExplorePage", () => {
     await click("Run");
     await wait(() => expect(ui.getByRole("alert").textContent).toBe("unknown field servce (did you mean service?)"));
     expect(bodies("/api/queries/run")).toHaveLength(0);
+  });
+
+  it.each(["query", "sql"] as const)("shows %s editor diagnostics when run returns an invalid panel", async kind => {
+    const source = kind === "sql" ? "SELECT http_route FROM spans WHERE $__window(start_time)" : "spans where http_route:'/cart' | count()";
+    const problem = { path: kind === "sql" ? "panels[0].sql" : "panels[0].query.where[0]", message: "unknown field http_route", hint: "Use attributes['http.route']" };
+    runQuery = async () => json({ results: [{ id: "explore", status: "invalid", problems: [problem], elapsed_ms: 0 }] });
+    const { ui, type, click, wait } = await render({ tab: kind });
+    await type(source);
+    await click("Run");
+    const editor = ui.getByRole("textbox", { name: kind === "sql" ? "Explore SQL" : "FanQL query" });
+    await wait(() => expect(editor.getAttribute("aria-invalid")).toBe("true"));
+    expect(ui.getByRole("alert").textContent).toContain(problem.message);
+    const marks: { from: number; to: number; message: string }[] = [];
+    forEachDiagnostic(EditorView.findFromDOM(editor)!.state, (diagnostic, from, to) => {
+      if (diagnostic.severity === "error") marks.push({ from, to, message: diagnostic.message });
+    });
+    expect(marks).toEqual([{ from: 0, to: source.length, message: `${problem.message} (${problem.hint})` }]);
+    expect(document.querySelector("[data-panel-error]")).toBeNull();
+    expect(document.querySelector("[data-explore-empty]")).not.toBeNull();
+    const save = ui.getByRole("button", { name: "Save to dashboard" });
+    expect(save.getAttribute("aria-disabled")).toBe("true");
+    expect(document.getElementById(save.getAttribute("aria-describedby")!)?.textContent).toBe("The last run failed; saving needs a run that works");
+  });
+
+  it.each(["query", "sql"] as const)("drops invalid %s run diagnostics if the source was edited", async kind => {
+    let answer: (response: Response) => void = () => {};
+    runQuery = () => new Promise(resolve => { answer = resolve; });
+    const { ui, type, click, wait } = await render({ tab: kind });
+    await type(kind === "sql" ? "SELECT http_route FROM spans" : "spans where http_route:a | count()");
+    await click("Run");
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    await type(kind === "sql" ? "SELECT service FROM spans" : "spans where service:a | count()");
+    await act(async () => answer(json({ results: [{ id: "explore", status: "invalid", problems: [{ path: kind === "sql" ? "panels[0].sql" : "panels[0].query.where[0]", message: "unknown field http_route" }], elapsed_ms: 0 }] })));
+    await wait(() => expect(ui.getByRole("button", { name: "Run" }).getAttribute("data-loading")).toBeNull());
+    expect(ui.getByRole("textbox", { name: kind === "sql" ? "Explore SQL" : "FanQL query" }).getAttribute("aria-invalid")).toBe("false");
+    expect(ui.queryByRole("alert")).toBeNull();
+    expect(document.querySelector("[data-panel-error]")).toBeNull();
   });
 
   it("applies a problem's fix-it to the query text", async () => {

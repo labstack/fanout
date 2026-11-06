@@ -184,6 +184,12 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       if (abort.signal.aborted) return;
       const result = results.find(r => r.id === explorePanelID);
       if (!result) throw new Error("The query returned no result.");
+      if (result.status === "invalid") {
+        setRefused({ kind, source, window: windowKey });
+        // Diagnostics belong to the submitted text, just like a refused request.
+        if (current.current[kind === "query" ? "text" : "sql"] === source) setProblems(result.problems ?? []);
+        return;
+      }
       setRun({ kind, source, window: windowKey, panel, result: classifyPanelResult(result, [explorePanelID]), canonical });
       // A SQL error that a retry cannot fix is a problem with the statement, shown at the editor.
       if (kind === "sql" && result.status === "error" && !result.retryable && current.current.sql === source) setProblems([{ path: "sql", message: result.error ?? "Query failed" }]);

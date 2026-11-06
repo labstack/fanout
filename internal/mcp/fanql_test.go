@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -251,5 +252,36 @@ func TestFragmentRawJSONIsNotAnInteger(t *testing.T) {
 	}
 	if reflect.DeepEqual(schema.Properties["payload"].Type, "integer") {
 		t.Fatalf("arbitrary JSON restricted to integer: %s", raw)
+	}
+}
+
+func TestQueryTelemetryKeepsInvalidPanelProblems(t *testing.T) {
+	s := newPanelServer(t)
+	client := connectTestClient(t, s, nil)
+	for _, panel := range []query.Panel{
+		{ID: "stale", Title: "Stale", Viz: "table", SQL: "SELECT http_route FROM spans WHERE $__window(start_time)"},
+		{ID: "stale", Title: "Stale", Viz: "table", Query: &query.Spec{From: "spans", Measures: []string{"count()"}, By: []string{"http_route"}}},
+	} {
+		result, out, err := s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Panel: panel})
+		var problems query.Problems
+		if !errors.As(err, &problems) || len(problems) == 0 || !strings.Contains(problems[0].Message, "http_route") || result != nil || out.PanelFragment != nil {
+			t.Fatalf("invalid query: %+v %+v %v", result, out, err)
+		}
+		want := "panels[0].query.by[0]"
+		if panel.SQL != "" {
+			want = "panels[0].sql"
+		}
+		if problems[0].Path != want {
+			t.Fatalf("problem path: %+v", problems)
+		}
+		wire, err := client.CallTool(t.Context(), &mcp.CallToolParams{Name: "query_telemetry", Arguments: map[string]any{"panel": panel}})
+		if err != nil || wire == nil || !wire.IsError {
+			t.Fatalf("tool failure: %+v %v", wire, err)
+		}
+		text := wire.Content[0].(*mcp.TextContent).Text
+		if !strings.Contains(text, want) || !strings.Contains(text, "http_route") {
+			t.Fatalf("tool diagnostics: %s", text)
+		}
+
 	}
 }

@@ -39,3 +39,8 @@ it("reports a span that is no longer stored", async () => {
   panels.mockResolvedValue([{ id: "span", status: "ok", elapsed_ms: 1, frame: { columns: [], values: [[], [], [], [], [], []], rows: 0 } }]);
   await expect(spanExtras("t", span)).rejects.toThrow("This span is no longer stored.");
 });
+
+it("reports invalid span detail queries as errors", async () => {
+  panels.mockResolvedValue([{ id: "span", status: "invalid", elapsed_ms: 0, error: "unknown field", problems: [{ path: "panels[0].sql", message: "unknown field" }] }]);
+  await expect(spanExtras("t", span)).rejects.toThrow("unknown field");
+});

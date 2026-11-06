@@ -55,6 +55,18 @@ describe("SearchPage", () => {
     expect(bodies("/api/queries/run")[0].dashboard.panels[0]).toMatchObject({ viz: "logs", query: { from: "logs", sort: "time" } });
   });
 
+  it("shows invalid panel problems at the search editor without a failed result", async () => {
+    const fetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/queries/run"
+      ? json({ results: [{ id: "search", status: "invalid", elapsed_ms: 0, problems: [{ path: "panels[0].query.where[0]", message: "unknown field http_route" }] }] })
+      : fetch(input, init));
+    const { ui, wait } = await render(logsPreset, { q: "http_route:a" });
+    await wait(() => expect(ui.getByRole("alert").textContent).toBe("unknown field http_route"));
+    const editor = ui.getByRole("textbox", { name: "Search logs" });
+    expect(editor.getAttribute("aria-invalid")).toBe("true");
+    expect(document.querySelector("[data-panel-error]")).toBeNull();
+  });
+
   it("parses typed filters against the page's source", async () => {
     const { ui, wait } = await render(tracesPreset);
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));

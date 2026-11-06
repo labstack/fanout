@@ -135,9 +135,12 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
         receipt.panel_count = saved.receipt.save_check.panels.length;
         stages.draft = {state:"complete"};
         const retained = new Set(saved.receipt.save_check.panels.map(p => p.id));
-        for(const p of saved.receipt.save_check.panels) if(executed(p)) {
-          clearProblems(p.id,[]);
-          previewFailures.delete(p.id);
+        for(const p of saved.receipt.save_check.panels) {
+          if(p.status === "invalid") clearProblems(p.id,namedProblems((p as unknown as Record<string, unknown>).problems,p.id));
+          else if(executed(p)) {
+            clearProblems(p.id,[]);
+            previewFailures.delete(p.id);
+          }
         }
         corrections = corrections.filter(p => retained.has(p.panel_id));
         receipt.problems = [...outstanding.values()].flat().filter(p=>retained.has(p.panel_id));

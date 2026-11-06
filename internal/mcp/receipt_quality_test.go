@@ -154,3 +154,21 @@ func TestNoOpDashboardEditCreatesADocumentedVersionWithoutChips(t *testing.T) {
 		t.Fatal("no-op saves are not documented")
 	}
 }
+
+func TestSaveReceiptRetainsInvalidPanelDiagnostics(t *testing.T) {
+	problems := query.Problems{{Path: "panels[0].sql", Message: "unknown field http_route"}}
+	s := newToolServer(t, structural{}, receiptExecutor{run: func(context.Context, query.RunRequest) ([]query.Result, error) {
+		return []query.Result{{ID: "notes", Status: query.StatusInvalid, Problems: problems, Error: problems.Error()}}, nil
+	}})
+	_, out, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: textDashboard("Invalid check")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := out.Receipt.SaveCheck
+	if check.Checked || check.Panels[0].Status != query.StatusInvalid || len(check.Panels[0].Problems) != 1 || check.Panels[0].Problems[0].Path != problems[0].Path || check.Panels[0].ElapsedMS != nil || !strings.Contains(check.Panels[0].Error, "http_route") {
+		t.Fatalf("save check: %+v", check)
+	}
+	if len(out.Warnings) != 1 || !strings.Contains(out.Warnings[0], "http_route") {
+		t.Fatalf("warnings: %+v", out.Warnings)
+	}
+}

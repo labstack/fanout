@@ -23,7 +23,7 @@ async function logExtras(row: Record<string, Cell>, signal?: AbortSignal): Promi
   const sql = `SELECT attributes, resource, coalesce(span_id, ''), coalesce(scope_name, '') FROM logs WHERE $__window(time) AND coalesce(service, '') = ${sqlText(String(row.service ?? ""))}`
     + ` AND coalesce(namespace, '') = ${sqlText(String(row.namespace ?? ""))} AND coalesce(trace_id, '') = ${sqlText(String(row.trace_id ?? ""))} AND ${bodyMatch} LIMIT 1`;
   const [result] = await queryPanels({ dashboard: { version: 1, name: "Log", time, panels: [{ id: "log", title: "Log", viz: "table", sql }] }, panels: ["log"], time }, signal);
-  if (result?.status === "error") throw new Error(result.error ?? "The log details could not load.");
+  if (result?.status === "error" || result?.status === "invalid") throw new Error(result.error ?? "The log details could not load.");
   const values = result?.frame?.values;
   if (!values || !result.frame?.rows) throw new Error("This log is no longer stored.");
   return { attributes: object(values[0][0]), resource: object(values[1][0]), span_id: String(values[2][0] ?? ""), scope: String(values[3][0] ?? "") };
