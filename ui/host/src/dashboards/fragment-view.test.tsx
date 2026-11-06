@@ -55,7 +55,7 @@ it.each(["health", "service_map", "logs", "traces", "log_patterns"] as const)("d
 });
 it("decodes query_telemetry and errors/empty/truncated frames", () => {
   const raw = fixture(); raw.dashboard.panels[0] = { id: "p", title: "Count", viz: "stat", query: { from: "spans", measures: ["count()"] } };
-  for (const status of ["ok", "empty", "error"] as const) expect(panelFragment({ ...raw, results: [{ ...raw.results[0], status, error: "safe error", frame: { columns: [], values: [], rows: 0, truncated: true, note: "Limited rows" } }] })).toBeDefined();
+  for (const status of ["ok", "empty", "error", "invalid"] as const) expect(panelFragment({ ...raw, results: [{ ...raw.results[0], status, error: "safe error", frame: { columns: [], values: [], rows: 0, truncated: true, note: "Limited rows" } }] })).toBeDefined();
 });
 it.each([{ ...fixture(), trace: {} }, { ...fixture(), trace: { data: { spans: null, logs: [], services: [] } } }, null, { data: {} }, { ...fixture(), results: [] }, { ...fixture(), results: [fixture().results[0], fixture().results[0]] }, { ...fixture(), results: [{ ...fixture().results[0], id: "other" }] }, { ...fixture(), vars: { service: [1] } }, { ...fixture(), vars: [] }, { ...fixture(), vars: null }])("rejects missing/duplicate/subset/old payloads and invalid vars (%j)", raw => {
   expect(() => panelFragment(raw)).toThrow();

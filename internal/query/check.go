@@ -116,6 +116,13 @@ func checkWith(ctx context.Context, parser Parser, d *Dashboard, memo *checkMemo
 	if len(problems) > 0 {
 		return nil, problems, nil
 	}
+	return checkValidated(ctx, parser, d, memo)
+}
+
+// checkValidated runs database checks after structural validation. Run may pass
+// no panels after isolating invalid ones, but must still check variables.
+func checkValidated(ctx context.Context, parser Parser, d *Dashboard, memo *checkMemo) (*Checked, Problems, error) {
+	var problems Problems
 	checked := &Checked{AnnotationFilters: map[string][]AnnotationFilter{}, Filters: map[string][]Filter{}, VarFilters: map[string][]Filter{}, Measures: map[string][]Measure{}}
 	earlier := map[string]Variable{}
 	varsKey := memoKey(d.Variables, nil)

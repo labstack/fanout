@@ -3,8 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -342,5 +348,156 @@ func TestNoCacheSkipsStoredResults(t *testing.T) {
 	s.e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !traces.bypass {
 		t.Fatalf("trace: %d bypass=%v", rec.Code, traces.bypass)
+	}
+}
+
+func TestPanelQueryIsolatesInvalidPanels(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2}
+	repo, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := query.NewExecutor(duck, 30)
+	t.Cleanup(func() { executor.Close(); _ = duck.Close(); _ = repo.Close() })
+	s := newTestAuthServer(t)
+	viewer, err := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	RegisterQueryRoutes(s.e, executor)
+	spec := query.Dashboard{Name: "Stale", Panels: []query.Panel{
+		{ID: "stale", Title: "Stale", Viz: "bar", Query: &query.Spec{From: "spans", Measures: []string{"count()"}, By: []string{"http_route"}}},
+		{ID: "valid", Title: "Valid", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}},
+	}}
+	for _, global := range []bool{false, true} {
+		if global {
+			spec.Variables = []query.Variable{{Name: "route", Kind: "query", From: "spans", Field: "http_route"}}
+		}
+		raw, err := json.Marshal(query.RunRequest{Dashboard: spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, accept := range []string{"application/json", streamType} {
+			req := sessionRequest(http.MethodPost, "/api/queries/run", strings.NewReader(string(raw)), s.login(t, viewer))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Accept", accept)
+			rec := httptest.NewRecorder()
+			s.e.ServeHTTP(rec, req)
+			if global {
+				if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "variables[0].field") {
+					t.Fatalf("global: %d %s", rec.Code, rec.Body)
+				}
+				continue
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%d %s", rec.Code, rec.Body)
+			}
+			var results []query.Result
+			if accept == streamType {
+				decoder := json.NewDecoder(rec.Body)
+				for decoder.More() {
+					var result query.Result
+					if err := decoder.Decode(&result); err != nil {
+						t.Fatal(err)
+					}
+					results = append(results, result)
+				}
+			} else {
+				var body struct {
+					Results []query.Result `json:"results"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				results = body.Results
+				if len(results) != 2 || results[0].ID != "stale" {
+					t.Fatalf("order: %+v", results)
+				}
+			}
+			got := map[string]query.Result{}
+			for _, r := range results {
+				got[r.ID] = r
+			}
+			bad := got["stale"]
+			if len(results) != 2 || bad.Status != query.StatusInvalid || len(bad.Problems) == 0 || !strings.Contains(bad.Problems[0].Message, "http_route") || got["valid"].Status != query.StatusOK {
+				t.Fatalf("results: %+v", results)
+			}
+		}
+	}
+	spec.Variables = nil
+	service := dashboard.New(s.db.DB, executor)
+	_, err = service.Create(t.Context(), viewer.ID, spec, dashboard.Author{Kind: "user", ID: viewer.ID})
+	var problems query.Problems
+	if !errors.As(err, &problems) || !strings.Contains(err.Error(), "http_route") {
+		t.Fatalf("save = %v", err)
+	}
+}
+
+func TestAuxiliaryQueryRoutesIgnoreInvalidSiblings(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2}
+	repo, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := query.NewExecutor(duck, 30)
+	t.Cleanup(func() { executor.Close(); _ = duck.Close(); _ = repo.Close() })
+	from := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	to := from.Add(time.Hour)
+	at := from.Add(time.Minute).UnixNano()
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "auxiliary", Spans: []telemetry.Span{{ServiceName: "checkout", TraceID: "trace", SpanID: "root", Name: "GET /", StartUnixNanos: at, EndUnixNanos: at + 1000000, DurationMS: 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	spec := query.Dashboard{Name: "Stale sibling", Time: query.Time{From: &from, To: &to}, Variables: []query.Variable{{Name: "service", Kind: "query", From: "spans", Field: "service", Default: "checkout"}}, Panels: []query.Panel{
+		{ID: "healthy", Title: "Healthy", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}, Where: []string{"service = $service"}}},
+		{ID: "stale", Title: "Stale", Viz: "bar", Query: &query.Spec{From: "spans", Measures: []string{"count()"}, By: []string{"http_route"}}},
+	}}
+	post := func(path string, input any) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, err := json.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return servePanels(t, executor, http.MethodPost, path, string(raw))
+	}
+	rec := post("/api/queries/variables/resolve", query.ResolveRequest{Dashboard: spec})
+	var options struct {
+		Options map[string][]query.Option `json:"options"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &options) != nil || len(options.Options["service"]) != 1 || options.Options["service"][0].Value != "checkout" {
+		t.Fatalf("variables: %d %s", rec.Code, rec.Body)
+	}
+	req := query.ExemplarRequest{Dashboard: spec, PanelID: "healthy", From: from, To: to}
+	rec = post("/api/queries/exemplars", req)
+	var exemplars query.ExemplarResponse
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &exemplars) != nil || len(exemplars.Traces) != 1 {
+		t.Fatalf("healthy exemplars: %d %s", rec.Code, rec.Body)
+	}
+	req.PanelID = "stale"
+	rec = post("/api/queries/exemplars", req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "panels[1].query.by[0]") {
+		t.Fatalf("invalid selected panel: %d %s", rec.Code, rec.Body)
+	}
+	spec.Variables[0].Where = []string{"http_route = '/cart'"}
+	spec.Panels[1] = query.Panel{ID: "stale", Title: "Stale", Viz: "unknown"}
+	for _, path := range []string{"/api/queries/variables/resolve", "/api/queries/exemplars", "/api/queries/run"} {
+		var input any = query.RunRequest{Dashboard: spec}
+		if path == "/api/queries/variables/resolve" {
+			input = query.ResolveRequest{Dashboard: spec}
+		}
+		if path == "/api/queries/exemplars" {
+			input = query.ExemplarRequest{Dashboard: spec, PanelID: "healthy", From: from, To: to}
+		}
+		rec = post(path, input)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "variables[0].where[0]") || !strings.Contains(rec.Body.String(), "panels[1].viz") {
+			t.Fatalf("global failure %s: %d %s", path, rec.Code, rec.Body)
+		}
 	}
 }

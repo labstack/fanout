@@ -75,7 +75,8 @@ export type PanelResult = {
   annotation_scope?: AnnotationMatch;
   annotation_error?: string;
   id: string;
-  status: "ok" | "empty" | "error";
+  status: "ok" | "empty" | "error" | "invalid";
+  problems?: { path: string; message: string; hint?: string }[];
   frame?: Frame;
   previous?: Frame;
   error?: string;

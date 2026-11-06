@@ -22,7 +22,7 @@ export async function spanExtras(traceId: string, span: TraceSpan, signal?: Abor
   // Event offsets are computed in SQL: nanosecond instants exceed a double's exact range.
   const sql = `SELECT attributes, resource, [epoch_ns(t) - start_unix_nano for t in event_times] AS event_offsets, event_names, event_attributes, scope_name FROM spans WHERE $__window(start_time) AND trace_id = ${sqlText(traceId)} AND span_id = ${sqlText(span.span_id)} LIMIT 1`;
   const [result] = await queryPanels({ dashboard: { version: 1, name: "Span", time, panels: [{ id: "span", title: "Span", viz: "table", sql }] }, panels: ["span"], time }, signal);
-  if (result?.status === "error") throw new Error(result.error ?? "The span details could not load.");
+  if (result?.status === "error" || result?.status === "invalid") throw new Error(result.error ?? "The span details could not load.");
   const values = result?.frame?.values;
   if (!values || !result.frame?.rows) throw new Error("This span is no longer stored.");
   const offsets = list(values[2][0]), names = list(values[3][0]), attributes = list(values[4][0]);

@@ -70,12 +70,13 @@ type dashboardOutput struct {
 }
 
 type savedPanelCheck struct {
-	ID        string `json:"id"`
-	Status    string `json:"status"`
-	Rows      int    `json:"rows" jsonschema:"Executed rows or nonempty text content; not a measurement when status is not_run"`
-	Diagnosis string `json:"diagnosis,omitempty"`
-	Error     string `json:"error,omitempty"`
-	ElapsedMS *int64 `json:"elapsed_ms,omitempty" jsonschema:"Execution duration in milliseconds; omitted when the panel did not run"`
+	Problems  query.Problems `json:"problems,omitempty"`
+	ID        string         `json:"id"`
+	Status    string         `json:"status"`
+	Rows      int            `json:"rows" jsonschema:"Executed rows or nonempty text content; not a measurement when status is not_run"`
+	Diagnosis string         `json:"diagnosis,omitempty"`
+	Error     string         `json:"error,omitempty"`
+	ElapsedMS *int64         `json:"elapsed_ms,omitempty" jsonschema:"Execution duration in milliseconds; omitted when the panel did not run"`
 }
 
 type saveCheck struct {
@@ -379,6 +380,11 @@ func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Muta
 					continue
 				}
 				r := matches[0]
+				if r.Status == query.StatusInvalid {
+					check.Panels[i] = savedPanelCheck{ID: r.ID, Status: r.Status, Problems: query.PresentProblems(r.Problems), Error: query.PresentMessage(r.Error)}
+					out.Warnings = append(out.Warnings, fmt.Sprintf("%s is invalid: %s", r.ID, check.Panels[i].Error))
+					continue
+				}
 				if r.Status != query.StatusOK && r.Status != query.StatusEmpty && r.Status != query.StatusError {
 					complete = false
 					continue

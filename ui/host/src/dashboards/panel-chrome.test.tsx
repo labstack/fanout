@@ -290,7 +290,7 @@ it("closes the tooltip after a mouse Retry and programmatic focus restoration", 
   await vi.waitFor(() => expect(within(document.body).queryByRole("tooltip")).toBeNull(), {timeout: 3000, interval: 5});
 });
 
-it("gives the compact error message at least half a 200px card with an icon Fix", async () => {
+it.each(["error", "invalid"] as const)("gives the compact %s message at least half a 200px card with an icon Fix", async (status) => {
   const observers: {callback: ResizeObserverCallback; elements: Element[]}[] = [];
   vi.stubGlobal("ResizeObserver", class {
     record: {callback: ResizeObserverCallback; elements: Element[]};
@@ -300,7 +300,7 @@ it("gives the compact error message at least half a 200px card with an icon Fix"
   try {
     const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
     const fix = vi.fn();
-    await act(async () => root.render(<MantineProvider env="test"><PanelCard panel={{...p, viz:"stat"}} title={p.title} result={{id: p.id, status: "error", elapsed_ms: 0, error: "Invalid query"}} loading={false} height={200} group="g" editing={false} agentAvailable onFix={fix}/></MantineProvider>));
+    await act(async () => root.render(<MantineProvider env="test"><PanelCard panel={{...p, viz:"stat"}} title={p.title} result={{id: p.id, status, elapsed_ms: 0, error: "Invalid query"}} loading={false} height={200} group="g" editing={false} agentAvailable onFix={fix}/></MantineProvider>));
     const body = host.querySelector<HTMLElement>('[data-panel-body]')!;
     await act(async () => {
       for (const observer of observers) for (const target of observer.elements) observer.callback([{target, contentRect: {width: 200, height: 112}} as unknown as ResizeObserverEntry], {} as ResizeObserver);

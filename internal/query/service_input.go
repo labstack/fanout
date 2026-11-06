@@ -149,7 +149,7 @@ func (e *Executor) EmptyGuidance(ctx context.Context, req RunRequest) (string, s
 	defer cancel()
 	d := req.Dashboard
 	Normalize(&d)
-	checked, err := e.check(ctx, &d)
+	checked, _, invalid, err := e.checkRun(ctx, &d)
 	if err != nil {
 		return "", "", err
 	}
@@ -168,7 +168,10 @@ func (e *Executor) EmptyGuidance(ctx context.Context, req RunRequest) (string, s
 	scope := Scope{Start: start, End: end, Vars: vars}
 	seen := map[[2]string]bool{}
 	var notes []string
-	for _, p := range d.Panels {
+	for i, p := range d.Panels {
+		if len(invalid[&d.Panels[i]]) > 0 {
+			continue
+		}
 		var namespace, service string
 		unsafeScope := false
 		for _, f := range checked.Filters[p.ID] {

@@ -1,7 +1,6 @@
 package query
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -56,10 +55,9 @@ func TestMetricNameRuleUsesCheckedEqualities(t *testing.T) {
 				}
 			}
 			if tc.label == "all_option" {
-				_, err := e.Run(t.Context(), RunRequest{Dashboard: d, Vars: map[string]Value{"metric": {All: true}}})
-				var p Problems
-				if !errors.As(err, &p) {
-					t.Fatalf("All accepted: %v", err)
+				got, err := e.Run(t.Context(), RunRequest{Dashboard: d, Vars: map[string]Value{"metric": {All: true}}})
+				if err != nil || len(got) != 1 || got[0].Status != StatusInvalid || len(got[0].Problems) == 0 {
+					t.Fatalf("All accepted: %+v %v", got, err)
 				}
 			}
 		})

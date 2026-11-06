@@ -3,7 +3,6 @@ package query
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -214,10 +213,9 @@ func TestSQLLogRedactionKeepsBoundary(t *testing.T) {
 	} {
 		d := exemplarDashboard("logs")
 		d.Panels[0] = Panel{ID: "p", Title: "SQL", Viz: "table", SQL: sql}
-		_, err := e.Run(t.Context(), RunRequest{Dashboard: d})
-		var problems Problems
-		if !errors.As(err, &problems) {
-			t.Fatalf("unsafe SQL accepted: %s %v", sql, err)
+		got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+		if err != nil || len(got) != 1 || got[0].Status != StatusInvalid || len(got[0].Problems) == 0 {
+			t.Fatalf("unsafe SQL accepted: %s %+v %v", sql, got, err)
 		}
 	}
 }
@@ -299,8 +297,8 @@ func TestQualifiedLogColumnsReturnOnlyRedactedValues(t *testing.T) {
 		t.Run(text, func(t *testing.T) {
 			d := Dashboard{Name: "Qualified logs", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "Qualified", Viz: "table", SQL: text}}}
 			got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
-			var problems Problems
-			if !errors.As(err, &problems) || strings.Contains(err.Error(), "token=private") {
+			wire, _ := json.Marshal(got)
+			if err != nil || len(got) != 1 || got[0].Status != StatusInvalid || len(got[0].Problems) == 0 || strings.Contains(string(wire), "token=private") {
 				t.Fatalf("invalid qualified reference accepted or secret leaked: %+v %v", got, err)
 			}
 		})

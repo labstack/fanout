@@ -172,3 +172,14 @@ it.each(['create_dashboard','restore_dashboard_version'])('reads %s errors only 
 it("omits a save receipt for structural answer-only refusals",()=>{
  expect(receiptForTurn([user(),call("refused","create_dashboard"),result("refused",{error:{code:"answer_only",message:"Read-only"},isError:true},"Read-only")],"u")).toBeNull();
 });
+
+it('retains diagnostics from an invalid committed save check',()=>{
+ const issue={path:'panels[0].sql',message:'unknown field http_route'};
+ const messages=[user(),call('save','edit_dashboard'),result('save',{...saved,receipt:{...saved.receipt,save_check:{checked:true,elapsed_ms:1,panels:[{id:'latency',status:'invalid',rows:0,error:issue.message,problems:[issue]}]}}})];
+ const receipt=receiptForTurn(messages,'u')!;
+ expect(receipt.saved?.version).toBe(2);
+ expect(receipt.problems).toEqual([{panel_id:'latency',...issue}]);
+ expect(receipt.corrections).toEqual([]);
+ expect(receipt.explanations).toContain('Latency: invalid — unknown field http_route');
+ expect(receipt.explanations.join(' ')).not.toContain('Save check incomplete');
+});

@@ -132,6 +132,10 @@ func (s *Server) previewPanels(ctx context.Context, _ *mcp.CallToolRequest, inpu
 	}
 	for i, r := range results {
 		preview := PanelPreview{ElapsedMS: &r.ElapsedMS, ID: r.ID, Status: r.Status, Interval: r.Interval, Diagnosis: query.PresentDiagnosis(r.Diagnosis), Error: query.PresentMessage(r.Error)}
+		preview.Problems = query.PresentProblems(r.Problems)
+		if r.Status == query.StatusInvalid {
+			preview.ElapsedMS = nil
+		}
 		if r.Frame != nil {
 			preview.Rows = r.Frame.Rows
 			for _, c := range r.Frame.Columns {

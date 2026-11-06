@@ -206,7 +206,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           </Tooltip>}
           <span id={busyReasonId} hidden>{result.error}</span>
         </Box>
-        : result?.status === "error" ? <Box data-panel-error style={{height:"100%", maxHeight:"100%", minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:compactError ? "row" : "column", alignItems:"center", justifyContent:"center", gap:compactError ? 6 : 4}}>
+        : (result?.status === "error" || result?.status === "invalid") ? <Box data-panel-error style={{height:"100%", maxHeight:"100%", minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:compactError ? "row" : "column", alignItems:"center", justifyContent:"center", gap:compactError ? 6 : 4}}>
           <WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" style={{flexShrink:0}} />
           {!compactError && <Text size="sm" fw={500} c="bad" style={{flexShrink:0}}>This panel failed</Text>}
           <Text data-panel-error-message title={result.error} size="xs" c="dimmed" ta={compactError ? "left" : "center"} style={{minWidth:0, minHeight:0, overflow:"hidden", ...(compactError ? {flex:"1 1 0px", whiteSpace:"nowrap", textOverflow:"ellipsis"} : {overflowWrap:"anywhere", flex:"0 1 auto"})}}>{compactError ? `This panel failed: ${result.error ?? "Request failed"}` : result.error}</Text>

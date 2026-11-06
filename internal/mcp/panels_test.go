@@ -114,11 +114,11 @@ func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 	if out.Panels[1].Status != "invalid" || !strings.Contains(out.Panels[1].Problems[0].Message+out.Panels[1].Problems[0].Hint, "duration_ms") {
 		t.Fatalf("typo preview = %+v", out.Panels[1])
 	}
-	if out.Panels[0].Status != "not_run" {
-		t.Fatalf("a valid panel is not run while another is invalid: %+v", out.Panels[0])
+	if out.Panels[0].Status != "ok" {
+		t.Fatalf("valid panel did not run alongside invalid sibling: %+v", out.Panels[0])
 	}
-	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS != nil || out.Panels[1].ElapsedMS != nil {
-		t.Fatalf("invalid/not_run timing = %+v", out)
+	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS == nil || out.Panels[1].ElapsedMS != nil {
+		t.Fatalf("valid/invalid timing = %+v", out)
 	}
 	result, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}}})
 	if err != nil || out.Panels[0].Status != "ok" || out.Panels[0].Diagnosis == "" || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "requests counted nothing: No spans") {
@@ -228,5 +228,13 @@ func TestTelemetrySchemaReportsBusy(t *testing.T) {
 	var failure toolerror.Result
 	if err == nil || json.Unmarshal([]byte(err.Error()), &failure) != nil || failure.Error == nil || failure.Error.Code != "schema_busy" || !strings.Contains(failure.Error.Message, "Try again") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPreviewRetainsPanelProblemsWhenVariablesFailLater(t *testing.T) {
+	s := newPanelServer(t)
+	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Variables: []query.Variable{{Name: "service", Kind: "query", From: "spans", Field: "service", Where: []string{"http_route = '/cart'"}}}, Panels: []query.Panel{{ID: "broken", Title: "Broken", Viz: "unknown"}}})
+	if err != nil || len(out.Panels) != 1 || out.Panels[0].Status != "invalid" || len(out.Panels[0].Problems) != 1 || out.Panels[0].Problems[0].Path != "panels[0].viz" || len(out.Problems) != 1 || out.Problems[0].Path != "variables[0].where[0]" {
+		t.Fatalf("preview: %+v %v", out, err)
 	}
 }

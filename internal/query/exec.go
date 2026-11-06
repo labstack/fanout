@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,6 +35,7 @@ const (
 	StatusOK            = "ok"
 	StatusEmpty         = "empty"
 	StatusError         = "error"
+	StatusInvalid       = "invalid"
 )
 
 type RunRequest struct {
@@ -45,6 +48,7 @@ type RunRequest struct {
 }
 
 type Result struct {
+	Problems        Problems         `json:"problems,omitempty"`
 	Ranking         *Ranking         `json:"ranking,omitempty"`
 	AnnotationScope *AnnotationMatch `json:"annotation_scope,omitempty"`
 	AnnotationError string           `json:"annotation_error,omitempty"`
@@ -200,9 +204,71 @@ func (e *Executor) checkKeyed(ctx context.Context, d *Dashboard) (*Checked, cach
 	return checked, key, nil
 }
 
-// Run validates the dashboard and runs the requested panels concurrently. An
-// invalid spec returns its Problems; a panel that fails to run reports the
-// failure in its own result, so one broken panel cannot blank a dashboard.
+// checkRun isolates panel diagnostics without weakening save validation. Each
+// reduced spec is checked under its own hash; execution keeps the full spec hash.
+func (e *Executor) checkRun(ctx context.Context, d *Dashboard) (*Checked, cacheKey, map[*Panel]Problems, error) {
+	checked, spec, err := e.checkKeyed(ctx, d)
+	invalid := map[*Panel]Problems{}
+	var collected Problems
+	reduced := *d
+	indices := make([]int, len(d.Panels))
+	for i := range indices {
+		indices[i] = i
+	}
+	for err != nil {
+		var problems Problems
+		if !errors.As(err, &problems) {
+			return nil, spec, nil, err
+		}
+		mapped := slices.Clone(problems)
+		scoped := true
+		owners := make([]*Panel, len(problems))
+		for i, problem := range problems {
+			rest, ok := strings.CutPrefix(problem.Path, "panels[")
+			number, suffix, closed := strings.Cut(rest, "]")
+			index, parseErr := strconv.Atoi(number)
+			if !ok || !closed || parseErr != nil || index < 0 || index >= len(indices) || (suffix != "" && !strings.HasPrefix(suffix, ".")) {
+				scoped = false
+				continue
+			}
+			original := indices[index]
+			owners[i] = &d.Panels[original]
+			mapped[i].Path = fmt.Sprintf("panels[%d]%s", original, suffix)
+		}
+		if !scoped {
+			return nil, spec, nil, append(mapped, collected...)
+		}
+		collected = append(collected, mapped...)
+		for i, problem := range mapped {
+			panel := owners[i]
+			invalid[panel] = append(invalid[panel], problem)
+		}
+		reduced.Panels = nil
+		remaining := make([]int, 0, len(indices))
+		for _, original := range indices {
+			if len(invalid[&d.Panels[original]]) == 0 {
+				reduced.Panels = append(reduced.Panels, d.Panels[original])
+				remaining = append(remaining, original)
+			}
+		}
+		indices = remaining
+		if len(indices) == 0 {
+			// The full spec already passed all non-panel structural checks.
+			var more Problems
+			checked, more, err = checkValidated(ctx, e.engine, &reduced, &e.memo)
+			if err == nil && len(more) > 0 {
+				err = more
+			}
+		} else {
+			checked, _, err = e.checkKeyed(ctx, &reduced)
+		}
+	}
+	return checked, spec, invalid, nil
+}
+
+// Run validates the dashboard and runs the requested panels concurrently.
+// Dashboard-level faults return Problems; invalid or failed panels report their
+// failures in their own results, so one broken panel cannot blank a dashboard.
 // Results are in panel order and share one response budget.
 func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 	var results []Result
@@ -282,7 +348,7 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 		}
 		return err
 	}
-	checked, spec, err := e.checkKeyed(ctx, &d)
+	checked, spec, invalid, err := e.checkRun(ctx, &d)
 	if err != nil {
 		return batchError(err)
 	}
@@ -310,16 +376,34 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 	if req.Compare != nil {
 		compare = *req.Compare
 	}
+	invalidResult := func(p *Panel) Result {
+		problems := PresentProblems(invalid[p])
+		// Cards show repair guidance; structured diagnostics retain their paths.
+		display := slices.Clone(problems)
+		for i := range display {
+			display[i].Path = ""
+		}
+		return Result{ID: p.ID, Status: StatusInvalid, Problems: problems, Error: display.Error()}
+	}
+	validCount := 0
+	for _, p := range targets {
+		if len(invalid[p]) == 0 {
+			validCount++
+		}
+	}
+	if validCount == 0 {
+		for i, p := range targets {
+			emit(i, invalidResult(p))
+		}
+		return caller.Err()
+	}
 	// Decide once before scheduling this batch's panels. A sibling waiting for
 	// the same limited panel slots is normal dashboard fanout, not evidence
 	// of pre-existing pressure. Keep this policy even if the queue drains
 	// before an admitted panel finishes; diagnosis uses its existing slot.
 	deferDiagnosis := e.admission.waiting() > 0
 	var group errgroup.Group
-	batch := newPanelBatchAdmission(e.admission, min(e.parallel, 2, len(targets)))
-	if len(targets) == 0 {
-		return nil
-	}
+	batch := newPanelBatchAdmission(e.admission, min(e.parallel, 2, validCount))
 	if err := batch.admit(ctx); err != nil {
 		batch.close()
 		if errors.Is(err, errQueueFull) {
@@ -327,7 +411,7 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 			// answers together so an eviction cannot create a partial refusal.
 			var lookups []panelCacheLookup
 			for _, p := range targets {
-				if p.Viz == "text" {
+				if p.Viz == "text" || len(invalid[p]) > 0 {
 					continue
 				}
 				key, keyErr := keyOf(panelCacheKey{Spec: spec, Panel: p.ID, Time: t, Vars: vars, Width: req.Widths[p.ID], Compare: compare})
@@ -344,6 +428,10 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 				for i, p := range targets {
 					if err := caller.Err(); err != nil {
 						return err
+					}
+					if len(invalid[p]) > 0 {
+						emit(i, invalidResult(p))
+						continue
 					}
 					if p.Viz == "text" {
 						emit(i, e.runPanel(caller, p, checked, t, now, vars, req.Widths[p.ID], compare))
@@ -374,6 +462,10 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 		// Register every selected panel's flight promptly. Execution is bounded
 		// by the lease, while other refreshes can coalesce the complete batch.
 		for i, p := range targets {
+			if len(invalid[p]) > 0 {
+				send(i, invalidResult(p))
+				continue
+			}
 			group.Go(func() error {
 				width := req.Widths[p.ID]
 				if p.Viz == "text" {

@@ -2,7 +2,6 @@ package query
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -76,10 +75,10 @@ func TestSQLTimestampComparisonsReturnRepairHintOrExactResults(t *testing.T) {
 			d := Dashboard{Name: "Time literals", Panels: []Panel{{ID: "p", Title: "Calls", Viz: "table", SQL: "SELECT count(*) AS n FROM spans WHERE $__window(start_time) AND " + tc.predicate}}}
 			results, err := executor.Run(t.Context(), RunRequest{Dashboard: d})
 			if tc.invalid {
-				var problems Problems
-				if !errors.As(err, &problems) || len(problems) != 1 {
-					t.Fatalf("expected one SQL problem, got %v", err)
+				if err != nil || len(results) != 1 || results[0].Status != StatusInvalid || len(results[0].Problems) != 1 {
+					t.Fatalf("expected one SQL problem, got %+v %v", results, err)
 				}
+				problems := results[0].Problems
 				// Each publication boundary may present the same problem again.
 				for range 3 {
 					problems = PresentProblems(problems)

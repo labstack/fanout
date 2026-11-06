@@ -201,6 +201,15 @@ func (s *Server) queryTelemetry(ctx context.Context, _ *mcp.CallToolRequest, inp
 	}
 	d := query.Dashboard{Name: input.Panel.Title, Variables: input.Variables, Panels: []query.Panel{input.Panel}}
 	result, out, err := s.runFragment(ctx, query.RunRequest{Dashboard: d, Time: input.Time, Vars: input.Vars})
+	// This tool authors one panel: preserve its validation-failure contract
+	// rather than publishing an invalid query as a successful view.
+	if err == nil {
+		for _, r := range out.Results {
+			if r.Status == query.StatusInvalid {
+				return nil, QueryTelemetryOutput{}, safePanelToolError(r.Problems)
+			}
+		}
+	}
 	response := QueryTelemetryOutput{PanelFragment: &out}
 	if err == nil && input.Text != "" {
 		response.Notices = notices

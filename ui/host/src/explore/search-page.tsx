@@ -138,6 +138,10 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
       if (abort.signal.aborted) return;
       const result = results.find(r => r.id === panelID);
       if (!result) throw new Error("The search returned no result.");
+      if (result.status === "invalid") {
+        if (current.current === filters) setProblems(result.problems ?? []);
+        return;
+      }
       setRan({ text: filters, terms: picked, sort: order, window: windowKey, panel, result: classifyPanelResult(searchCopy(result), [panelID]) });
     } catch (failure) {
       if (abort.signal.aborted) return;
