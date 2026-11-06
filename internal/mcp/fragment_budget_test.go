@@ -10,15 +10,15 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func nonuniformFragment(values []any) PanelFragment {
-	return PanelFragment{Dashboard: fragmentPreset("logs", "", "", "", "", 100), Results: []panel.Result{
-		{ID: "volume", Status: "ok", Frame: &panel.Frame{Columns: []panel.Column{{Name: "count", Type: "number", Role: "measure"}}, Values: [][]any{{1, 2, 3}}, Rows: 3}},
-		{ID: "events", Status: "ok", Frame: &panel.Frame{Columns: []panel.Column{{Name: "body", Type: "string", Role: "dimension"}}, Values: [][]any{values}, Rows: len(values)}},
+	return PanelFragment{Dashboard: fragmentPreset("logs", "", "", "", "", 100), Results: []query.Result{
+		{ID: "volume", Status: "ok", Frame: &query.Frame{Columns: []query.Column{{Name: "count", Type: "number", Role: "measure"}}, Values: [][]any{{1, 2, 3}}, Rows: 3}},
+		{ID: "events", Status: "ok", Frame: &query.Frame{Columns: []query.Column{{Name: "body", Type: "string", Role: "dimension"}}, Values: [][]any{values}, Rows: len(values)}},
 	}}
 }
 func TestHeadHeavyRowsKeepSmallPanelAndMaximalPrefix(t *testing.T) {
@@ -109,7 +109,7 @@ func TestLargeTraceKeepsRootErrorsAndSlowest(t *testing.T) {
 func TestNullArgumentsRawJSONRPC(t *testing.T) {
 	s := panelServerFixture(t, true)
 	h := s.HTTPHandler()
-	for _, name := range []string{"get_telemetry_schema", "list_dashboards", "get_observability_overview"} {
+	for _, name := range []string{"get_telemetry_schema", "list_dashboards", "get_overview"} {
 		t.Run(name, func(t *testing.T) {
 			request := httptest.NewRequest("POST", "/api/mcp", strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"_meta":{"io.fanout/owner-id":"owner","io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},"arguments":null}}`, name)))
 			request.Header.Set("Content-Type", "application/json")

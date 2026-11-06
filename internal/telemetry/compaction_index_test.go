@@ -51,44 +51,7 @@ func TestCompactionStreamingIndexMatchesReread(t *testing.T) {
 		t.Fatalf("merge stats=%+v", stats)
 	}
 	// This is the old narrow reread, retained only as an independent oracle.
-	file, err := os.Open(output)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	reader := parquet.NewGenericReader[traceParquetRow](file)
-	defer reader.Close()
-	wantPath := filepath.Join(t.TempDir(), "trace.fidx")
-	index, err := newTraceIndexWriter(wantPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer index.Abort()
-	buffer := make([]traceParquetRow, 8192)
-	for {
-		n, err := reader.Read(buffer)
-		for _, row := range buffer[:n] {
-			if err := index.Append(row.TraceHash); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n == 0 {
-			t.Fatal(io.ErrNoProgress)
-		}
-	}
-	if err := index.Close(); err != nil {
-		t.Fatal(err)
-	}
-	want, err := os.ReadFile(wantPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	want := rereadTraceIndex(t, output)
 	got, err := os.ReadFile(filepath.Join(dir, "trace.fidx"))
 	if err != nil {
 		t.Fatal(err)
@@ -151,4 +114,73 @@ func TestCancelledSpanMergeRemovesOutputAndIndex(t *testing.T) {
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("artifacts=%v error=%v", entries, err)
 	}
+}
+
+// Ingest writes the trace index alongside the span file; it must hold the
+// file's trace hashes in file order.
+func TestCommitTraceIndexMatchesReread(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spans := make([]Span, 20001)
+	for i := range spans {
+		spans[i] = Span{Namespace: "prod", TraceID: fmt.Sprint("trace-", i%997), SpanID: fmt.Sprint("span-", i), StartUnixNanos: int64(i%13) - 6, IngestedAt: 1}
+	}
+	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "index"}, spans, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := rereadTraceIndex(t, filepath.Join(store.BatchPath("index"), "spans.parquet"))
+	got, err := os.ReadFile(filepath.Join(store.BatchPath("index"), "trace.fidx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("committed trace.fidx differs from reread")
+	}
+}
+
+// rereadTraceIndex builds a span file's trace index from its _trace_hash
+// column.
+func rereadTraceIndex(t *testing.T, path string) []byte {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	reader := parquet.NewGenericReader[traceParquetRow](file)
+	defer reader.Close()
+	wantPath := filepath.Join(t.TempDir(), "trace.fidx")
+	index, err := newTraceIndexWriter(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer index.Abort()
+	buffer := make([]traceParquetRow, 8192)
+	for {
+		n, err := reader.Read(buffer)
+		for _, row := range buffer[:n] {
+			if err := index.Append(row.TraceHash); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			t.Fatal(io.ErrNoProgress)
+		}
+	}
+	if err := index.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return want
 }

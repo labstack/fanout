@@ -31,7 +31,7 @@ export function startMock(failure?:Failure,intents?:EvaluationConfig['prompts'])
     if(path.startsWith('/api/agent/threads/'))return Response.json({id:path.split('/').at(-1)!,messages:threads.get(path.split('/').at(-1)!)??[],updated_at:'2026-10-01 13:00:00'});
     if(path.startsWith('/api/agent/runs/')&&req.method==='GET'){stats.status_reads++;return Response.json({status:statuses.get(path.split('/').at(-1)!)??'unknown'});}
     if(path.endsWith('/versions')) {stats.version_reads++;const id=path.split('/').at(-2)!;return Response.json({versions:Array.from({length:boards.get(id)?.version??0},(_,i)=>({version:i+1,author_kind:'agent'}))});}
-    if(path==='/api/panels/query') {
+    if(path==='/api/queries/run') {
       stats.queries++;const {dashboard}=await req.json();
       if(failure==='invalid')return Response.json({code:'invalid_dashboard',message:'Synthetic validation',problems:[{path:'panels'}]},{status:400});
       if(failure==='unchecked')return Response.json({},{status:503});

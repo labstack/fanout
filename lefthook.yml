@@ -12,6 +12,10 @@
 pre-commit:
   parallel: false
   jobs:
+    # Secrets, private AI session links and local paths, by .gitleaks.toml.
+    - name: leaks
+      run: gitleaks git --pre-commit --staged --redact --no-banner
+
     - name: merge-conflict
       glob: "*"
       # Minified single-file bundles legitimately contain long runs of `=`, so
@@ -38,6 +42,11 @@ pre-commit:
     - name: ui-host-lint
       glob: "{ui/host/**/*.{ts,tsx},ui/panels/**/*.{ts,tsx},ui/*.ts}"
       run: cd ui/host && bun run lint
+
+commit-msg:
+  jobs:
+    - name: leaks
+      run: gitleaks stdin --redact --no-banner < {1}
 
 pre-push:
   jobs:

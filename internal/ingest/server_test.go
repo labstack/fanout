@@ -3,10 +3,14 @@ package ingest
 import (
 	"context"
 	"errors"
+	"math"
+	"reflect"
 	"testing"
 
+	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	common "go.opentelemetry.io/proto/otlp/common/v1"
+	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
@@ -14,33 +18,6 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/telemetry"
 )
-
-func TestToJSON(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  interface{}
-		nilOut bool
-	}{
-		{"nil input", nil, true},
-		{"empty slice", []string{}, false},
-		{"string slice", []string{"a", "b"}, false},
-		{"map", map[string]int{"a": 1}, false},
-		{"unmarshalable chan", make(chan int), false},
-		{"unmarshalable func", func() {}, false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := toJSON(tc.input)
-			if tc.nilOut && result != "" {
-				t.Errorf("toJSON(%v) = %v, want nil", tc.input, result)
-			}
-			if !tc.nilOut && result == "" {
-				t.Errorf("toJSON(%v) = nil, want non-nil", tc.input)
-			}
-		})
-	}
-}
 
 func TestBodyString(t *testing.T) {
 	tests := []struct {
@@ -141,22 +118,25 @@ func TestAsString(t *testing.T) {
 }
 
 func TestNumber(t *testing.T) {
+	flag := uint32(metricspb.DataPointFlags_DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK)
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    *metricspb.NumberDataPoint
 		expected float64
+		invalid  bool
 	}{
-		{"double value", &metricspb.NumberDataPoint_AsDouble{AsDouble: 3.14}, 3.14},
-		{"int value", &metricspb.NumberDataPoint_AsInt{AsInt: 42}, 42.0},
-		{"nil value", nil, 0},
-		{"unknown type", "string", 0},
+		{"double value", &metricspb.NumberDataPoint{Value: &metricspb.NumberDataPoint_AsDouble{AsDouble: 3.14}}, 3.14, false},
+		{"int value", &metricspb.NumberDataPoint{Value: &metricspb.NumberDataPoint_AsInt{AsInt: 42}}, 42.0, false},
+		{"no value", &metricspb.NumberDataPoint{}, 0, true},
+		{"no recorded value", &metricspb.NumberDataPoint{Flags: flag}, 0, false},
+		{"no recorded value ignores value", &metricspb.NumberDataPoint{Flags: flag, Value: &metricspb.NumberDataPoint_AsInt{AsInt: 42}}, 0, false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := number(tc.input)
-			if result != tc.expected {
-				t.Errorf("number() = %f, want %f", result, tc.expected)
+			result, err := number(tc.input)
+			if (err != nil) != tc.invalid || result != tc.expected {
+				t.Errorf("number() = %f, %v; want %f, invalid=%v", result, err, tc.expected, tc.invalid)
 			}
 		})
 	}
@@ -179,79 +159,6 @@ func TestHexOrEmpty(t *testing.T) {
 			result := hexOrEmpty(tc.input)
 			if result != tc.expected {
 				t.Errorf("hexOrEmpty() = %q, want %q", result, tc.expected)
-			}
-		})
-	}
-}
-
-func TestEventsToJSON(t *testing.T) {
-	tests := []struct {
-		name   string
-		events []*tracepb.Span_Event
-		nilOut bool
-	}{
-		{"nil events", nil, true},
-		{"empty events", []*tracepb.Span_Event{}, true},
-		{"with events", []*tracepb.Span_Event{
-			{TimeUnixNano: 123, Name: "event1"},
-		}, false},
-		{"with attributes", []*tracepb.Span_Event{
-			{
-				TimeUnixNano: 123,
-				Name:         "event1",
-				Attributes: []*common.KeyValue{
-					{Key: "key1", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "value1"}}},
-				},
-			},
-		}, false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := eventsToJSON(tc.events)
-			if tc.nilOut && result != "" {
-				t.Errorf("eventsToJSON() = %v, want nil", result)
-			}
-			if !tc.nilOut && result == "" {
-				t.Error("eventsToJSON() = nil, want non-nil")
-			}
-		})
-	}
-}
-
-func TestLinksToJSON(t *testing.T) {
-	tests := []struct {
-		name   string
-		links  []*tracepb.Span_Link
-		nilOut bool
-	}{
-		{"nil links", nil, true},
-		{"empty links", []*tracepb.Span_Link{}, true},
-		{"with links", []*tracepb.Span_Link{
-			{TraceId: []byte{0x01, 0x02}, SpanId: []byte{0x03, 0x04}},
-		}, false},
-		{"with trace state", []*tracepb.Span_Link{
-			{TraceId: []byte{0x01}, SpanId: []byte{0x02}, TraceState: "vendor=value"},
-		}, false},
-		{"with attributes", []*tracepb.Span_Link{
-			{
-				TraceId: []byte{0x01, 0x02},
-				SpanId:  []byte{0x03, 0x04},
-				Attributes: []*common.KeyValue{
-					{Key: "link.key", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "link.value"}}},
-				},
-			},
-		}, false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := linksToJSON(tc.links)
-			if tc.nilOut && result != "" {
-				t.Errorf("linksToJSON() = %v, want nil", result)
-			}
-			if !tc.nilOut && result == "" {
-				t.Error("linksToJSON() = nil, want non-nil")
 			}
 		})
 	}
@@ -280,86 +187,6 @@ func TestScopeInfo(t *testing.T) {
 				t.Errorf("scopeInfo() version = %q, want %q", ver, tc.expectedVer)
 			}
 		})
-	}
-}
-
-func TestExemplarsToJSON(t *testing.T) {
-	tests := []struct {
-		name      string
-		exemplars []*metricspb.Exemplar
-		nilOut    bool
-	}{
-		{"nil exemplars", nil, true},
-		{"empty exemplars", []*metricspb.Exemplar{}, true},
-		{"with double exemplar", []*metricspb.Exemplar{
-			{TimeUnixNano: 123, Value: &metricspb.Exemplar_AsDouble{AsDouble: 1.5}},
-		}, false},
-		{"with int exemplar", []*metricspb.Exemplar{
-			{TimeUnixNano: 123, Value: &metricspb.Exemplar_AsInt{AsInt: 42}},
-		}, false},
-		{"with trace context", []*metricspb.Exemplar{
-			{
-				TimeUnixNano: 123,
-				TraceId:      []byte{0x01, 0x02},
-				SpanId:       []byte{0x03, 0x04},
-				Value:        &metricspb.Exemplar_AsDouble{AsDouble: 1.0},
-			},
-		}, false},
-		{"with attributes", []*metricspb.Exemplar{
-			{
-				TimeUnixNano: 123,
-				Value:        &metricspb.Exemplar_AsDouble{AsDouble: 1.0},
-				FilteredAttributes: []*common.KeyValue{
-					{Key: "exemplar.key", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "exemplar.value"}}},
-				},
-			},
-		}, false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := exemplarsToJSON(tc.exemplars)
-			if tc.nilOut && result != "" {
-				t.Errorf("exemplarsToJSON() = %v, want nil", result)
-			}
-			if !tc.nilOut && result == "" {
-				t.Error("exemplarsToJSON() = nil, want non-nil")
-			}
-		})
-	}
-}
-
-func TestSummaryQuantiles(t *testing.T) {
-	dp := &metricspb.SummaryDataPoint{
-		QuantileValues: []*metricspb.SummaryDataPoint_ValueAtQuantile{
-			{Quantile: 0.5, Value: 100.0},
-			{Quantile: 0.99, Value: 500.0},
-		},
-	}
-
-	result := summaryQuantiles(dp)
-	if len(result) != 2 {
-		t.Errorf("summaryQuantiles() len = %d, want 2", len(result))
-	}
-	if result[0] != 0.5 {
-		t.Errorf("summaryQuantiles()[0] = %f, want 0.5", result[0])
-	}
-}
-
-func TestSummaryValues(t *testing.T) {
-	dp := &metricspb.SummaryDataPoint{
-		QuantileValues: []*metricspb.SummaryDataPoint_ValueAtQuantile{
-			{Quantile: 0.5, Value: 100.0},
-			{Quantile: 0.99, Value: 500.0},
-		},
-	}
-
-	result := summaryValues(dp)
-	if len(result) != 2 {
-		t.Errorf("summaryValues() len = %d, want 2", len(result))
-	}
-	if result[0] != 100.0 {
-		t.Errorf("summaryValues()[0] = %f, want 100.0", result[0])
 	}
 }
 
@@ -392,34 +219,6 @@ func TestSpanAttr(t *testing.T) {
 			got := spanAttr(input, tt.keys...)
 			if got != tt.want {
 				t.Errorf("spanAttr() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSpanAttrInt(t *testing.T) {
-	attrs := []*common.KeyValue{
-		{Key: "http.status_code", Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: 200}}},
-		{Key: "http.response.status_code", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "404"}}},
-	}
-
-	tests := []struct {
-		name string
-		keys []string
-		want string
-	}{
-		{"int value extracted", []string{"http.status_code"}, "200"},
-		{"string value extracted", []string{"http.response.status_code"}, "404"},
-		{"priority order", []string{"http.response.status_code", "http.status_code"}, "404"},
-		{"fallback to second key", []string{"missing", "http.response.status_code"}, "404"},
-		{"no match", []string{"missing"}, ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := spanAttrInt(attrs, tt.keys...)
-			if got != tt.want {
-				t.Errorf("spanAttrInt() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -515,10 +314,36 @@ func TestNormalizeSeverityCanonicalizesEmitterSpellings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeSeverity(tt.text, tt.number); got != tt.want {
+			if got := telemetry.NormalizeSeverity(tt.text, tt.number); got != tt.want {
 				t.Errorf("normalizeSeverity(%q, %d) = %q, want %q", tt.text, tt.number, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestExportedLogsCarryNormalizedBands(t *testing.T) {
+	spans := make(chan telemetry.Span, 1)
+	logs := make(chan telemetry.Log, 6)
+	metrics := make(chan telemetry.Metric, 1)
+	srv := NewServer(config.Config{}, newTestSubmitter(spans, logs, metrics))
+	pairs := []struct {
+		text   string
+		number int32
+		want   string
+	}{{"ERROR", 9, "INFO"}, {"FATAL", 0, "FATAL"}, {"WARN2", 14, "WARN"}, {"info", 0, "INFO"}, {"custom", 0, "CUSTOM"}, {"", 0, "UNSPECIFIED"}}
+	var records []*logspb.LogRecord
+	for _, p := range pairs {
+		records = append(records, &logspb.LogRecord{SeverityText: p.text, SeverityNumber: logspb.SeverityNumber(p.number), TimeUnixNano: 1})
+	}
+	_, err := srv.exportLogs(context.Background(), &collectorlogs.ExportLogsServiceRequest{ResourceLogs: []*logspb.ResourceLogs{{ScopeLogs: []*logspb.ScopeLogs{{LogRecords: records}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pairs {
+		got := <-logs
+		if got.Severity != p.want || got.Severity != telemetry.NormalizeSeverity(p.text, p.number) {
+			t.Errorf("stored severity = %q, want %q", got.Severity, p.want)
+		}
 	}
 }
 
@@ -557,5 +382,66 @@ func TestTraceExportAcceptsSpanWithoutStatus(t *testing.T) {
 		}
 	default:
 		t.Fatal("span was dropped")
+	}
+}
+
+// Event, link and exemplar attributes keep their OTLP types, and integer
+// exemplar values become doubles like point values.
+func TestEventsLinksAndExemplarsKeepTypedAttributes(t *testing.T) {
+	integer := func(k string, v int64) *common.KeyValue {
+		return &common.KeyValue{Key: k, Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: v}}}
+	}
+	events, err := spanEvents([]*tracepb.Span_Event{{TimeUnixNano: 5, Name: "retry", Attributes: []*common.KeyValue{integer("attempt", 2)}}, {Name: "bare"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(events, []telemetry.Event{{TimeUnixNanos: 5, Name: "retry", Attributes: map[string]any{"attempt": int64(2)}}, {Name: "bare"}}) {
+		t.Fatalf("events = %+v", events)
+	}
+	links, err := spanLinks([]*tracepb.Span_Link{{TraceId: []byte{1}, SpanId: []byte{2}, TraceState: "a=b", Attributes: []*common.KeyValue{integer("hops", 3)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(links, []telemetry.Link{{TraceID: "01", SpanID: "02", TraceState: "a=b", Attributes: map[string]any{"hops": int64(3)}}}) {
+		t.Fatalf("links = %+v", links)
+	}
+	exemplars, err := exemplars([]*metricspb.Exemplar{{TimeUnixNano: 7, Value: &metricspb.Exemplar_AsInt{AsInt: 4}, TraceId: []byte{3}, FilteredAttributes: []*common.KeyValue{integer("user", 9)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(exemplars, []telemetry.Exemplar{{TimeUnixNanos: 7, Value: 4, TraceID: "03", Attributes: map[string]any{"user": int64(9)}}}) {
+		t.Fatalf("exemplars = %+v", exemplars)
+	}
+}
+
+// Explicit buckets that no quantile can read reject the export.
+func TestHistogramRejectsMalformedBuckets(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		bounds []float64
+		counts []uint64
+	}{
+		{"missing count", []float64{1, 2}, []uint64{1, 1}},
+		{"extra count", []float64{1}, []uint64{1, 1, 1}},
+		{"counts without bounds or overflow", nil, []uint64{1, 2}},
+		{"unordered", []float64{2, 1}, []uint64{1, 1, 1}},
+		{"repeated", []float64{1, 1}, []uint64{1, 1, 1}},
+		{"infinite", []float64{1, math.Inf(1)}, []uint64{1, 1, 1}},
+		{"not a number", []float64{math.NaN()}, []uint64{1, 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := checkBuckets(tc.bounds, tc.counts); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+	for _, ok := range [][2]int{{0, 0}, {0, 1}, {2, 3}} {
+		bounds, counts := make([]float64, ok[0]), make([]uint64, ok[1])
+		for i := range bounds {
+			bounds[i] = float64(i)
+		}
+		if err := checkBuckets(bounds, counts); err != nil {
+			t.Fatalf("%d bounds, %d counts: %v", ok[0], ok[1], err)
+		}
 	}
 }

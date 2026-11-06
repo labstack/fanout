@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func TestHTTPFailuresCarryStatusCodesAndSafeMessages(t *testing.T) {
@@ -65,7 +65,7 @@ func TestSpecificFailuresPreserveCodesAndSpecProblems(t *testing.T) {
 	e.HTTPErrorHandler = HTTPErrorHandler
 	e.GET("/api/specific", func(*echo.Context) error { return newAPIError(409, "already_current", "Already current.") })
 	e.GET("/api/spec", func(c *echo.Context) error {
-		_, err := writeProblems(c, panel.Problems{{Path: "panels[0].viz", Message: "Unsupported."}})
+		_, err := writeProblems(c, query.Problems{{Path: "panels[0].viz", Message: "Unsupported."}})
 		return err
 	})
 	for _, path := range []string{"/api/specific", "/api/spec"} {

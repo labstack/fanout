@@ -1,5 +1,7 @@
-# Default rules, plus known non-secrets: a fixed test-only auth code secret,
-# a redaction fixture, a cache key name, and content hashes in fixtures.
+# Default secret rules, plus links and paths this public repository must never
+# publish, and known non-secrets: a fixed test-only auth code secret, a
+# redaction fixture, a cache key name, and content hashes in fixtures.
+# Lefthook and the Leaks workflow read this file; add a rule here to extend both.
 [extend]
 useDefault = true
 
@@ -12,9 +14,26 @@ regexes = [
 ]
 
 [[allowlists]]
-description = "content hashes in fixtures and the retired Atlas checksum file"
+description = "content hashes in fixtures"
 paths = [
   '''^ui/host/e2e/data/mcp\.json$''',
   '''^ui/host/tests/go-fragments/[^/]+\.json$''',
-  '''^internal/db/migrations/atlas\.sum$''',
 ]
+
+[[rules]]
+id = "private-ai-session-link"
+description = "Private AI session link or session trailer"
+regex = '''(?i)(claude\.ai/(code|chat|share|project)/|Claude-Session:|chatgpt\.com/(c|share|codex)/)'''
+keywords = ["claude", "chatgpt"]
+
+[[rules]]
+id = "local-workstation-path"
+description = "Local workstation home directory path"
+regex = '''(/Users|/home)/[A-Za-z0-9_.-]+/'''
+keywords = ["/users/", "/home/"]
+
+[[rules]]
+id = "fanout-bearer-secret"
+description = "Fanout opaque bearer secret"
+regex = '''fo[iacr]_[A-Za-z0-9_-]{43}\b'''
+keywords = ["foi_", "foa_", "for_", "foc_"]

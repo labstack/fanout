@@ -2,7 +2,8 @@ import { defaultCssVariablesResolver, DEFAULT_THEME, mergeMantineTheme } from "@
 import axe from "axe-core";
 import { expect, it } from "vitest";
 import { fanoutCssVariables, fanoutThemeConfig } from "../../../theme";
-import { sqlHighlight } from "./theme";
+import { EditorView } from "@codemirror/view";
+import { sqlHighlight, sqlTheme } from "./theme";
 
 it.each(["light", "dark"] as const)("keeps all SQL token colors at 4.5:1 on normal and active lines in %s", scheme => {
   const mantine = defaultCssVariablesResolver(mergeMantineTheme(DEFAULT_THEME, fanoutThemeConfig));
@@ -13,6 +14,11 @@ it.each(["light", "dark"] as const)("keeps all SQL token colors at 4.5:1 on norm
     Color: new () => Color; flattenColors(fg: Color, bg: Color): Color; getContrast(bg: Color, fg: Color): number;
   } }).color;
   const parse = (value: string) => { const result = new color.Color(); result.parseString(resolve(value)); return result; };
+  // The color the theme gives the placeholder, as CodeMirror mounts it.
+  const view = new EditorView({ extensions: [sqlTheme], parent: document.body });
+  const rules = [...document.adoptedStyleSheets ?? [], ...document.styleSheets].flatMap(sheet => [...sheet.cssRules].map(rule => rule.cssText));
+  view.destroy();
+  const placeholder = rules.join("\n").match(/\.cm-placeholder\s*\{[^}]*color:\s*(var\([^)]*\))/)?.[1] ?? "unset";
   const body = parse("var(--mantine-color-body)");
   const active = color.flattenColors(parse("var(--mantine-primary-color-light)"), body);
   for (const background of [body, active]) {
@@ -21,4 +27,6 @@ it.each(["light", "dark"] as const)("keeps all SQL token colors at 4.5:1 on norm
     }
   }
   expect(color.getContrast(parse("var(--mantine-color-default)"), parse("var(--mantine-color-dimmed)"))).toBeGreaterThanOrEqual(4.5);
+  // An empty editor's placeholder can sit on the active line.
+  for (const background of [body, active]) expect(color.getContrast(background, parse(placeholder)), `${scheme}: placeholder`).toBeGreaterThanOrEqual(4.5);
 });

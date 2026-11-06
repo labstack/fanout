@@ -15,7 +15,7 @@ import { FragmentView } from './fragment-view';
 import { fixture } from '../../tests/fixtures';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TableViz } from './viz/table';
-import { Waterfall } from './trace/trace-components';
+import { Waterfall } from './trace/waterfall';
 import { traceFixture } from '../../tests/fixtures';
 
 const chart=vi.hoisted(()=>({setOption:vi.fn(),dispatchAction:vi.fn(),dispose:vi.fn(),on:vi.fn(),resize:vi.fn()}));

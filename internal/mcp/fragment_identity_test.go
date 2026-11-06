@@ -1,12 +1,12 @@
 package mcp
 
 import (
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"testing"
 )
 
 func TestFragmentIdentityIncludesRelativeWindowAndVars(t *testing.T) {
-	f := PanelFragment{Dashboard: panel.Dashboard{Name: "Map", Time: panel.Time{Range: "1h"}, Panels: []panel.Panel{{ID: "a", Title: "A", Viz: "service_map", Query: &panel.Query{From: "spans"}}}}, Results: []panel.Result{{ID: "a", FromMS: 1, ToMS: 2}}}
+	f := PanelFragment{Dashboard: query.Dashboard{Name: "Map", Time: query.Time{Range: "1h"}, Panels: []query.Panel{{ID: "a", Title: "A", Viz: "service_map", Query: &query.Spec{From: "spans"}}}}, Results: []query.Result{{ID: "a", FromMS: 1, ToMS: 2}}}
 	original := fragmentIdentity(f)
 	f.Dashboard.Name = "Another title"
 	f.Dashboard.Panels[0].ID = "b"
@@ -19,14 +19,14 @@ func TestFragmentIdentityIncludesRelativeWindowAndVars(t *testing.T) {
 		t.Fatal("different captured windows deduped")
 	}
 	f.Results[0].FromMS = 1
-	f.Vars = map[string]panel.Value{"service": panel.Value{Values: []string{"checkout"}}}
+	f.Vars = map[string]query.Value{"service": query.Value{Values: []string{"checkout"}}}
 	if original == fragmentIdentity(f) {
 		t.Fatal("different vars deduped")
 	}
 }
 
 func TestMapIdentityIgnoresLimitsOnlyForIdenticalCompleteProjections(t *testing.T) {
-	f := PanelFragment{Dashboard: panel.Dashboard{Time: panel.Time{Range: "1h"}, Panels: []panel.Panel{{ID: "map", Title: "Map", Viz: "service_map", Query: &panel.Query{From: "spans", Limit: 20}}}}, Results: []panel.Result{{ID: "map", FromMS: 1, ToMS: 2, Frame: &panel.Frame{Columns: []panel.Column{{Name: "service", Type: "string", Role: "dimension"}}, Values: [][]any{{"checkout"}}, Rows: 1}}}}
+	f := PanelFragment{Dashboard: query.Dashboard{Time: query.Time{Range: "1h"}, Panels: []query.Panel{{ID: "map", Title: "Map", Viz: "service_map", Query: &query.Spec{From: "spans", Limit: 20}}}}, Results: []query.Result{{ID: "map", FromMS: 1, ToMS: 2, Frame: &query.Frame{Columns: []query.Column{{Name: "service", Type: "string", Role: "dimension"}}, Values: [][]any{{"checkout"}}, Rows: 1}}}}
 	first := fragmentIdentity(f)
 	f.Dashboard.Panels[0].Query.Limit = 400
 	if first != fragmentIdentity(f) {

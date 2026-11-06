@@ -10,14 +10,14 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type structuralValidator struct{}
 
-func (structuralValidator) Validate(_ context.Context, d *panel.Dashboard) error {
-	panel.Normalize(d)
-	if problems := panel.Validate(d); len(problems) > 0 {
+func (structuralValidator) Validate(_ context.Context, d *query.Dashboard) error {
+	query.Normalize(d)
+	if problems := query.Validate(d); len(problems) > 0 {
 		return problems
 	}
 	return nil
@@ -94,8 +94,8 @@ func TestDashboardLifecycleOverHTTP(t *testing.T) {
 	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "version 9 of dashboard "+created.ID+" does not exist") || !strings.Contains(rec.Body.String(), `"code":"dashboard_version_not_found"`) {
 		t.Fatalf("missing version %d %s", rec.Code, rec.Body)
 	}
-	if rec := call(http.MethodDelete, "/api/dashboards/"+created.ID, "", ownerCookie); rec.Code != http.StatusPreconditionRequired {
-		t.Fatalf("unconfirmed delete = %d", rec.Code)
+	if rec := call(http.MethodDelete, "/api/dashboards/"+created.ID, "", ownerCookie); rec.Code != http.StatusPreconditionRequired || !strings.Contains(rec.Body.String(), `"code":"confirmation_required"`) {
+		t.Fatalf("unconfirmed delete = %d %s", rec.Code, rec.Body)
 	}
 	if rec := call(http.MethodDelete, "/api/dashboards/"+created.ID, "", ownerCookie, "Fanout-Confirm-Delete", created.ID); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d", rec.Code)
@@ -104,7 +104,7 @@ func TestDashboardLifecycleOverHTTP(t *testing.T) {
 
 type failingValidator struct{ err error }
 
-func (v failingValidator) Validate(context.Context, *panel.Dashboard) error { return v.err }
+func (v failingValidator) Validate(context.Context, *query.Dashboard) error { return v.err }
 
 func TestDashboardValidationTimeoutIs504(t *testing.T) {
 	s := newTestAuthServer(t)
@@ -139,7 +139,7 @@ func TestDashboardBrowserSummaryKeepsOwnerScopedBuildProvenance(t *testing.T) {
 	}
 	service := dashboard.New(s.db.DB, structuralValidator{})
 	origin := dashboard.BuildOrigin{ThreadID: "source", MessageID: "request", RequestExcerpt: "Private request"}
-	_, err = service.Create(dashboard.WithBuildOrigin(t.Context(), origin), owner.ID, panel.Dashboard{Name: "Origin", Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hi"}}}, dashboard.Author{Kind: "agent", ID: owner.ID})
+	_, err = service.Create(dashboard.WithBuildOrigin(t.Context(), origin), owner.ID, query.Dashboard{Name: "Origin", Panels: []query.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hi"}}}, dashboard.Author{Kind: "agent", ID: owner.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

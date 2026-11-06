@@ -1,0 +1,153 @@
+---
+title: Authentication modes
+description: Why Fanout has two sign-in modes, what each one owns, and where the boundary between them sits.
+summary: Local codes versus an identity provider, who owns roles in each, and what happens on every login.
+read_when:
+  - You are choosing between local sign-in and OIDC.
+  - You expect a provider group change to take effect and want to know when it does.
+status: preview
+---
+
+Fanout supports local sign-in and OIDC, selected by `FANOUT_AUTH_MODE`.
+Both use the same [roles and capabilities](/docs/reference/roles), browser sessions
+and account suspension rules.
+
+## Local
+
+Active users sign in with an emailed code when SMTP is configured. Without
+SMTP, an operator with access to the control database mints a single-use link
+with `fanout login-link <email>`. Administrators manage accounts and roles
+through the HTTP API. There is no user-management browser page. See
+[account profiles and suspension](#account-profiles-and-suspension)
+for account APIs and [local recovery](#recover-local-sign-in) for invitation delivery
+and recovery.
+
+`FANOUT_SELF_SIGNUP` allows verified email addresses to create viewer accounts.
+It defaults to `false` and requires complete SMTP configuration. Self-signup is
+available only after the first administrator completes setup. Viewers can read
+all telemetry, manage their own dashboards and run the built-in agent.
+The built-in agent sends requests to your configured model provider and can
+incur charges. Enabling self-signup grants that access to anyone who can verify
+an email address.
+
+## OIDC
+
+An identity provider handles sign-in. Group and domain allowlists are evaluated
+on every login, including for linked identities. Removing a user's eligibility
+blocks their next login; it does not revoke a browser session already issued.
+Suspending the account in Fanout blocks access and revokes its sessions.
+
+If neither `FANOUT_OIDC_ALLOWED_GROUPS` nor `FANOUT_OIDC_ALLOWED_DOMAINS` is
+configured, no eligibility allow policy is enforced; membership is managed locally.
+
+### Account provisioning
+
+`FANOUT_OIDC_AUTO_PROVISION` creates eligible accounts on first sign-in after
+administrator setup. It requires an allowed group or domain. The role comes
+from the configured group mapping, falling back to `FANOUT_OIDC_DEFAULT_ROLE`
+(`viewer`).
+
+`FANOUT_OIDC_EMAIL_VERIFICATION=required` requires a verified email. The `issuer`
+policy trusts the configured issuer and requires an allowlist. See
+[Microsoft Entra ID group overage](#microsoft-entra-id-group-overage) if group
+claims are omitted.
+
+### Role ownership
+
+If `FANOUT_OIDC_ADMIN_GROUPS` or `FANOUT_OIDC_OPERATOR_GROUPS` is configured, the
+provider reapplies the mapped role on every login. Users outside mapped groups
+receive `FANOUT_OIDC_DEFAULT_ROLE`. A role change revokes browser sessions and
+writes an audit event in the same transaction.
+
+Without a role-group mapping, administrators manage roles inside Fanout and
+OIDC sign-in preserves them. Reconciliation cannot demote the last active
+administrator; promote a second administrator before applying that mapping.
+
+### Microsoft Entra ID group overage
+
+Entra can omit the `groups` claim when an account has too many memberships.
+If the token signals group overage and any group-based policy is configured,
+Fanout denies login. It does not fetch group membership from Graph.
+Configure the application registration to emit only groups assigned to the
+application. Domain-only allow policies are unaffected.
+
+## Account profiles and suspension
+
+Administrators create active accounts with `POST /api/users`, supplying `email`,
+`display_name` and `role`. Edit profiles with `PATCH /api/users/{id}`; change
+roles with `PATCH /api/users/{id}/role` and `{"role":"viewer"}`. Suspend with
+`PATCH /api/users/{id}/status` and `{"status":"suspended"}`; restore with
+`{"status":"active"}`. Unknown fields and invalid statuses return `400`.
+Email, role and status changes revoke browser sessions. Suspension blocks local
+and OIDC sign-in and OAuth token use. Reactivation does not restore revoked
+sessions. The last active administrator cannot be demoted, suspended or deleted.
+
+`GET /api/users` returns a `users` array. `DELETE /api/users/{id}` removes an
+account and cascades to its sessions, OAuth grants and owned dashboards. Use
+suspension when the account and its data should remain.
+
+`POST /api/users/{id}/access/revoke` revokes all browser sessions and OAuth
+tokens for that user. It preserves the account. A user who remains eligible
+can sign in again.
+
+### Call account APIs from a script
+
+These routes accept only a browser session with the admin role. Fanout has no
+API key for user administration. Ingest tokens, metrics tokens and MCP OAuth
+tokens cannot substitute for that session.
+
+Sign in as an administrator. In browser developer tools, find an authenticated
+request and copy its session cookie into a temporary Netscape-format cookie
+jar supported by curl. Keep it private and outside source control. A script
+can use that jar while the session remains valid:
+
+```sh
+curl --fail-with-body --cookie "$COOKIE_JAR" \
+  https://fanout.example.com/api/users
+
+curl --fail-with-body --cookie "$COOKIE_JAR" \
+  -H 'Fanout-Request: 1' -H 'Content-Type: application/json' \
+  -X POST https://fanout.example.com/api/users \
+  --data '{"email":"user@example.com","display_name":"New user","role":"viewer"}'
+```
+
+Replace the origin and set `COOKIE_JAR` to that private jar. Mutating requests
+need `Fanout-Request: 1` or a matching Origin/Referer; cross-site browser requests
+are rejected. Session expiry or revocation requires signing in again. Delete
+the temporary jar when finished and sign out to revoke that session.
+
+## Recover local sign-in
+
+Run with the server's environment and data directory:
+
+```sh
+fanout login-link admin@example.com
+# For Docker:
+docker exec fanout fanout login-link admin@example.com
+```
+
+The URL is printed to stderr, expires in 15 minutes and works once. Issuance
+and redemption are audited. The command supports an online server but refuses
+missing or suspended users, a missing control database and OIDC mode.
+
+Creating a local user without SMTP returns `201`,
+`invite_delivery: "not_configured"` and `login_link_required: true`. Mint a link
+for that active user and deliver it through a trusted channel. If configured
+SMTP fails delivery, the API reports an error. Repair SMTP after regaining access.
+
+If the only administrator is suspended or has an unusable address, stop Fanout
+and back up the control database. Repair that existing account's email or status
+in SQLite, preserving its ID and owned data. Restart and mint a login link for
+the active account. OIDC recovery belongs at the provider or configuration layer.
+
+## Review MCP connections
+
+Open **Connect telemetry → Connected agents** in the account menu to review and disconnect one OAuth client.
+Disconnecting revokes that client's access and refresh tokens for your account.
+Reconnect by authorizing it again. Other clients and browser sessions remain
+connected. See [MCP connections](/docs/guides/mcp#disconnect-an-agent) for API routes.
+
+## Access boundaries
+
+See [namespace access limits](/docs/reference/capabilities#operating-limits).
+Dashboard access is scoped to the owner for every role, including administrators.

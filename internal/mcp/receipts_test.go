@@ -8,16 +8,16 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type receiptExecutor struct {
 	panelExecutor
-	run func(context.Context, panel.RunRequest) ([]panel.Result, error)
+	run func(context.Context, query.RunRequest) ([]query.Result, error)
 }
 
-func (e receiptExecutor) Run(ctx context.Context, req panel.RunRequest) ([]panel.Result, error) {
+func (e receiptExecutor) Run(ctx context.Context, req query.RunRequest) ([]query.Result, error) {
 	return e.run(ctx, req)
 }
 
@@ -25,21 +25,21 @@ func TestSaveCheckFailuresAreStructuredAndDoNotRetrySave(t *testing.T) {
 	longError := "cannot read /private/data/file: " + strings.Repeat("details; ", 100) + "final diagnostic"
 	for _, tc := range []struct {
 		name    string
-		results []panel.Result
+		results []query.Result
 		err     error
 		checked bool
 	}{
 		{name: "missing"},
-		{name: "duplicate", results: []panel.Result{{ID: "notes", Status: "ok"}, {ID: "notes", Status: "ok"}}},
-		{name: "unexpected", results: []panel.Result{{ID: "other", Status: "ok"}}},
-		{name: "not_run", results: []panel.Result{{ID: "notes", Status: "not_run"}}},
+		{name: "duplicate", results: []query.Result{{ID: "notes", Status: "ok"}, {ID: "notes", Status: "ok"}}},
+		{name: "unexpected", results: []query.Result{{ID: "other", Status: "ok"}}},
+		{name: "not_run", results: []query.Result{{ID: "notes", Status: "not_run"}}},
 		{name: "engine", err: errors.New("cannot open /private/data/telemetry.parquet")},
 		{name: "timeout", err: context.DeadlineExceeded},
-		{name: "failing_panel", results: []panel.Result{{ID: "notes", Status: "error", Error: longError, ElapsedMS: 17}}, checked: true},
+		{name: "failing_panel", results: []query.Result{{ID: "notes", Status: "error", Error: longError, ElapsedMS: 17}}, checked: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newToolServer(t, structural{}, nil)
-			s.panels = receiptExecutor{run: func(ctx context.Context, _ panel.RunRequest) ([]panel.Result, error) {
+			s.panels = receiptExecutor{run: func(ctx context.Context, _ query.RunRequest) ([]query.Result, error) {
 				deadline, ok := ctx.Deadline()
 				if !ok || time.Until(deadline) > saveCheckBudget {
 					t.Error("missing eight-second budget")
@@ -63,7 +63,7 @@ func TestSaveCheckFailuresAreStructuredAndDoNotRetrySave(t *testing.T) {
 			if tc.name == "failing_panel" && (check.Panels[0].Status != "error" || *check.Panels[0].ElapsedMS != 17 || len(out.Warnings) != 1) {
 				t.Fatal(out)
 			}
-			if tc.name == "failing_panel" && (check.Panels[0].Error != panel.ReadFailure || strings.Contains(result.Content[0].(*mcp.TextContent).Text, "final diagnostic")) {
+			if tc.name == "failing_panel" && (check.Panels[0].Error != query.ReadFailure || strings.Contains(result.Content[0].(*mcp.TextContent).Text, "final diagnostic")) {
 				t.Fatal("receipt lost the complete sanitized diagnostic")
 			}
 			versions, err := s.dashboards.Versions(t.Context(), "owner", out.Dashboard.ID)
@@ -85,15 +85,15 @@ func TestSaveCheckMatchesEverySavedIDRatherThanResultOrder(t *testing.T) {
 	for _, duplicate := range []bool{false, true} {
 		t.Run(map[bool]string{false: "reordered", true: "duplicate"}[duplicate], func(t *testing.T) {
 			s := newToolServer(t, structural{}, nil)
-			s.panels = receiptExecutor{run: func(context.Context, panel.RunRequest) ([]panel.Result, error) {
+			s.panels = receiptExecutor{run: func(context.Context, query.RunRequest) ([]query.Result, error) {
 				id := "notes"
 				if duplicate {
 					id = "b"
 				}
-				return []panel.Result{{ID: "b", Status: "empty", Diagnosis: "No spans match.", ElapsedMS: 19}, {ID: id, Status: "ok", ElapsedMS: 31}}, nil
+				return []query.Result{{ID: "b", Status: "empty", Diagnosis: "No spans match.", ElapsedMS: 19}, {ID: id, Status: "ok", ElapsedMS: 31}}, nil
 			}}
 			spec := textDashboard("IDs")
-			spec.Panels = append(spec.Panels, panel.Panel{ID: "b", Title: "B", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}})
+			spec.Panels = append(spec.Panels, query.Panel{ID: "b", Title: "B", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}})
 			mutation, err := s.dashboards.CreateWithChanges(t.Context(), "owner", spec, agentAuthor("owner"))
 			if err != nil {
 				t.Fatal(err)
@@ -124,9 +124,9 @@ func TestSaveCheckDoesNotAcceptResultsAfterCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	s.panels = receiptExecutor{run: func(context.Context, panel.RunRequest) ([]panel.Result, error) {
+	s.panels = receiptExecutor{run: func(context.Context, query.RunRequest) ([]query.Result, error) {
 		cancel()
-		return []panel.Result{{ID: "notes", Status: "ok"}}, nil
+		return []query.Result{{ID: "notes", Status: "ok"}}, nil
 	}}
 	_, out, err := s.saved(ctx, "Created", mutation)
 	if err != nil || out.Receipt.SaveCheck.Checked || out.Receipt.SaveCheck.Reason == "" || out.Dashboard.Version != 1 {
@@ -168,7 +168,7 @@ func TestConcurrentSaveReceiptIdentifiesItsOwnCommittedVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
-	s.panels = receiptExecutor{run: func(ctx context.Context, req panel.RunRequest) ([]panel.Result, error) {
+	s.panels = receiptExecutor{run: func(ctx context.Context, req query.RunRequest) ([]query.Result, error) {
 		close(entered)
 		select {
 		case <-release:
@@ -178,7 +178,7 @@ func TestConcurrentSaveReceiptIdentifiesItsOwnCommittedVersion(t *testing.T) {
 		if req.Dashboard.Panels[0].Content != "first" {
 			t.Error("checked a later writer's spec")
 		}
-		return []panel.Result{{ID: "notes", Status: "ok", ElapsedMS: 23}}, nil
+		return []query.Result{{ID: "notes", Status: "ok", ElapsedMS: 23}}, nil
 	}}
 	type answer struct {
 		out dashboardOutput
@@ -205,7 +205,7 @@ func TestConcurrentSaveReceiptIdentifiesItsOwnCommittedVersion(t *testing.T) {
 func TestRemoveReceiptPacksNeighborsWithoutAuthoredChips(t *testing.T) {
 	s := newPanelServer(t)
 	spec := textDashboard("Packing")
-	spec.Panels = append(spec.Panels, panel.Panel{ID: "b", Title: "B", Viz: "text", Content: "b"}, panel.Panel{ID: "c", Title: "C", Viz: "text", Content: "c"})
+	spec.Panels = append(spec.Panels, query.Panel{ID: "b", Title: "B", Viz: "text", Content: "b"}, query.Panel{ID: "c", Title: "C", Viz: "text", Content: "c"})
 	for i := range spec.Panels {
 		spec.Panels[i].Width = 12
 	}
@@ -225,9 +225,9 @@ func TestRemoveReceiptPacksNeighborsWithoutAuthoredChips(t *testing.T) {
 
 func TestSaveReceiptsCheckCommittedPanelsAndAuthoredChanges(t *testing.T) {
 	s := newPanelServer(t)
-	spec := panel.Dashboard{Name: "Receipt", Panels: []panel.Panel{
+	spec := query.Dashboard{Name: "Receipt", Panels: []query.Panel{
 		{ID: "notes", Title: "Notes", Viz: "text", Content: "Notes."},
-		{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}},
+		{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}},
 	}}
 	result, rejected, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
 	if err != nil || !result.IsError || rejected.Error == nil || rejected.Error.Code != "invalid_spec" || rejected.Dashboard != nil || !strings.Contains(rejected.Error.Message, "panels[1]") || !strings.Contains(rejected.Error.Message, "Requests") || !strings.Contains(rejected.Error.Message, "No spans") {

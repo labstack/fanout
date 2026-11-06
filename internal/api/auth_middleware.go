@@ -297,7 +297,7 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyCapability, capability: ReadOperations}, read || method == http.MethodPost
 	case strings.HasPrefix(path, "/api/traces/") && len(strings.TrimPrefix(path, "/api/traces/")) > 0 && !strings.Contains(strings.TrimPrefix(path, "/api/traces/"), "/"):
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
-	case path == "/api/intelligence":
+	case path == "/api/insights":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
 	case path == "/api/alerting/alerts" || path == "/api/alerting/summary" || path == "/api/alerting/rules":
 		if read {
@@ -308,9 +308,11 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		}
 	case strings.HasPrefix(path, "/api/alerting/rules/"):
 		return routePolicy{kind: routePolicyCapability, capability: ManageAlerts}, unsafe
-	case path == "/api/panels/query" || path == "/api/panels/exemplars" || path == "/api/panels/variables/resolve" || path == "/api/annotations":
+	case path == "/api/queries/run" || path == "/api/queries/exemplars" || path == "/api/queries/variables/resolve" || path == "/api/annotations/query":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, method == http.MethodPost
-	case path == "/api/telemetry/schema":
+	case path == "/api/fanql/parse" || path == "/api/fanql/format" || path == "/api/fanql/complete":
+		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, method == http.MethodPost
+	case path == "/api/fanql/reference" || path == "/api/telemetry/schema":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
 	case path == "/api/dashboards" || strings.HasPrefix(path, "/api/dashboards/"):
 		return routePolicy{kind: routePolicyCapability, capability: ManageOwnDashboards}, read || unsafe

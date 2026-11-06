@@ -3,6 +3,9 @@ import type { Cell, Frame, Panel } from "./types";
 export type Series = { name: string; unit?: string; points: [number, number | null][] };
 export type Categories = { categories: string[]; series: { name: string; unit?: string; values: (number | null)[] }[] };
 
+/** A group's name on a chart, for display only; a missing value reads the same in every chart. */
+export const groupName = (cell: Cell | undefined): string => String(cell ?? "") || "(none)";
+
 const num = (cell: Cell | undefined): number | null => (typeof cell === "number" && Number.isFinite(cell) ? cell : null);
 
 function measureColumns(frame: Frame): number[] {
@@ -20,11 +23,11 @@ export function toSeries(frame: Frame): Series[] {
     const m = measures[0];
     const byName = new Map<string, Series>();
     for (let row = 0; row < frame.rows; row += 1) {
-      const name = String(frame.values[dim][row] ?? "");
-      let s = byName.get(name);
+      const key = String(frame.values[dim][row] ?? "");
+      let s = byName.get(key);
       if (!s) {
-        s = { name: name || "(none)", unit: frame.columns[m].unit, points: [] };
-        byName.set(name, s);
+        s = { name: groupName(key), unit: frame.columns[m].unit, points: [] };
+        byName.set(key, s);
       }
       s.points.push([Number(frame.values[time][row]), num(frame.values[m][row])]);
     }

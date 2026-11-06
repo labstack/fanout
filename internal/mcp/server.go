@@ -17,7 +17,7 @@ import (
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -31,7 +31,7 @@ var supportedProtocolVersions = []string{ProtocolVersion, "2025-11-25", "2025-06
 
 const staticCatalogTTLMs = 5 * 60 * 1000
 
-const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges (use this preset once for a service map; do not repeat the same map with query_telemetry), get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency, errors and slow operations across HTTP, gRPC and consumers, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. For a custom chart in chat, use query_telemetry with one v1 panel; every chart view returns a dashboard fragment rendered by the shared panel renderer. Do not present empty results; state no matching data findings in the answer and prefer the signal a service actually has. Dashboards contain only panels that return data; text panels are exempt. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every non-text panel returns data, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
+const serverInstructions = "Start with get_overview for system health, use get_insights for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges (use this preset once for a service map; do not repeat the same map with query_telemetry), get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency, errors and slow operations across HTTP, gRPC and consumers, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. For a custom chart in chat, use query_telemetry with one v1 panel; every chart view returns a dashboard fragment rendered by the shared panel renderer. Do not present empty results; state no matching data findings in the answer and prefer the signal a service actually has. Dashboards contain only panels that return data; text panels are exempt. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every non-text panel returns data, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
 
 type Observability interface {
 	Dependencies(context.Context, observability.Scope, observability.DependencyOptions) (observability.Result[observability.Dependencies], error)
@@ -39,7 +39,7 @@ type Observability interface {
 }
 
 type IntelligenceSnapshots interface {
-	LatestSnapshot() *intelligence.IntelligenceSnapshot
+	LatestSnapshot() *intelligence.Snapshot
 }
 
 type QueryInput struct {
@@ -91,14 +91,14 @@ type LogsInput struct {
 
 // panelExecutor keeps execution injectable while production uses the pinned engine.
 type panelExecutor interface {
-	Run(context.Context, panel.RunRequest) ([]panel.Result, error)
-	Validate(context.Context, *panel.Dashboard) error
-	Schema(context.Context, panel.SchemaRequest) (*panel.Schema, error)
-	Exemplars(context.Context, panel.ExemplarRequest) (panel.ExemplarResponse, error)
-	ResolveVariables(context.Context, panel.ResolveRequest) (map[string][]panel.Option, error)
+	Run(context.Context, query.RunRequest) ([]query.Result, error)
+	Validate(context.Context, *query.Dashboard) error
+	Schema(context.Context, query.SchemaRequest) (*query.Schema, error)
+	Exemplars(context.Context, query.ExemplarRequest) (query.ExemplarResponse, error)
+	ResolveVariables(context.Context, query.ResolveRequest) (map[string][]query.Option, error)
 	ResolveWindow(time.Time, time.Time) (time.Time, time.Time, error)
 	ServiceGuidance(context.Context, time.Time, time.Time, string, string) (string, error)
-	EmptyGuidance(context.Context, panel.RunRequest) (string, string, error)
+	EmptyGuidance(context.Context, query.RunRequest) (string, string, error)
 }
 
 type Server struct {
@@ -111,11 +111,11 @@ type Server struct {
 	limitTools   map[string]bool
 }
 
-func NewWithIntelligence(queries Observability, dashboards *dashboard.Service, panels *panel.Executor, snapshots IntelligenceSnapshots, version string) *Server {
+func NewWithIntelligence(queries Observability, dashboards *dashboard.Service, panels *query.Executor, snapshots IntelligenceSnapshots, version string) *Server {
 	return newServer(queries, dashboards, panels, snapshots, version)
 }
 
-func newServer(queries Observability, dashboards *dashboard.Service, panels *panel.Executor, snapshots IntelligenceSnapshots, version string) *Server {
+func newServer(queries Observability, dashboards *dashboard.Service, panels *query.Executor, snapshots IntelligenceSnapshots, version string) *Server {
 	s := &Server{
 		mcp: mcp.NewServer(&mcp.Implementation{
 			Name:    "fanout",
@@ -142,6 +142,7 @@ func newServer(queries Observability, dashboards *dashboard.Service, panels *pan
 	s.registerPanelTools()
 	s.registerDashboardTools()
 	s.registerAppResources()
+	s.registerFanQLResource()
 	s.mcp.AddReceivingMiddleware(limitLegacySessions(s.mcp), normalizeToolErrors, recoverToolPanic, addStaticCacheHints, filterMCPAppToolMetadata, s.validateToolArguments)
 	return s
 }
@@ -203,12 +204,12 @@ func normalizeToolErrors(next mcp.MethodHandler) mcp.MethodHandler {
 		switch failure := payload["error"].(type) {
 		case *toolerror.Error:
 			if !slices.Contains(alreadyPresented, failure.Code) {
-				failure.Message = panel.PresentMessage(failure.Message)
+				failure.Message = query.PresentMessage(failure.Message)
 			}
 		case map[string]any:
 			code, _ := failure["code"].(string)
 			if message, ok := failure["message"].(string); ok && !slices.Contains(alreadyPresented, code) {
-				failure["message"] = panel.PresentMessage(message)
+				failure["message"] = query.PresentMessage(message)
 			}
 		}
 		raw, marshalErr := json.Marshal(payload)
@@ -387,7 +388,7 @@ func (s *Server) registerTools() {
 		Annotations: readOnly,
 	}, s.dependencies)
 	fragmentTool(s, &mcp.Tool{
-		Name:        "get_observability_overview",
+		Name:        "get_overview",
 		Title:       "System health overview",
 		Description: "Summarize service health for a bounded telemetry window. Start here for incident triage.",
 		Annotations: readOnly,
@@ -423,9 +424,9 @@ func (s *Server) registerTools() {
 	}, s.logs)
 	if s.intelligence != nil {
 		mcp.AddTool(s.mcp, &mcp.Tool{
-			Name:        "get_intelligence_snapshot",
+			Name:        "get_insights",
 			Title:       "Latest detected anomalies",
-			Description: "Return the latest precomputed health score, anomalies, insights, and recurring warning or error log patterns.",
+			Description: "Return the latest precomputed system findings: health score, anomalies, insights, recurring log patterns, summary, generation time, and evaluated timeframe.",
 			Annotations: readOnly,
 		}, s.intelligenceSnapshot)
 	}
@@ -448,10 +449,10 @@ func (s *Server) dependencies(ctx context.Context, _ *mcp.CallToolRequest, input
 	return summary(output.Summary), output, nil
 }
 
-func (s *Server) intelligenceSnapshot(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, intelligence.IntelligenceSnapshot, error) {
+func (s *Server) intelligenceSnapshot(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, intelligence.Snapshot, error) {
 	snapshot := s.intelligence.LatestSnapshot()
 	if snapshot == nil {
-		return nil, intelligence.IntelligenceSnapshot{}, fmt.Errorf("intelligence snapshot is not ready")
+		return nil, intelligence.Snapshot{}, fmt.Errorf("intelligence snapshot is not ready")
 	}
 	return summary(snapshot.Summary), *snapshot, nil
 }
@@ -462,8 +463,8 @@ func (s *Server) presetFragment(ctx context.Context, input QueryInput, kind, ser
 		return nil, PanelFragment{}, err
 	}
 	d := fragmentPreset(kind, service, input.Namespace, severity, search, input.Limit)
-	d.Time = panel.Time{From: &scope.Start, To: &scope.End, Refresh: "off"}
-	out, err := s.executeFragment(ctx, panel.RunRequest{Dashboard: d})
+	d.Time = query.Time{From: &scope.Start, To: &scope.End, Refresh: "off"}
+	out, err := s.executeFragment(ctx, query.RunRequest{Dashboard: d})
 	if err != nil {
 		return nil, PanelFragment{}, err
 	}
@@ -497,12 +498,12 @@ func (s *Server) trace(ctx context.Context, _ *mcp.CallToolRequest, input TraceI
 		return nil, PanelFragment{}, safePanelToolError(err)
 	}
 	d := fragmentPreset("trace", input.Service, input.Namespace, "", "", input.Limit)
-	d.Time = panel.Time{From: &scope.Start, To: &scope.End, Refresh: "off"}
+	d.Time = query.Time{From: &scope.Start, To: &scope.End, Refresh: "off"}
 	// A representative lookup is performed once. The list must represent that
 	// selected trace, even when no match exists (empty id cannot show others).
 	id := detail.Data.TraceID
 	d.Panels[0].Query.Where = append(d.Panels[0].Query.Where, "trace_id = '"+strings.ReplaceAll(id, "'", "''")+"'")
-	out, err := s.executeFragment(ctx, panel.RunRequest{Dashboard: d})
+	out, err := s.executeFragment(ctx, query.RunRequest{Dashboard: d})
 	if err != nil {
 		return nil, PanelFragment{}, err
 	}
@@ -527,12 +528,12 @@ func (s *Server) trace(ctx context.Context, _ *mcp.CallToolRequest, input TraceI
 	return summary(fragmentSummary(out)), out, nil
 }
 
-func allResultsEmpty(results []panel.Result) bool {
+func allResultsEmpty(results []query.Result) bool {
 	if len(results) == 0 {
 		return false
 	}
 	for _, result := range results {
-		if result.Status != panel.StatusEmpty {
+		if result.Status != query.StatusEmpty {
 			return false
 		}
 	}

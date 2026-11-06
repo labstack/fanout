@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,7 @@ import (
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	controlstore "github.com/labstack/fanout/internal/store"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -20,27 +21,27 @@ type fakeObservability struct {
 	scope observability.Scope
 }
 
-// structural validates without DuckDB; filter checks live in internal/panel.
+// structural validates without DuckDB; filter checks live in internal/query.
 type structural struct{}
 
-func (structural) Validate(_ context.Context, d *panel.Dashboard) error {
-	panel.Normalize(d)
-	if problems := panel.Validate(d); len(problems) > 0 {
+func (structural) Validate(_ context.Context, d *query.Dashboard) error {
+	query.Normalize(d)
+	if problems := query.Validate(d); len(problems) > 0 {
 		return problems
 	}
 	return nil
 }
 
-func withName(d panel.Dashboard, name string) panel.Dashboard {
+func withName(d query.Dashboard, name string) query.Dashboard {
 	d.Name = name
 	return d
 }
 
 type fakeIntelligence struct {
-	snapshot *intelligence.IntelligenceSnapshot
+	snapshot *intelligence.Snapshot
 }
 
-func (f fakeIntelligence) LatestSnapshot() *intelligence.IntelligenceSnapshot {
+func (f fakeIntelligence) LatestSnapshot() *intelligence.Snapshot {
 	return f.snapshot
 }
 
@@ -56,7 +57,7 @@ func TestDashboardToolsUseAuthenticatedOwner(t *testing.T) {
 	}
 	server := NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, nil, "test")
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{}, Extra: &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}}}
-	spec := panel.Dashboard{Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
+	spec := query.Dashboard{Panels: []query.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
 	_, output, err := server.dashboardCreate(ctx, req, DashboardCreateInput{Dashboard: withName(spec, "AI overview")})
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +96,7 @@ func TestDashboardOwnerIgnoresSpoofedMetaWhenTokenPresent(t *testing.T) {
 		Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{dashboard.OwnerMetaKey: "attacker"}},
 		Extra:  &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}},
 	}
-	spec := panel.Dashboard{Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
+	spec := query.Dashboard{Panels: []query.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
 	if _, _, err := server.dashboardCreate(ctx, req, DashboardCreateInput{Dashboard: withName(spec, "Spoof check")}); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +189,7 @@ func TestDependencyToolForwardsScopeAndBounds(t *testing.T) {
 }
 
 func TestIntelligenceSnapshotReturnsStructuredOutput(t *testing.T) {
-	want := &intelligence.IntelligenceSnapshot{
+	want := &intelligence.Snapshot{
 		GeneratedAt: time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC),
 		Timeframe:   "last_15m",
 		Summary:     "One anomaly requires attention.",
@@ -313,7 +314,7 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 func TestServerAdvertisesInstructionsAndStaticCacheHints(t *testing.T) {
 	server := panelServerFixture(t, true)
 	session := connectTestClient(t, server, nil)
-	if instructions := session.InitializeResult().Instructions; !strings.Contains(instructions, "get_observability_overview") || !strings.Contains(instructions, "authenticated user") {
+	if instructions := session.InitializeResult().Instructions; !strings.Contains(instructions, "get_overview") || !strings.Contains(instructions, "authenticated user") {
 		t.Fatalf("server instructions = %q", instructions)
 	}
 
@@ -330,7 +331,7 @@ func TestServerAdvertisesInstructionsAndStaticCacheHints(t *testing.T) {
 		}
 	}
 	called, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "get_observability_overview",
+		Name: "get_overview",
 		Arguments: map[string]any{
 			"window": "1h",
 		},
@@ -401,5 +402,40 @@ func TestMCPAppsCapabilitiesAreRequestScoped(t *testing.T) {
 	request.Params.Meta[mcp.MetaKeyClientCapabilities] = map[string]any{}
 	if clientSupportsMCPApps(request) {
 		t.Fatal("Apps support leaked between requests")
+	}
+}
+
+func TestGetInsightsReturnsCompletePrecomputedSnapshot(t *testing.T) {
+	want := intelligence.Snapshot{GeneratedAt: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), Timeframe: "last_15m", HealthScore: 75, Summary: "Errors increased", Insights: []intelligence.Insight{{Message: "Check checkout"}}, Patterns: []intelligence.Pattern{{Template: "failed", Count: 3}}, Anomalies: []intelligence.Anomaly{{ServiceName: "checkout"}}}
+	server := NewWithIntelligence(&fakeObservability{}, nil, nil, fakeIntelligence{snapshot: &want}, "test")
+	session := connectTestClient(t, server, nil)
+	listed, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range listed.Tools {
+		if tool.Name == "get_insights" || tool.Name == "get_overview" {
+			if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint || tool.Annotations.OpenWorldHint == nil || *tool.Annotations.OpenWorldHint {
+				t.Fatalf("annotations = %#v", tool.Annotations)
+			}
+		}
+		if tool.Name == "get_insights" && !strings.Contains(tool.Description, "latest precomputed system findings") {
+			t.Fatalf("description = %s", tool.Description)
+		}
+	}
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_insights", Arguments: map[string]any{}})
+	if err != nil || result.IsError {
+		t.Fatalf("get_insights = %#v, %v", result, err)
+	}
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got intelligence.Snapshot
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("snapshot = %#v, want %#v", got, want)
 	}
 }

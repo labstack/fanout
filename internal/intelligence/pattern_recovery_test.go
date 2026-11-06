@@ -1,25 +1,60 @@
 package intelligence
 
 import (
-	"database/sql"
+	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
-func createDetectorLogs(t *testing.T, db *sql.DB) {
+// detectorEngine is a real engine whose detector reads can fail on demand: a
+// statement containing fail returns context.DeadlineExceeded, as a read that
+// timed out does.
+type detectorEngine struct {
+	*engine.Duck
+	repo *telemetrystore.Repository
+	fail string
+	logs int
+}
+
+func (e *detectorEngine) QueryContext(ctx context.Context, statement string, args ...any) (queryrows.Rows, error) {
+	if e.fail != "" && strings.Contains(statement, e.fail) {
+		return nil, context.DeadlineExceeded
+	}
+	return e.Duck.QueryContext(ctx, statement, args...)
+}
+
+func newDetectorEngine(t *testing.T) *detectorEngine {
 	t.Helper()
-	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(t.Context(), `SET TimeZone='UTC'`); err != nil {
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2}
+	repo, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(t.Context(), `CREATE TABLE logs (
-		time TIMESTAMPTZ_NS, time_unix_nano BIGINT, body_template VARCHAR,
-		body VARCHAR, severity VARCHAR, service VARCHAR, namespace VARCHAR)`); err != nil {
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = duck.Close(); _ = repo.Close() })
+	return &detectorEngine{Duck: duck, repo: repo}
+}
+
+// commitFailures commits ten identical ERROR logs from api at at.
+func (e *detectorEngine) commitFailures(t *testing.T, at time.Time) {
+	t.Helper()
+	e.logs++
+	batch := telemetrystore.Batch{ID: fmt.Sprintf("failures-%d", e.logs)}
+	for range 10 {
+		batch.Logs = append(batch.Logs, telemetry.Log{Namespace: "default", ServiceName: "api", Severity: "ERROR", Body: "failure", BodyTemplate: "failure", TimeUnixNanos: at.UnixNano()})
+	}
+	if err := e.repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -31,7 +66,7 @@ func TestLogPatternsIncludeObservedTimeAndExactEventBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,31 +109,21 @@ func TestDetectorRefreshesPatternsAtStalledAndZeroWatermarks(t *testing.T) {
 			name = "stalled"
 		}
 		t.Run(name, func(t *testing.T) {
-			db, err := sql.Open("duckdb", "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			if err := query.CreateCacheTables(db); err != nil {
-				t.Fatal(err)
-			}
-			createDetectorLogs(t, db)
+			e := newDetectorEngine(t)
 			end := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
 			if completed {
-				seedDetectorRecoveryRollup(t, db, end)
+				seedDetectorRecoveryRollup(t, e.DB, end)
 			}
-			d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+			d := NewDetector(e, DefaultDetectorConfig())
 			d.runCheck(t.Context())
 			previous := d.LatestSnapshot()
 			if previous == nil || len(previous.Patterns) != 0 {
 				t.Fatalf("initial snapshot: %+v", previous)
 			}
 			at := time.Now().UTC().Add(-time.Minute)
-			if _, err := db.Exec(`INSERT INTO logs SELECT ?::TIMESTAMP_NS::TIMESTAMPTZ_NS, ?, 'failure', 'failure', 'ERROR', 'api', 'default' FROM range(10)`, at, at.UnixNano()); err != nil {
-				t.Fatal(err)
-			}
+			e.commitFailures(t, at)
 			// Changing rollup data must not change the cached anomaly evaluation.
-			if _, err := db.Exec(`UPDATE service_rollup SET error_rate=0,p95_ms=0,spans=1`); err != nil {
+			if _, err := e.DB.Exec(`UPDATE service_rollup SET error_rate=0,p95_ms=0,spans=1`); err != nil {
 				t.Fatal(err)
 			}
 			d.runCheck(t.Context())

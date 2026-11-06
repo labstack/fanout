@@ -138,3 +138,11 @@ it.each([[[37],"1 pattern · 37 events in the window"],[[37,5],"2 patterns · 42
   expect(summary.style.position).not.toBe("absolute");expect(summary.style.marginTop).toBe("8px");
   expect(summary.style.flexShrink).toBe("0");
 });
+
+it("heads the trace duration without a unit because each cell names its own", async () => {
+  const traces: PanelResult = { id: "p", status: "ok", elapsed_ms: 1, frame: { columns: [{ name: "duration_ms", type: "number", role: "measure", unit: "ms" }], values: [[600000]], rows: 1 } };
+  await render({ id: "p", title: "Traces", viz: "traces" }, traces);
+  const header = container.querySelector("th")!;
+  expect(header.textContent).toBe("Duration");
+  expect(container.querySelector("td")!.textContent).toContain("10m");
+});

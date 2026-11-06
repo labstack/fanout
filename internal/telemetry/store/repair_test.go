@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -14,13 +15,15 @@ import (
 	"github.com/parquet-go/parquet-go"
 )
 
+// Batches verify concurrently; the issues still name the corrupt ones alone,
+// in directory order.
 func TestVerifyBatchesReportsOnlyUnreadableBatches(t *testing.T) {
 	root := t.TempDir()
 	repository, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"good", "broken"} {
+	for _, id := range []string{"a-good", "b-broken", "c-good", "d-broken", "e-good"} {
 		if err := repository.Commit(context.Background(), Batch{
 			ID: id, Spans: []telemetry.Span{{TraceID: id, SpanID: "span"}},
 		}); err != nil {
@@ -30,13 +33,14 @@ func TestVerifyBatchesReportsOnlyUnreadableBatches(t *testing.T) {
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
 	}
-	corruptBatchFile(t, root, "broken", "spans.parquet")
+	corruptBatchFile(t, root, "b-broken", "spans.parquet")
+	corruptBatchFile(t, root, "d-broken", "spans.parquet")
 
 	issues, err := VerifyBatches(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(issues) != 1 || issues[0].ID != "broken" || issues[0].Err == nil {
+	if len(issues) != 2 || issues[0].ID != "b-broken" || issues[1].ID != "d-broken" || issues[0].Err == nil || issues[1].Err == nil {
 		t.Fatalf("issues = %#v", issues)
 	}
 }
@@ -138,6 +142,33 @@ func TestSchemaMismatchCannotAuthorizeQuarantine(t *testing.T) {
 	after, err := os.ReadFile(path)
 	if err != nil || string(before) != string(after) {
 		t.Fatalf("unsupported data changed: %v", err)
+	}
+}
+
+// The first worker's failure must surface as itself, not as the cancellation
+// of verifiers that were still opening.
+func TestConcurrentVerifyReportsUnsupportedFormat(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(8))
+	root := t.TempDir()
+	repository, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a-old", "b", "c", "d", "e", "f"} {
+		if err := repository.Commit(t.Context(), Batch{ID: id, Spans: []telemetry.Span{{TraceID: id, SpanID: "span"}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repository.Close()
+	if err := parquet.WriteFile(filepath.Join(root, "parquet", "batches", "a-old.batch", "spans.parquet"), []struct {
+		TraceID string `parquet:"trace_id"`
+	}{{"trace"}}); err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		if _, err := VerifyBatches(root); !errors.Is(err, telemetry.ErrUnsupportedBatchFormat) {
+			t.Fatalf("verify: %v", err)
+		}
 	}
 }
 

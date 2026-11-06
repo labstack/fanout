@@ -6,14 +6,14 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type apiError struct {
 	status   int
 	Code     string         `json:"code"`
 	Message  string         `json:"message"`
-	Problems panel.Problems `json:"problems,omitempty"`
+	Problems query.Problems `json:"problems,omitempty"`
 }
 
 func (e *apiError) Error() string   { return e.Message }
@@ -96,7 +96,12 @@ func HTTPErrorHandler(c *echo.Context, err error) {
 	if c.Request().Method == http.MethodHead {
 		writeErr = c.NoContent(status)
 	} else {
-		writeErr = c.JSON(status, body)
+		var domain interface{ ResponseBody() any }
+		if errors.As(err, &domain) {
+			writeErr = c.JSON(status, domain.ResponseBody())
+		} else {
+			writeErr = c.JSON(status, body)
+		}
 	}
 	if writeErr != nil {
 		slog.Error("HTTP error response failed", "route", c.Path(), "error", writeErr)

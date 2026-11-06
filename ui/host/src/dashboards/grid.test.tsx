@@ -207,6 +207,18 @@ it("hides fix without manage permission while keeping Explain answer-only", asyn
   expect(vi.mocked(props.onOpenChat).mock.calls[0][1]).toMatchObject({ answer_only: true, context: [{description:"Observed panel diagnostics",value:expect.any(String)}] });
 });
 
+it.each([undefined, "broken"])("hides Explain and Fix with chat disabled in panel view %s", async (view) => {
+  const { host, props } = await render({ agentAvailable: false, view });
+  const scope = view ? document.querySelector<HTMLElement>('[role="dialog"]')! : host;
+  expect(within(scope).queryByRole("button", { name: "Ask Fanout to fix it" })).toBeNull();
+  await act(async () => within(scope).getByRole("button", { name: "Broken menu" }).click());
+  const actions = [...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent);
+  expect(actions).toContain("Copy link");
+  expect(actions).not.toContain("Explain in chat");
+  expect(actions).not.toContain("Ask Fanout to fix it");
+  expect(props.onOpenChat).not.toHaveBeenCalled();
+});
+
 it("copies a view link without edit mode and reports success", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   vi.spyOn(navigator.clipboard, "writeText").mockImplementation(writeText);

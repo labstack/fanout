@@ -1,0 +1,803 @@
+package query
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/labstack/fanout/internal/engine"
+)
+
+// Filter is one checked filter expression.
+type Filter struct {
+	ScopeEquality   *SQLExpr `json:"-"` // Original checked tree, before parameter casts.
+	RoutePopulation bool     `json:"-"` // Checked nonempty http.route population, safe for bounded endpoint summaries.
+	Columns         []string `json:"-"` // Checked column dependencies, including attribute roots.
+	// Expr is DuckDB's canonical rendering of the checked expression; it is
+	// the only text ever embedded in SQL.
+	Expr string `json:"expr"`
+	// Source is the author's text, kept for messages.
+	Source   string          `json:"source"`
+	Params   []string        `json:"params,omitempty"`
+	InParams map[string]bool `json:"-"`
+	// PatternParams are variables used as patterns; their values are bounded
+	// when bound.
+	PatternParams map[string]bool `json:"-"`
+	// EqField is the field compared when the filter is `field = value`; the
+	// empty-panel diagnosis lists values seen for it.
+	EqField        string `json:"-"`
+	EqLiteral      string `json:"-"`
+	EqParam        string `json:"-"`
+	EqValue        bool   `json:"-"`
+	DisplayField   string `json:"-"`
+	DisplayLiteral string `json:"-"`
+	DisplayParam   string `json:"-"`
+	NameInAnd      bool   `json:"-"`
+	// Negated is a whole entry that is one negated term as FanQL lowers it
+	// (proposal 0004, section 0.7); on the traces viz it excludes traces.
+	Negated bool `json:"-"`
+}
+
+var (
+	filterFunctions = map[string]bool{"~~": true, "!~~": true, "~~*": true, "!~~*": true, "lower": true, "upper": true,
+		"starts_with": true, "contains": true, "regexp_matches": true, "length": true}
+	filterCasts     = map[string]bool{"VARCHAR": true, "BIGINT": true, "INTEGER": true, "DOUBLE": true, "BOOLEAN": true, "UBIGINT": true, "TIMESTAMPTZ_NS": true}
+	filterOperators = map[string]bool{"OPERATOR_NOT": true, "OPERATOR_IS_NULL": true, "OPERATOR_IS_NOT_NULL": true, "OPERATOR_COALESCE": true, "COMPARE_IN": true, "COMPARE_NOT_IN": true}
+)
+
+// checkFilter parses expr with DuckDB as the WHERE clause of a query over the
+// signal and walks the tree against an allowlist: columns of that signal,
+// attribute lookups with literal keys, comparisons, boolean logic, IN, LIKE,
+// IS NULL, BETWEEN, casts to scalar types, constants, declared variables, and
+// a few scalar functions. Anything else is rejected. The accepted expression
+// is stored as DuckDB's canonical rendering with typed parameter casts, and
+// that rendering must bind against the signal.
+func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[string]Variable, expr string) (Filter, error) {
+	if strings.TrimSpace(expr) == "" || len(expr) > 500 {
+		return Filter{}, errors.New("filters are 1 to 500 characters")
+	}
+	if strings.Contains(stripQuoted(expr), "?") {
+		return Filter{}, errors.New("use $variables instead of ? placeholders")
+	}
+	node, err := parser.ParseSQL(ctx, "SELECT 1 FROM "+sig.name+" WHERE ("+expr+")")
+	if err != nil {
+		if isOperational(err) {
+			return Filter{}, err
+		}
+		return Filter{}, fmt.Errorf("does not parse: %w", err)
+	}
+	if !onlyWhereClause(node, sig.name) {
+		return Filter{}, errors.New("must be a single boolean expression")
+	}
+	f := Filter{Columns: []string{}, Source: strings.TrimSpace(expr), InParams: map[string]bool{}}
+	uses := map[string]int{}
+	typed := SQLExpression(node["where_clause"])
+	f.ScopeEquality = typed
+	if err := walkFilterExpr(typed, sig, vars, &f, uses); err != nil {
+		return Filter{}, err
+	}
+	for _, name := range f.Params {
+		if vars[name].Multi && !f.InParams[name] {
+			return Filter{}, fmt.Errorf("$%s holds several values; use it as IN $%s", name, name)
+		}
+		if f.InParams[name] && uses[name] > 1 {
+			return Filter{}, fmt.Errorf("use $%s either with IN or with a comparison, not both", name)
+		}
+	}
+	f.RoutePopulation = typed != nil && typed.Class == "COMPARISON" && typed.Type == "COMPARE_NOTEQUAL" && fieldText(typed.Left) == "attributes['http.route']" && typed.Right != nil && typed.Right.LiteralKind == "STRING" && typed.Right.LiteralText == ""
+	f.EqField = equalityField(typed)
+	f.DisplayField, f.DisplayLiteral, f.DisplayParam = filterDisplay(typed)
+	f.EqLiteral, f.EqParam, f.EqValue = equalityValue(typed)
+	f.NameInAnd = nameEqualityInAnd(typed)
+	f.Negated = negatedTerm(typed)
+	if f.EqValue {
+		f.EqField = "name"
+	}
+	rewriteContainsAsIn(node["where_clause"])
+	node["where_clause"] = castParameters(node["where_clause"], sig, "")
+	canonical, err := canonicalFilter(ctx, parser, sig, vars, node, f)
+	if err != nil {
+		return Filter{}, err
+	}
+	f.Expr = canonical
+	if err := bindFilter(ctx, parser, sig, vars, f); err != nil {
+		return Filter{}, err
+	}
+	return f, nil
+}
+
+// bindFilter binds the canonical expression on the engine's guarded DESCRIBE
+// path, with NULL for every value and as many values as a run binds (one per
+// scalar variable, two per list), so a filter whose types do not line up is a
+// Check problem instead of an error on every run.
+func bindFilter(ctx context.Context, parser Parser, sig *signal, vars map[string]Variable, f Filter) error {
+	query, describe, _, err := bindParams(f.Expr, func(name string) ([]any, bool, error) {
+		if vars[name].Multi {
+			return []any{"", ""}, true, nil
+		}
+		return []any{""}, false, nil
+	})
+	if err != nil {
+		return err
+	}
+	prefix := "SELECT 1 FROM " + sig.name + " WHERE ("
+	if _, _, err := parser.PrepareTelemetrySQL(ctx, prefix+query+")", prefix+describe+")", 1); err != nil {
+		return err
+	}
+	return nil
+}
+
+// canonicalFilter renders the checked statement with DuckDB, keeps only the
+// WHERE expression, and checks the rendering again: it must parse as the same
+// single expression and use the same variables.
+func canonicalFilter(ctx context.Context, parser Parser, sig *signal, vars map[string]Variable, node map[string]any, f Filter) (string, error) {
+	rendered, err := parser.RenderSQL(ctx, node)
+	if err != nil {
+		if isOperational(err) {
+			return "", err
+		}
+		return "", fmt.Errorf("the filter could not be rendered canonically: %w", err)
+	}
+	prefix := "SELECT 1 FROM " + sig.name + " WHERE "
+	if !strings.HasPrefix(rendered, prefix) {
+		return "", errors.New("the filter could not be rendered canonically")
+	}
+	expr := strings.TrimPrefix(rendered, prefix)
+	again, err := parser.ParseSQL(ctx, "SELECT 1 FROM "+sig.name+" WHERE ("+expr+")")
+	if err != nil && isOperational(err) {
+		return "", err
+	}
+	if err != nil || !onlyWhereClause(again, sig.name) {
+		return "", errors.New("the filter could not be rendered canonically")
+	}
+	g := Filter{InParams: map[string]bool{}}
+	if err := walkFilter(again["where_clause"], sig, vars, &g, map[string]int{}); err != nil {
+		return "", err
+	}
+	if !slices.Equal(g.Params, f.Params) {
+		return "", errors.New("the filter could not be rendered canonically")
+	}
+	return expr, nil
+}
+
+func onlyWhereClause(node map[string]any, table string) bool {
+	if node["type"] != "SELECT_NODE" {
+		return false
+	}
+	if mods, _ := node["modifiers"].([]any); len(mods) > 0 {
+		return false
+	}
+	if cte, _ := node["cte_map"].(map[string]any); cte != nil {
+		if entries, _ := cte["map"].([]any); len(entries) > 0 {
+			return false
+		}
+	}
+	if groups, _ := node["group_expressions"].([]any); len(groups) > 0 {
+		return false
+	}
+	if sets, _ := node["group_sets"].([]any); len(sets) > 0 {
+		return false
+	}
+	if node["aggregate_handling"] != "STANDARD_HANDLING" {
+		return false
+	}
+	if node["having"] != nil || node["qualify"] != nil || node["sample"] != nil {
+		return false
+	}
+	if list, _ := node["select_list"].([]any); len(list) != 1 {
+		return false
+	}
+	from, _ := node["from_table"].(map[string]any)
+	return from != nil && from["type"] == "BASE_TABLE" && from["table_name"] == table && from["schema_name"] == "" && from["catalog_name"] == ""
+}
+
+func walkFilter(raw any, sig *signal, vars map[string]Variable, f *Filter, uses map[string]int) error {
+	return walkFilterExpr(SQLExpression(raw), sig, vars, f, uses)
+}
+func walkFilterExpr(v *SQLExpr, sig *signal, vars map[string]Variable, f *Filter, uses map[string]int) error {
+	if v == nil {
+		return nil
+	}
+	walk := func(nodes ...*SQLExpr) error {
+		for _, child := range nodes {
+			if err := walkFilterExpr(child, sig, vars, f, uses); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	switch v.Class {
+	case "CONJUNCTION":
+		return walk(v.Children...)
+	case "COMPARISON":
+		return walk(v.Left, v.Right)
+	case "BETWEEN":
+		return walk(v.Input, v.Lower, v.Upper)
+	case "OPERATOR":
+		if v.Type == "ARRAY_EXTRACT" {
+			f.Columns = append(f.Columns, fieldText(v))
+			return checkAttributeExpr(v)
+		}
+		if !filterOperators[v.Type] {
+			return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(v.Type))
+		}
+		if v.Type == "COMPARE_IN" || v.Type == "COMPARE_NOT_IN" {
+			for _, c := range v.Children[min(1, len(v.Children)):] {
+				if c != nil && c.Class == "PARAMETER" {
+					f.InParams[c.Identifier] = true
+				}
+			}
+		}
+		return walk(v.Children...)
+	case "CAST":
+		if !filterCasts[v.CastType] {
+			return fmt.Errorf("casting to %s is not allowed in a filter", v.CastType)
+		}
+		return walk(v.Child)
+	case "COLUMN_REF":
+		if len(v.Columns) != 1 {
+			return errors.New("qualified column names are not allowed in a filter")
+		}
+		if !slices.Contains(f.Columns, v.Columns[0]) {
+			f.Columns = append(f.Columns, v.Columns[0])
+		}
+		_, err := sig.field(v.Columns[0])
+		return err
+	case "CONSTANT":
+		return nil
+	case "PARAMETER":
+		name := v.Identifier
+		if name == "" || name[0] >= '0' && name[0] <= '9' {
+			return errors.New("use $name variables, not positional parameters")
+		}
+		if _, ok := vars[name]; !ok {
+			return fmt.Errorf("$%s is not a declared variable", name)
+		}
+		uses[name]++
+		if !slices.Contains(f.Params, name) {
+			f.Params = append(f.Params, name)
+		}
+		return nil
+	case "FUNCTION":
+		if !filterFunctions[v.Function] {
+			return fmt.Errorf("function %s is not allowed in a filter", v.Function)
+		}
+		if v.Distinct {
+			return errors.New("DISTINCT is not allowed in a filter")
+		}
+		if v.HasOrder {
+			return errors.New("ORDER BY is not allowed in a filter")
+		}
+		if v.HasFilter {
+			return errors.New("FILTER is not allowed in a filter")
+		}
+		if err := checkFilterPattern(v, f); err != nil {
+			return err
+		}
+		if v.Function == "contains" && len(v.Arguments) == 2 && v.Arguments[0] != nil && v.Arguments[0].Class == "PARAMETER" {
+			f.InParams[v.Arguments[0].Identifier] = true
+		}
+		return walk(v.Arguments...)
+	default:
+		return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(strings.TrimPrefix(v.Type, "VALUE_")))
+	}
+}
+
+// filterPatterns names the filter functions whose second argument is a
+// pattern. A pattern costs its length times the text's per row, and DuckDB
+// stops a statement only between chunks, so it is a literal or a variable of
+// at most engine.MaxPatternBytes, never a column.
+var filterPatterns = map[string]string{"~~": "LIKE", "!~~": "NOT LIKE", "~~*": "ILIKE", "!~~*": "NOT ILIKE", "regexp_matches": "regexp_matches"}
+
+func checkFilterPattern(v *SQLExpr, f *Filter) error {
+	label, ok := filterPatterns[v.Function]
+	if !ok || len(v.Arguments) < 2 {
+		return nil
+	}
+	pattern := v.Arguments[1]
+	for pattern != nil && pattern.Class == "CAST" {
+		pattern = pattern.Child
+	}
+	switch {
+	case pattern != nil && pattern.Class == "PARAMETER":
+		if f.PatternParams == nil {
+			f.PatternParams = map[string]bool{}
+		}
+		f.PatternParams[pattern.Identifier] = true
+		return nil
+	case pattern != nil && pattern.Class == "CONSTANT" && len(pattern.LiteralText) <= engine.MaxPatternBytes:
+		return nil
+	}
+	return fmt.Errorf("the pattern of %s must be a literal or a variable of at most %d bytes", label, engine.MaxPatternBytes)
+}
+
+func checkAttributeExpr(v *SQLExpr) error {
+	if len(v.Children) != 2 {
+		return errors.New("attribute lookups take one key")
+	}
+	column, key := v.Children[0], v.Children[1]
+	if column == nil || column.Class != "COLUMN_REF" || len(column.Columns) != 1 || column.Columns[0] != "attributes" && column.Columns[0] != "resource" {
+		return errors.New("only attributes['key'] and resource['key'] lookups are allowed")
+	}
+	if key == nil || key.Class != "CONSTANT" || !attributePattern.MatchString(fmt.Sprintf("%s[%s]", column.Columns[0], sqlString(key.LiteralText))) {
+		return errors.New("attribute keys must be literal strings such as attributes['http.route']")
+	}
+	return nil
+}
+
+// negatedTerm reports whether an expression is one prefix-negated term in a
+// shape FanQL lowers it to and lifts back as one: k IS NULL (-k:*), NOT
+// coalesce((p), FALSE) over one leaf, or (k IS NULL OR q) where q is one
+// comparison, IN, BETWEEN, LIKE or negated contains that reads only k. SQL's
+// own k != v is not one, nor is a hand-written q that FanQL keeps raw.
+func negatedTerm(v *SQLExpr) bool {
+	if v == nil {
+		return false
+	}
+	if v.Type == "OPERATOR_IS_NULL" && len(v.Children) == 1 {
+		return fieldText(v.Children[0]) != ""
+	}
+	if v.Class == "OPERATOR" && v.Type == "OPERATOR_NOT" && len(v.Children) == 1 {
+		c := v.Children[0]
+		if c == nil || c.Type != "OPERATOR_COALESCE" || len(c.Children) != 2 || c.Children[0] == nil || c.Children[0].Class == "CONJUNCTION" {
+			return false
+		}
+		last := c.Children[1]
+		return last != nil && last.Class == "CONSTANT" && strings.EqualFold(last.LiteralText, "false")
+	}
+	if v.Class != "CONJUNCTION" || v.Type != "CONJUNCTION_OR" || len(v.Children) != 2 {
+		return false
+	}
+	isNull := v.Children[0]
+	if isNull == nil || isNull.Type != "OPERATOR_IS_NULL" || len(isNull.Children) != 1 {
+		return false
+	}
+	field := fieldText(isNull.Children[0])
+	return field != "" && negatedLeaf(v.Children[1]) && readsOnly(v.Children[1], field)
+}
+
+// negatedLeaf reports whether q is one of the leaves FanQL writes after
+// k IS NULL OR in a negated term: a predicate on the field itself, or a
+// negated contains.
+func negatedLeaf(q *SQLExpr) bool {
+	if q == nil {
+		return false
+	}
+	var operand *SQLExpr
+	switch {
+	case q.Class == "COMPARISON":
+		operand = q.Left
+	case q.Class == "BETWEEN":
+		operand = q.Input
+	case (q.Type == "COMPARE_IN" || q.Type == "COMPARE_NOT_IN") && len(q.Children) > 0:
+		operand = q.Children[0]
+	case q.Class == "FUNCTION" && (q.Function == "~~" || q.Function == "!~~" || q.Function == "~~*" || q.Function == "!~~*") && len(q.Arguments) > 0:
+		operand = q.Arguments[0]
+	case q.Type == "OPERATOR_NOT" && len(q.Children) == 1:
+		c := q.Children[0]
+		return c != nil && c.Class == "FUNCTION" && c.Function == "contains"
+	}
+	return fieldText(operand) != ""
+}
+
+// readsOnly reports whether an expression reads one field and no other.
+func readsOnly(v *SQLExpr, field string) bool {
+	found := false
+	var visit func(*SQLExpr) bool
+	visit = func(n *SQLExpr) bool {
+		if n == nil {
+			return true
+		}
+		if n.Class == "COLUMN_REF" || n.Class == "OPERATOR" && n.Type == "ARRAY_EXTRACT" {
+			found = true
+			return fieldText(n) == field
+		}
+		for _, child := range []*SQLExpr{n.Left, n.Right, n.Child, n.Input, n.Lower, n.Upper} {
+			if !visit(child) {
+				return false
+			}
+		}
+		for _, children := range [][]*SQLExpr{n.Children, n.Arguments} {
+			for _, child := range children {
+				if !visit(child) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return visit(v) && found
+}
+
+func equalityField(v *SQLExpr) string {
+	if v == nil || v.Class != "COMPARISON" || v.Type != "COMPARE_EQUAL" {
+		return ""
+	}
+	for _, side := range []*SQLExpr{v.Left, v.Right} {
+		if field := fieldText(side); field != "" {
+			return field
+		}
+	}
+	return ""
+}
+
+func fieldText(v *SQLExpr) string {
+	if v == nil {
+		return ""
+	}
+	switch v.Class {
+	case "CAST":
+		return fieldText(v.Child)
+	case "COLUMN_REF":
+		if len(v.Columns) == 1 {
+			return v.Columns[0]
+		}
+	case "OPERATOR":
+		if v.Type == "ARRAY_EXTRACT" && len(v.Children) == 2 {
+			column, key := v.Children[0], v.Children[1]
+			if column != nil && len(column.Columns) == 1 {
+				return fmt.Sprintf("%s[%s]", column.Columns[0], sqlString(constantText(key)))
+			}
+		}
+	}
+	return ""
+}
+
+// stripQuoted blanks quoted strings and identifiers so scans for tokens see
+// only SQL syntax.
+func stripQuoted(text string) string {
+	var b strings.Builder
+	var quote byte
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				if i+1 < len(text) && text[i+1] == quote {
+					i++
+					continue
+				}
+				quote = 0
+			}
+			b.WriteByte(' ')
+		case c == '\'' || c == '"':
+			quote = c
+			b.WriteByte(' ')
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// constantText returns the text of a string constant node.
+func constantText(n *SQLExpr) string {
+	if n == nil || n.LiteralKind != "STRING" {
+		return ""
+	}
+	return n.LiteralText
+}
+
+// functionArguments returns the argument expressions of a FUNCTION node.
+func functionArguments(v map[string]any) []any {
+	entries, _ := v["arguments"].([]any)
+	out := make([]any, 0, len(entries))
+	for _, e := range entries {
+		if entry, _ := e.(map[string]any); entry != nil {
+			out = append(out, entry["expression"])
+		}
+	}
+	return out
+}
+
+// rewriteContainsAsIn turns DuckDB's parse of `x IN $p`, contains($p, x),
+// back into `x IN ($p)` (OPERATOR / COMPARE_IN). The bound list then renders
+// as an IN list, which compares VARIANT attributes and numeric columns with
+// string binds correctly; contains([?, ?], x) does not.
+func rewriteContainsAsIn(n any) {
+	switch v := n.(type) {
+	case []any:
+		for _, child := range v {
+			rewriteContainsAsIn(child)
+		}
+	case map[string]any:
+		for _, child := range v {
+			rewriteContainsAsIn(child)
+		}
+		if v["class"] != "FUNCTION" || v["function_name"] != "contains" {
+			return
+		}
+		args := functionArguments(v)
+		if len(args) != 2 {
+			return
+		}
+		if param, _ := args[0].(map[string]any); param == nil || param["class"] != "PARAMETER" {
+			return
+		}
+		for key := range v {
+			delete(v, key)
+		}
+		v["alias"] = ""
+		v["class"] = "OPERATOR"
+		v["type"] = "COMPARE_IN"
+		v["children"] = []any{args[1], args[0]}
+	}
+}
+
+var numericCasts = map[string]bool{"INTEGER": true, "BIGINT": true, "UBIGINT": true, "DOUBLE": true}
+
+// The types castParameters gives a parameter. The time columns are
+// TIMESTAMPTZ_NS; DuckDB 2 does not compare them with a TIMESTAMPTZ cast, and
+// the _NS cast keeps a variable's nanoseconds.
+const (
+	paramNumber = "DOUBLE"
+	paramTime   = "TIMESTAMPTZ_NS"
+	paramText   = "VARCHAR"
+)
+
+// castParameters wraps every PARAMETER in a CAST typed from the operands it is
+// compared with: in a comparison, BETWEEN (input and bounds alike), IN list or
+// coalesce, the first operand that is a number (numeric column, numeric cast,
+// numeric constant, length(), a numeric coalesce) makes the parameters DOUBLE,
+// and the first that is a time (time column, TIMESTAMPTZ_NS cast) makes them
+// TIMESTAMPTZ_NS. Everything else, including a parameter compared only with
+// parameters, is VARCHAR. Variables bind as strings; the driver cannot bind an
+// untyped parameter against a VARIANT attribute, and VARCHAR does not compare
+// with numbers or times, so the type has to be in the canonical SQL. Whatever
+// this misses, checkFilter's bind check reports.
+func castParameters(n any, sig *signal, want string) any {
+	switch v := n.(type) {
+	case []any:
+		for i := range v {
+			v[i] = castParameters(v[i], sig, "")
+		}
+	case map[string]any:
+		switch v["class"] {
+		case "PARAMETER":
+			if want == "" {
+				want = paramText
+			}
+			return castNode(v, want)
+		case "CAST":
+			if child, _ := v["child"].(map[string]any); child != nil && child["class"] == "PARAMETER" {
+				return v // the author's own cast
+			}
+		case "COMPARISON":
+			group := groupType(sig, v["left"], v["right"])
+			v["left"], v["right"] = castParameters(v["left"], sig, group), castParameters(v["right"], sig, group)
+			return v
+		case "BETWEEN":
+			group := groupType(sig, v["input"], v["lower"], v["upper"])
+			for _, key := range []string{"input", "lower", "upper"} {
+				v[key] = castParameters(v[key], sig, group)
+			}
+			return v
+		case "OPERATOR":
+			if kind := v["type"]; kind == "COMPARE_IN" || kind == "COMPARE_NOT_IN" || kind == "OPERATOR_COALESCE" {
+				children, _ := v["children"].([]any)
+				group := groupType(sig, children...)
+				for i := range children {
+					children[i] = castParameters(children[i], sig, group)
+				}
+				return v
+			}
+		}
+		for key, child := range v {
+			switch child.(type) {
+			case map[string]any, []any:
+				v[key] = castParameters(child, sig, "")
+			}
+		}
+	}
+	return n
+}
+
+// groupType is the parameter type for a group of compared operands: the type
+// of the first one operandType classifies, or "" when none is classified.
+func groupType(sig *signal, operands ...any) string {
+	for _, operand := range operands {
+		if t := operandType(operand, sig); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// operandType classifies an operand as a number (paramNumber) or a time
+// (paramTime), or returns "" for text, parameters and anything else. A
+// lookup of a standard integer key is a number: the engine reads its typed
+// column (proposal 0005). Other attribute lookups are text.
+func operandType(n any, sig *signal) string {
+	v, _ := n.(map[string]any)
+	switch v["class"] {
+	case "COLUMN_REF":
+		names, _ := v["column_names"].([]any)
+		if len(names) == 1 {
+			name, _ := names[0].(string)
+			switch sig.index[name].Type {
+			case TypeNumber:
+				return paramNumber
+			case TypeTime:
+				return paramTime
+			}
+		}
+	case "CAST":
+		typeExpr, _ := v["type_expr"].(map[string]any)
+		name, _ := typeExpr["type_name"].(string)
+		if numericCasts[name] {
+			return paramNumber
+		}
+		if name == paramTime {
+			return paramTime
+		}
+	case "CONSTANT":
+		literal, _ := v["literal"].(map[string]any)
+		if kind := literal["kind"]; kind == "INTEGER" || kind == "NUMERIC" {
+			return paramNumber
+		}
+	case "FUNCTION":
+		if v["function_name"] == "length" {
+			return paramNumber
+		}
+	case "OPERATOR":
+		if field := fieldText(SQLExpression(v)); v["type"] == "ARRAY_EXTRACT" && field != "" {
+			if ref, err := sig.field(field); err == nil && ref.Type == TypeNumber {
+				return paramNumber
+			}
+		}
+		if v["type"] == "OPERATOR_COALESCE" {
+			children, _ := v["children"].([]any)
+			return groupType(sig, children...)
+		}
+	}
+	return ""
+}
+
+func castNode(param map[string]any, typeName string) map[string]any {
+	return map[string]any{
+		"alias": "", "class": "CAST", "type": "OPERATOR_CAST", "try_cast": false, "child": param,
+		"type_expr": map[string]any{
+			"alias": "", "catalog": "", "children": []any{}, "class": "TYPE", "schema": "", "type": "TYPE",
+			"type_name": typeName, "qualified_name": map[string]any{"path": []any{typeName}},
+		},
+	}
+}
+
+func equalityValue(v *SQLExpr) (literal, parameter string, ok bool) {
+	if v == nil || v.Class != "COMPARISON" || v.Type != "COMPARE_EQUAL" {
+		return "", "", false
+	}
+	var other *SQLExpr
+	directName := func(field *SQLExpr) bool {
+		return field != nil && field.Class == "COLUMN_REF" && len(field.Columns) == 1 && field.Columns[0] == "name"
+	}
+	if directName(v.Left) {
+		other = v.Right
+	} else if directName(v.Right) {
+		other = v.Left
+	} else {
+		return "", "", false
+	}
+	for other != nil {
+		switch other.Class {
+		case "CAST":
+			other = other.Child
+			continue
+		case "PARAMETER":
+			return "", other.Identifier, other.Identifier != ""
+		case "CONSTANT":
+			if other.LiteralKind == "STRING" {
+				return constantText(other), "", true
+			}
+		}
+		break
+	}
+	return "", "", false
+}
+
+func nameEqualityInAnd(v *SQLExpr) bool {
+	if v == nil || v.Class != "CONJUNCTION" || v.Type != "CONJUNCTION_AND" {
+		return false
+	}
+	for _, child := range v.Children {
+		if _, _, ok := equalityValue(child); ok || nameEqualityInAnd(child) {
+			return true
+		}
+	}
+	return false
+}
+
+// filterDisplay derives product wording from the checked AST, never SQL text.
+func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
+	if node == nil {
+		return "", "", ""
+	}
+	if node.Class == "FUNCTION" && node.Function == "contains" && len(node.Arguments) == 2 {
+		// FanQL free text and `~` lower to contains(lower(field), lower('text')).
+		if field := displayField(fieldText(unwrapLower(node.Arguments[0]))); field != "" {
+			if text := constantText(unwrapLower(node.Arguments[1])); text != "" {
+				return field, `containing "` + text + `"`, ""
+			}
+			return field, "", ""
+		}
+	}
+	if node.Class != "COMPARISON" {
+		// Negations and other compound filters are named by their first field.
+		return displayField(firstField(node)), "", ""
+	}
+	other := node.Right
+	field = fieldText(node.Left)
+	if field == "" {
+		field, other = fieldText(node.Right), node.Left
+	}
+	if field == "" {
+		return "", "", ""
+	}
+	field = displayField(field)
+	if node.Type != "COMPARE_EQUAL" {
+		return field, "", ""
+	}
+	for other != nil {
+		switch other.Class {
+		case "CAST":
+			other = other.Child
+		case "CONSTANT":
+			if other.LiteralKind == "NULL" {
+				return field, "", ""
+			}
+			return field, other.LiteralText, ""
+		case "PARAMETER":
+			return field, "", other.Identifier
+		default:
+			return field, "", ""
+		}
+	}
+	return field, "", ""
+}
+
+// displayField names a filtered field for people.
+func displayField(field string) string {
+	switch field {
+	case "":
+		return ""
+	case "name":
+		return "metric"
+	case "duration_ms":
+		return "duration"
+	}
+	// Attribute keys keep their spelling; only column names read as words.
+	if key, ok := strings.CutPrefix(field, "attributes['"); ok {
+		return "attribute " + strings.TrimSuffix(key, "']")
+	}
+	if key, ok := strings.CutPrefix(field, "resource['"); ok {
+		return "resource " + strings.TrimSuffix(key, "']")
+	}
+	return strings.ReplaceAll(field, "_", " ")
+}
+
+func unwrapLower(v *SQLExpr) *SQLExpr {
+	if v != nil && v.Class == "FUNCTION" && v.Function == "lower" && len(v.Arguments) == 1 {
+		return v.Arguments[0]
+	}
+	return v
+}
+
+// firstField is the first field a filter reads, depth first.
+func firstField(v *SQLExpr) string {
+	if v == nil {
+		return ""
+	}
+	if field := fieldText(v); field != "" {
+		return field
+	}
+	for _, list := range [][]*SQLExpr{{v.Left, v.Right, v.Child, v.Input, v.Lower, v.Upper}, v.Children, v.Arguments} {
+		for _, child := range list {
+			if field := firstField(child); field != "" {
+				return field
+			}
+		}
+	}
+	return ""
+}

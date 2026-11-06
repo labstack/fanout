@@ -4,8 +4,8 @@ import (
 	"context"
 	"github.com/labstack/fanout/internal/annotations"
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/query/writegate"
+	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/writegate"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"testing"
 	"time"
@@ -18,12 +18,12 @@ func TestDetectorPublishesWhilePersistenceBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer duck.Close()
-	unlock := duck.WriteGate().Lock(writegate.WriteRollupService)
+	unlock := duck.WriteGate().Lock(writegate.RollupService)
 	defer unlock()
 	d := NewDetector(duck, DefaultDetectorConfig())
 	ctx, cancel := context.WithCancel(t.Context())
@@ -43,7 +43,7 @@ func TestDetectorPublishesWhilePersistenceBlocked(t *testing.T) {
 }
 
 func TestDetectorCoalescesPendingPersistence(t *testing.T) {
-	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
+	d := NewDetector(&engine.Duck{}, DefaultDetectorConfig())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	entered := make(chan time.Time, 3)
@@ -63,7 +63,7 @@ func TestDetectorCoalescesPendingPersistence(t *testing.T) {
 	}()
 	defer func() { cancel(); <-done }()
 	now := time.Now().UTC()
-	publish := func(at time.Time) { d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: at}) }
+	publish := func(at time.Time) { d.publishSnapshot(Snapshot{GeneratedAt: at}) }
 	publish(now)
 	select {
 	case at := <-entered:
@@ -109,13 +109,13 @@ func TestDetectorAnnotationMapping(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer duck.Close()
 	at := time.Now().UTC().Truncate(time.Minute)
-	snapshot := IntelligenceSnapshot{GeneratedAt: at, Anomalies: []Anomaly{{ServiceName: "checkout", Type: AnomalyLatencyDegradation, ZScore: -4, DetectedAt: at, WindowStart: at.Add(-5 * time.Minute), WindowEnd: at, Description: "Slow"}, {ServiceName: "payment", Type: AnomalyVolumeChange, ZScore: 3, DetectedAt: at, WindowStart: at.Add(-5 * time.Minute), WindowEnd: at, Description: "Low volume"}}}
+	snapshot := Snapshot{GeneratedAt: at, Anomalies: []Anomaly{{ServiceName: "checkout", Type: AnomalyLatencyDegradation, ZScore: -4, DetectedAt: at, WindowStart: at.Add(-5 * time.Minute), WindowEnd: at, Description: "Slow"}, {ServiceName: "payment", Type: AnomalyVolumeChange, ZScore: 3, DetectedAt: at, WindowStart: at.Add(-5 * time.Minute), WindowEnd: at, Description: "Low volume"}}}
 	findings := detectorAnnotations(snapshot, "shop")
 	if err := duck.RecordAnomalies(t.Context(), findings, at); err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestDetectorAnnotationMapping(t *testing.T) {
 }
 
 func TestDetectorWritesFailedFindingsWithTheNextBatch(t *testing.T) {
-	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
+	d := NewDetector(&engine.Duck{}, DefaultDetectorConfig())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	calls := make(chan []annotations.Anomaly, 2)
@@ -173,7 +173,7 @@ func TestDetectorWritesFailedFindingsWithTheNextBatch(t *testing.T) {
 }
 
 func TestDetectorKeepsDisplacedPendingIncidentAndItsInterval(t *testing.T) {
-	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
+	d := NewDetector(&engine.Duck{}, DefaultDetectorConfig())
 	ctx, cancel := context.WithCancel(t.Context())
 	entered := make(chan annotationBatch, 3)
 	release := make(chan struct{})
@@ -192,17 +192,17 @@ func TestDetectorKeepsDisplacedPendingIncidentAndItsInterval(t *testing.T) {
 	}()
 	defer func() { cancel(); <-done }()
 	now := time.Now().UTC()
-	d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: now})
+	d.publishSnapshot(Snapshot{GeneratedAt: now})
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
 		t.Fatal("persistence did not start")
 	}
 	incident := Anomaly{ServiceName: "api", Type: AnomalyLatencyDegradation, ZScore: 4, WindowStart: now.Add(-time.Minute), WindowEnd: now}
-	d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: now.Add(time.Minute), Anomalies: []Anomaly{incident}})
+	d.publishSnapshot(Snapshot{GeneratedAt: now.Add(time.Minute), Anomalies: []Anomaly{incident}})
 	// A repeated live pattern refresh must not duplicate this finding.
-	d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: now.Add(2 * time.Minute), Anomalies: []Anomaly{incident}})
-	d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: now.Add(3 * time.Minute)})
+	d.publishSnapshot(Snapshot{GeneratedAt: now.Add(2 * time.Minute), Anomalies: []Anomaly{incident}})
+	d.publishSnapshot(Snapshot{GeneratedAt: now.Add(3 * time.Minute)})
 	close(release)
 	select {
 	case batch := <-entered:
@@ -215,14 +215,14 @@ func TestDetectorKeepsDisplacedPendingIncidentAndItsInterval(t *testing.T) {
 }
 
 func TestDetectorBoundsPendingFindings(t *testing.T) {
-	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
+	d := NewDetector(&engine.Duck{}, DefaultDetectorConfig())
 	now := time.Now().UTC()
 	for _, count := range []int{maxCarriedAnomalies + 1, 1} {
 		findings := make([]Anomaly, count)
 		for i := range findings {
 			findings[i] = Anomaly{Type: AnomalyLatencyDegradation, WindowStart: now.Add(time.Duration(i) * time.Minute), WindowEnd: now.Add(time.Duration(i+1) * time.Minute)}
 		}
-		d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: now, Anomalies: findings})
+		d.publishSnapshot(Snapshot{GeneratedAt: now, Anomalies: findings})
 	}
 	batch := <-d.annotationBatches
 	if len(batch.findings) != maxCarriedAnomalies || !batch.findings[len(batch.findings)-1].To.Equal(now.Add(time.Minute)) {

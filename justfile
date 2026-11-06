@@ -150,6 +150,10 @@ notices-check:
 db-gen:
     cd internal/db && sqlc generate
 
+# Regenerate the format-5 dedicated attribute keys from the pinned semconv tag (network).
+semconv-generate:
+    bash scripts/semconv-generate.sh
+
 # Create a timestamped SQLite SQL migration. Edit its Up section, then db-gen.
 db-migrate-create NAME:
     {{goose}} -dir internal/db/migrations create {{NAME}} sql
@@ -185,6 +189,10 @@ test *ARGS='./...':
 # Run the Go tests under the race detector.
 test-race:
     bash scripts/with-duckdb.sh go test -race -gcflags=all=-d=checkptr=0 ./...
+
+# Opt-in wall-clock acceptance; deterministic work bounds remain in test.
+fanql-perf:
+    FANOUT_TEST_LATENCY=1 bash scripts/with-duckdb.sh go test ./internal/fanql -run TestLatencyBudgets -count=1
 
 # ── Browser quality ──────────────────────────────────────────────────────────
 

@@ -1,23 +1,27 @@
 # Fanout
 
-**Single-binary, agent-native OpenTelemetry investigation.**
+**Observability your agents can operate.** Send OpenTelemetry to one binary, then investigate with
+Fanout's built-in agent or connect your own over MCP.
 
 [![CI](https://github.com/labstack/fanout/actions/workflows/ci.yml/badge.svg)](https://github.com/labstack/fanout/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/labstack/fanout.svg)](https://pkg.go.dev/github.com/labstack/fanout)
 
+<a href="https://fanout.run">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/src/assets/landing/overview-dark.png">
-  <img src="site/src/assets/landing/overview-light.png" alt="Fanout System overview dashboard showing request rates, errors, latency, and service charts.">
+  <img src="site/src/assets/landing/overview-light.png" alt="A Fanout dashboard the built-in agent built from one request: store request rate, error rate, p95 latency and error logs, with request and error rates by service.">
 </picture>
+</a>
 
 Fanout keeps OpenTelemetry traces, logs, and metrics in one binary and one data directory, with no
 external storage services to operate. Fanout is pre-release and changes without migration paths; the browser
 client, built-in agent, MCP tools, dashboards, and alerts are preview capabilities
-([status](https://fanout.run/status/capabilities)). Start with the
+([status](https://fanout.run/docs/reference/capabilities)). Start with the
 [documentation](https://fanout.run) or run it below.
 
 - OTLP ingest over gRPC and HTTP, with local Parquet storage and DuckDB analytics.
+- Explore and FanQL for querying telemetry without an AI provider.
 - An investigation agent that answers questions about your telemetry in plain language.
 - An MCP server for external agents using the same typed query tools.
 - Dashboards across traces, logs, and metrics, and alerts on service error rate, latency,
@@ -28,7 +32,7 @@ client, built-in agent, MCP tools, dashboards, and alerts are preview capabiliti
 ### Docker
 
 ```sh
-docker run --name fanout -p 7520:7520 \
+docker run --name fanout --restart unless-stopped -p 7520:7520 \
   -v fanout-data:/var/lib/fanout/data \
   -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
   labstack/fanout:latest
@@ -43,8 +47,8 @@ docker exec fanout fanout login-link admin@example.com
 ```
 
 The UI, API, MCP, and both OTLP transports share port `7520`. See
-[installation](https://fanout.run/start/install) for image defaults and bind-mount ownership, and
-[first boot](https://fanout.run/start/first-boot) for setup and SMTP login.
+[installation](https://fanout.run/docs/get-started/install) for image defaults and bind-mount ownership, and
+[first boot](https://fanout.run/docs/get-started/first-boot) for setup and SMTP login.
 
 ### Native binary
 
@@ -56,7 +60,7 @@ export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32)
 fanout
 ```
 
-Set `FANOUT_VERSION=v2026.10.1-alpha` to pin a release and `FANOUT_PREFIX` to choose the installation
+Set `FANOUT_VERSION` to a [release tag](https://github.com/labstack/fanout/releases), such as `v2026.11.0-alpha`, to pin a release, and `FANOUT_PREFIX` to choose the installation
 directory. Native installs bind `127.0.0.1:7520`; set `FANOUT_ADDR=:7520` for remote access, then
 follow the same first-boot setup.
 
@@ -88,22 +92,22 @@ service:
 
 Use an existing `otlp` receiver, set `INGEST_TOKEN`, and replace `fanout` with the Collector's
 reachable private hostname. OTLP/gRPC uses `localhost:7520` locally; see [send
-telemetry](https://fanout.run/start/send-telemetry) for TLS and HTTP/2 setup.
+telemetry](https://fanout.run/docs/get-started/send-telemetry) for TLS and HTTP/2 setup.
 
 ### Enable chat
 
 Select `FANOUT_AI_PROVIDER=anthropic` and inject `ANTHROPIC_API_KEY`, or select
 `FANOUT_AI_PROVIDER=openai` and inject `OPENAI_API_KEY`, then restart Fanout; the selected provider
 requires its key at startup. With no provider, chat is disabled and the other features still work.
-See [AI settings](https://fanout.run/reference/settings/ai).
+See [AI settings](https://fanout.run/docs/reference/configuration/ai).
 
 ### Connect an MCP client
 
 Set `FANOUT_PUBLIC_URL` to your stable, externally reachable HTTPS origin, then point a remote MCP
 client at that origin's `/mcp` endpoint. The client discovers and registers through OAuth; you
-authorize its scopes in the browser. The client must support MCP protocol `2026-07-28` over
-stateless Streamable HTTP; older versions and the `initialize` handshake are unsupported. See [connect over
-MCP](https://fanout.run/guides/connect-over-mcp) for setup and permissions.
+authorize its scopes in the browser. Fanout serves MCP `2026-07-28` and, through the `initialize`
+handshake, `2025-11-25` and `2025-06-18` over Streamable HTTP. See [connect over
+MCP](https://fanout.run/docs/guides/mcp) for setup and permissions.
 
 ## How it compares
 
@@ -127,7 +131,7 @@ and agent clients share a typed observability contract.
 ![Fanout runtime architecture: OTLP ingest and commit workers publish Parquet; the browser API, agent runtime, and MCP server share queries and dashboards, with DuckDB query state, SQLite control state, anomaly detection, and webhook alerts.](docs/diagrams/architecture.svg)
 
 Parquet holds telemetry, DuckDB query state is rebuildable, and SQLite holds transactional product
-state. See [how storage works](https://fanout.run/explanation/storage-model) for durable ingest,
+state. See [how storage works](https://fanout.run/docs/concepts/storage) for durable ingest,
 indexed reads, and compaction while reads continue.
 
 ![Telemetry durability and query flow: authenticated OTLP rows pass through group admission, parallel commit workers, and durable publication into immutable Parquet batches; indexed trace reads, DuckDB SQL, retention, and compaction use those batches, while service and edge rollups populate rebuildable query state.](docs/diagrams/persistence.svg)
@@ -151,23 +155,23 @@ change requires a restart.
 | `FANOUT_MCP_ENABLED` | `true` | Serve the MCP endpoint at `/mcp` |
 
 Every secret accepts `<NAME>_FILE` instead of its value; see the [settings
-reference](https://fanout.run/reference/configuration) for validation and [runtime secret
+reference](https://fanout.run/docs/reference/configuration) for validation and [runtime secret
 delivery](docs/operations.md#runtime-secret-delivery) for deployment examples.
 
 ### Advanced DuckDB sizing
 
 Fanout sizes DuckDB automatically; measured workloads can override memory, connections, and threads
-as described in [DuckDB sizing](https://fanout.run/reference/configuration#duckdb-sizing).
+as described in [DuckDB sizing](https://fanout.run/docs/reference/configuration#duckdb-sizing).
 
 For TLS, health checks, backups, upgrades, retention, and recovery, see the [operator
 runbook](docs/operations.md).
 
 ## Performance
 
-Fanout v2026.10.8-alpha accepted **415,859 mixed OpenTelemetry items/s**
-over 303.5 seconds on a Hetzner Cloud ccx33 (8 dedicated vCPUs, 32 GB RAM), with
-telemetrygen on a separate ccx33. The ingest run on 16 October 2026 passed every
-quality gate. See the [performance methodology](https://fanout.run/explanation/performance).
+Fanout v2026.11.0-alpha accepted **507,311 mixed OpenTelemetry items/s**
+over 306.8 seconds on a Hetzner Cloud ccx33 (8 dedicated vCPUs, 32 GB RAM), with
+telemetrygen on a separate ccx33. The ingest run on 6 November 2026 passed every
+quality gate. See the [performance methodology](https://fanout.run/docs/concepts/performance).
 [Fanout Bench](https://github.com/labstack/fanout-bench) reproduces the measurement on your hardware.
 
 ## Build from source
@@ -208,7 +212,7 @@ generated assets, hooks, and project layout.
 ## Releases
 
 Versions are CalVer — `vYYYY.M.N[-alpha|-beta|-rc]`, numbered from 0 within each month across all
-maturity suffixes. Fanout is alpha (for example, `v2026.10.1-alpha`); GA has no suffix.
+maturity suffixes. Fanout is alpha (for example, `v2026.11.0-alpha`); GA has no suffix.
 Container tags omit the leading `v`, and every release moves `latest`. Tagged releases publish
 identical manifests to Docker Hub (`labstack/fanout`) and GHCR (`ghcr.io/labstack/fanout`); GHCR is
 canonical and also carries development images.
@@ -216,9 +220,9 @@ canonical and also carries development images.
 | Image tag | Points at |
 | --- | --- |
 | `labstack/fanout:latest` | the newest release, mirrored on Docker Hub |
-| `labstack/fanout:2026.10.1-alpha` | that exact release, mirrored on Docker Hub |
+| `labstack/fanout:2026.11.0-alpha` | that exact release, mirrored on Docker Hub |
 | `ghcr.io/labstack/fanout:latest` | the newest release |
-| `ghcr.io/labstack/fanout:2026.10.1-alpha` | that exact release |
+| `ghcr.io/labstack/fanout:2026.11.0-alpha` | that exact release |
 | `ghcr.io/labstack/fanout:main` | the tip of `main` |
 | `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
 

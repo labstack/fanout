@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"strings"
 	"testing"
 	"time"
@@ -25,14 +25,14 @@ func (p pathErrorObservability) Trace(context.Context, observability.Scope, stri
 func TestMCPRedactsEnginePaths(t *testing.T) {
 	s := NewWithIntelligence(pathErrorObservability{}, nil, nil, nil, "test")
 	_, _, err := s.trace(t.Context(), nil, TraceInput{})
-	if err == nil || strings.Contains(err.Error(), "/srv/") || err.Error() != panel.ReadFailure {
+	if err == nil || strings.Contains(err.Error(), "/srv/") || err.Error() != query.ReadFailure {
 		t.Fatalf("MCP error=%v", err)
 	}
 }
 
 type boundedWriteValidator struct{ t *testing.T }
 
-func (v boundedWriteValidator) Validate(ctx context.Context, _ *panel.Dashboard) error {
+func (v boundedWriteValidator) Validate(ctx context.Context, _ *query.Dashboard) error {
 	d, ok := ctx.Deadline()
 	if !ok || time.Until(d) > 20*time.Second {
 		v.t.Errorf("unbounded MCP write: %v %v", d, ok)

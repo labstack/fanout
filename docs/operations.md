@@ -44,7 +44,7 @@ Unselected AI providers' value and file forms are ignored.
 For Docker, mount a provisioned secret and inject its path:
 
 ```sh
-docker run --name fanout -p 7520:7520 \
+docker run --name fanout --restart unless-stopped -p 7520:7520 \
   -v fanout-data:/var/lib/fanout/data \
   --mount type=bind,src="$AUTH_SECRET_PATH",dst=/run/secrets/auth_code,readonly \
   -e FANOUT_AUTH_CODE_SECRET_FILE=/run/secrets/auth_code \
@@ -173,7 +173,7 @@ their HTTP `Host` matches that origin, so the reverse proxy must preserve the
 original host.
 
 MCP also validates `Origin` before authentication; see
-[Connect an agent over MCP](https://fanout.run/guides/connect-over-mcp#protocol).
+[Connect an agent over MCP](https://fanout.run/docs/guides/mcp#protocol).
 
 ## Health and monitoring
 
@@ -186,10 +186,42 @@ normally. Healthcheck reads only these two settings and does not require valid
 secrets. An explicit `fanout healthcheck <url>` uses default proxy and
 certificate verification behaviour.
 
-- `/healthz` is the liveness check.
-- `/readyz` includes storage readiness and resolved runtime sizing.
+- `/healthz` is the liveness check. It fails only when Fanout's own work on
+  the query engine stalls: a Parquet publication holds reads for 10 minutes,
+  or an idle engine does not answer a ping while no read holds it. An
+  overloaded engine stays alive, and so does one running a query past its
+  deadline.
+- `/readyz` includes storage readiness and resolved runtime sizing. A busy
+  engine reports `degraded` with 200; a stalled one reports 503. A query still
+  running 25 seconds past its deadline reports `queries` as `degraded`, logs
+  a warning with a hash of the query (never its text), and increments
+  `fanout_duckdb_statement_overruns_total`.
 - `/metrics` exposes Prometheus metrics. Keep it private or configure
   `FANOUT_METRICS_TOKEN`; do not make it public merely to simplify scraping.
+
+Monitor admission and compaction together:
+
+- `fanout_ingest_throttled_total{reason}` counts refused whole exports by `debt`,
+  `reads`, or `budget`. Exporters need retries enabled.
+- `fanout_ingest_admission_rows_per_second` is the current row-rate cap; zero
+  means uncapped.
+- `fanout_ingest_backpressure_seconds_total` measures time with an admission cap
+  active. Earlier releases measured blocked-writer time; do not compare them
+  directly.
+- `fanout_compaction_backlog_batches` is total generation-0 inventory, including
+  batches excluded from reclaimable debt.
+- `fanout_compaction_pass_seconds` measures pass duration, and
+  `fanout_compaction_retired_batches_total` counts input batches retired by
+  successful publications. Compare its rate with backlog growth.
+
+Run Fanout under a supervisor that restarts it on exit: Docker or Compose with
+`restart: unless-stopped` (`--restart unless-stopped`), systemd with
+`Restart=on-failure`, or Kubernetes. Docker's `HEALTHCHECK` only marks a
+container unhealthy; it does not restart it. Fanout exits with status 1 when
+the query engine fails beyond recovery, for example when it runs out of memory
+while writing its cache, or when a stall that fails `/healthz` lasts another
+25 seconds. It first finishes writing received telemetry; the restart
+rebuilds the query cache from stored telemetry.
 
 Alert on repeated restarts, readiness failures, ingest authentication failures,
 telemetry drops, sustained query latency, and available disk space. Retention

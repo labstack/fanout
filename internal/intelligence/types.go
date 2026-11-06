@@ -52,8 +52,8 @@ type Insight struct {
 	Message  string `json:"message"`  // Description
 }
 
-// IntelligenceSnapshot represents the current system intelligence state
-type IntelligenceSnapshot struct {
+// Snapshot represents the current system intelligence state
+type Snapshot struct {
 	evaluatedThrough time.Time
 	GeneratedAt      time.Time `json:"generated_at"`
 	Timeframe        string    `json:"timeframe"` // e.g., "last_15m"

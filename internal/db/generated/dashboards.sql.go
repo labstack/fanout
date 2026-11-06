@@ -57,7 +57,7 @@ func (q *Queries) GetDashboard(ctx context.Context, arg GetDashboardParams) (Das
 		&i.Description,
 		&i.IsDefault,
 		&i.Version,
-		&i.SpecJson,
+		&i.SpecJSON,
 		&i.PanelCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -102,7 +102,7 @@ type GetDashboardVersionRecordRow struct {
 	IsDefault          int64  `json:"is_default"`
 	DashboardCreatedAt string `json:"dashboard_created_at"`
 	Version            int64  `json:"version"`
-	SpecJson           string `json:"spec_json"`
+	SpecJSON           string `json:"spec_json"`
 	AuthorKind         string `json:"author_kind"`
 	AuthorID           string `json:"author_id"`
 	Message            string `json:"message"`
@@ -117,7 +117,7 @@ func (q *Queries) GetDashboardVersionRecord(ctx context.Context, arg GetDashboar
 		&i.IsDefault,
 		&i.DashboardCreatedAt,
 		&i.Version,
-		&i.SpecJson,
+		&i.SpecJSON,
 		&i.AuthorKind,
 		&i.AuthorID,
 		&i.Message,
@@ -141,7 +141,7 @@ type InsertDashboardBelowOwnerLimitParams struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Version     int64  `json:"version"`
-	SpecJson    string `json:"spec_json"`
+	SpecJSON    string `json:"spec_json"`
 	PanelCount  int64  `json:"panel_count"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
@@ -154,7 +154,7 @@ func (q *Queries) InsertDashboardBelowOwnerLimit(ctx context.Context, arg Insert
 		arg.Name,
 		arg.Description,
 		arg.Version,
-		arg.SpecJson,
+		arg.SpecJSON,
 		arg.PanelCount,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -202,7 +202,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 type InsertDashboardVersionParams struct {
 	DashboardID string `json:"dashboard_id"`
 	Version     int64  `json:"version"`
-	SpecJson    string `json:"spec_json"`
+	SpecJSON    string `json:"spec_json"`
 	AuthorKind  string `json:"author_kind"`
 	AuthorID    string `json:"author_id"`
 	Message     string `json:"message"`
@@ -213,7 +213,7 @@ func (q *Queries) InsertDashboardVersion(ctx context.Context, arg InsertDashboar
 	_, err := q.db.ExecContext(ctx, insertDashboardVersion,
 		arg.DashboardID,
 		arg.Version,
-		arg.SpecJson,
+		arg.SpecJSON,
 		arg.AuthorKind,
 		arg.AuthorID,
 		arg.Message,
@@ -363,7 +363,7 @@ type UpdateDashboardParams struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	NextVersion int64  `json:"next_version"`
-	SpecJson    string `json:"spec_json"`
+	SpecJSON    string `json:"spec_json"`
 	PanelCount  int64  `json:"panel_count"`
 	UpdatedAt   string `json:"updated_at"`
 	ID          string `json:"id"`
@@ -376,7 +376,7 @@ func (q *Queries) UpdateDashboard(ctx context.Context, arg UpdateDashboardParams
 		arg.Name,
 		arg.Description,
 		arg.NextVersion,
-		arg.SpecJson,
+		arg.SpecJSON,
 		arg.PanelCount,
 		arg.UpdatedAt,
 		arg.ID,

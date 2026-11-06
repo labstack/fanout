@@ -11,10 +11,9 @@ interface Props {
   alt: string;
   description: string;
   eager?: boolean;
-  spedUp?: boolean;
 }
 
-const { view, alt, description, eager = false, spedUp = false } = Astro.props;
+const { view, alt, description, eager = false } = Astro.props;
 const posters = { chat: { light: chatLight, dark: chatDark }, dashboard: { light: dashboardLight, dark: dashboardDark } };
 // Optional manifest: a checkout without published clips still builds with posters.
 const manifests = import.meta.glob<LandingMedia>("../../data/landing-media.json", { eager: true, import: "default" });
@@ -47,7 +46,7 @@ const available = hasProductVideo(clips, view);
   </div>
   <p id={`${id}-description`} class="fo-video-sr">{description}</p>
   <MediaCaption id={`${id}-caption`}
-    caption={available ? `Recorded on the OpenTelemetry Demo${spedUp ? " · sped up" : ""}` : "Recording pending · OpenTelemetry Demo"}
+    caption={available ? "Fanout interface · OpenTelemetry Demo data" : "Recording pending · OpenTelemetry Demo"}
     light={themes[0].mp4 ?? themes[0].poster.src} dark={themes[1].mp4 ?? themes[1].poster.src}>
     <button type="button" data-video-control hidden aria-label="Pause clip">Pause</button>
   </MediaCaption>

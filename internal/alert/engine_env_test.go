@@ -8,14 +8,14 @@ import (
 
 	_ "github.com/duckdb/duckdb-go/v2"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 )
 
 // buildEnvs feeds CEL rules from a SQL aggregate over service_rollup. DuckDB
 // widens SUM over integer columns to HUGEINT, which the driver scans as
-// *big.Int — a type the env conversion must handle, or throughput/log_count
-// silently read 0 while the DOUBLE fields (error_rate, p50, p95, deltas)
-// stay populated. Seen live 2026-07-03: Throughput=0 with ThroughputDelta=7.65
+// *big.Int, so the statement casts those sums to DOUBLE. Without that,
+// throughput/log_count read 0 while the DOUBLE fields (error_rate, p50, p95,
+// deltas) stay populated. Seen live 2026-07-03: Throughput=0 with ThroughputDelta=7.65
 // for a service pushing ~600 spans/min, making throughput rules unusable.
 func TestBuildEnvs_IntegerSumsSurviveHugeint(t *testing.T) {
 	db, err := sql.Open("duckdb", "")
@@ -39,7 +39,7 @@ INSERT INTO service_rollup VALUES
 		t.Fatalf("seed service_rollup: %v", err)
 	}
 
-	eng := NewEngine(nil, &query.Duck{DB: db}, nil, time.Minute, 7)
+	eng := NewEngine(nil, &engine.Duck{DB: db}, nil, time.Minute, 7)
 	envs := eng.buildEnvs(context.Background())
 	env, ok := envs["svc-a"]
 	if !ok {

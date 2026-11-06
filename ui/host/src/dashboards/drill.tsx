@@ -17,6 +17,7 @@ import type {
 import type { DrillClient } from "./drill-client";
 import type { DrillTarget } from "./drill-state";
 import { LogsViz } from "./viz/logs";
+import { duration } from "../../../format";
 export type DrillProps = {
   client: DrillClient;
   spec: DashboardSpec;
@@ -71,9 +72,9 @@ export function DrillDrawer({
       opened={Boolean(target)}
       onClose={() => onChange(undefined)}
       title={
-        panel
-          ? `${panel.title} · ${target?.kind}`
-          : "Panel selection unavailable"
+        !panel ? "Panel selection unavailable"
+          : target?.trace_id ? "Trace"
+          : `${target?.kind === "logs" ? "Logs" : "Traces"} in ${panel.title}`
       }
       position="right"
       size="xl"
@@ -127,7 +128,7 @@ export function DrillDrawer({
                 })
               }
             >
-              {t.service} · {t.operation} · {t.duration_ms.toFixed(1)} ms
+              {t.service} · {t.operation} · {duration(t.duration_ms)}
             </Button>
           ))}
           {exemplars.data.truncated && (
@@ -137,7 +138,7 @@ export function DrillDrawer({
           )}
         </Stack>
       )}
-      {trace.data && <TraceDetailView result={trace.data} dark={dark} />}
+      {trace.data && <TraceDetailView result={trace.data} dark={dark} loadSpan={client.span} />}
     </Drawer>
   );
 }

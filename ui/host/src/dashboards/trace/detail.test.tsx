@@ -1,9 +1,11 @@
-import { MantineProvider } from "@mantine/core";
+import { Drawer, MantineProvider } from "@mantine/core";
 import { within } from "@testing-library/dom";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TraceDetailView } from "./detail";
+import { Waterfall } from "./waterfall";
 import { traceFixture } from "../../../tests/fixtures";
 import { formatTimestamp } from "../../../../panels/units";
 import { duration } from "../../../../format";
@@ -21,21 +23,23 @@ it("uses the dashboard logs table for correlated logs with compact times and com
   } finally { await act(async () => root.unmount()); node.remove(); }
 });
 
-it.each([false, true].flatMap(dark => [false, true].map(interactive => ({dark, interactive}))))("shares accessible waterfall/logs/truncation and flame view (dark=$dark, interactive=$interactive)", async ({dark, interactive}) => {
+it.each([false, true].flatMap(dark => [false, true].map(external => ({dark, external}))))("shares accessible waterfall/logs/truncation and flame view (dark=$dark, external=$external)", async ({dark, external}) => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
   try {
-    const onSpan = interactive ? vi.fn() : undefined;
-    await act(async () => root.render(<MantineProvider forceColorScheme={dark ? "dark" : "light"}><TraceDetailView result={traceFixture} dark={dark} onSpan={onSpan} /></MantineProvider>));
+    const onSpan = external ? vi.fn() : undefined;
+    await act(async () => root.render(<MantineProvider forceColorScheme={dark ? "dark" : "light"}><QueryClientProvider client={new QueryClient()}><TraceDetailView result={traceFixture} dark={dark} onSpan={onSpan} /></QueryClientProvider></MantineProvider>));
     expect(node.textContent).toContain("correlated failure"); expect(node.textContent).toContain("1 of 3 spans");
     expect(node.querySelector('[aria-label^="cart on checkout took"]')).not.toBeNull();
     await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
     expect(node.textContent).toContain("lanes preserve span hierarchy without overlap");
     const span = traceFixture.data.spans[0];
-    const frame = within(node).getByRole(interactive ? "button" : "img", {name: `${span.operation} · ${duration(span.duration_ms)} · ${span.service}`});
+    const frame = within(node).getByRole("button", {name: `${span.operation} · ${duration(span.duration_ms)} · ${span.service}`});
     expect(frame.getAttribute("aria-label")!.startsWith(frame.textContent!)).toBe(true);
-    if (onSpan) { await act(async () => frame.click()); expect(onSpan).toHaveBeenCalledWith(span); }
-    else expect(frame.getAttribute("tabindex")).toBe("0");
+    await act(async () => frame.click());
+    // Without a caller's handler a span opens its details below the chart.
+    if (onSpan) { expect(onSpan).toHaveBeenCalledWith(span); expect(node.querySelector("[data-span-details]")).toBeNull(); }
+    else expect(node.querySelector("[data-span-details]")?.textContent).toContain("Error");
     expect([...node.querySelectorAll("button")].find(b => b.textContent === "Flame graph")?.getAttribute("aria-pressed")).toBe("true");
     expect(node.textContent).not.toMatch(/Explain|Investigate|fix it/);
   } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
@@ -45,12 +49,13 @@ it("renders overlapping siblings on separate flame lanes and tolerates cycles", 
   const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const result = { ...traceFixture, data: { ...traceFixture.data, spans: [span, { ...span, span_id: "a", parent_span_id: "root", operation: "child-a" }, { ...span, span_id: "b", parent_span_id: "root", operation: "child-b" }] } };
+  const view = (value: typeof result) => <MantineProvider><QueryClientProvider client={new QueryClient()}><TraceDetailView result={value} dark={false} /></QueryClientProvider></MantineProvider>;
   try {
-    await act(async () => root.render(<MantineProvider><TraceDetailView result={result} dark={false} /></MantineProvider>));
+    await act(async () => root.render(view(result)));
     await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
-    expect([...node.querySelectorAll<HTMLElement>('[role="img"][tabindex="0"]')].map(frame => frame.style.top)).toEqual(["6px", "42px", "78px"]);
-    await act(async () => root.render(<MantineProvider><TraceDetailView result={{ ...result, data: { ...result.data, spans: [{ ...span, parent_span_id: "root" }] } }} dark={false} /></MantineProvider>));
-    expect(node.querySelectorAll('[role="img"][tabindex="0"]')).toHaveLength(1);
+    expect([...node.querySelectorAll<HTMLElement>('button[aria-label*=" · "]')].map(frame => frame.style.top)).toEqual(["6px", "42px", "78px"]);
+    await act(async () => root.render(view({ ...result, data: { ...result.data, spans: [{ ...span, parent_span_id: "root" }] } })));
+    expect(node.querySelectorAll('button[aria-label*=" · "]')).toHaveLength(1);
   } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
 });
 
@@ -60,12 +65,157 @@ it("shows a compact flame frame tooltip on keyboard focus", async () => {
   const span = traceFixture.data.spans[0];
   const result = { ...traceFixture, data: { ...traceFixture.data, spans: [{ ...span, duration_ms: 100 }, { ...span, span_id: "compact", parent_span_id: "root", operation: "tiny", duration_ms: 1 }] } };
   try {
-    await act(async () => root.render(<MantineProvider><TraceDetailView result={result} dark={false} /></MantineProvider>));
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><TraceDetailView result={result} dark={false} /></QueryClientProvider></MantineProvider>));
     await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
-    const frame = node.querySelector<HTMLElement>('[role="img"][aria-label^="tiny ·"]')!;
+    const frame = node.querySelector<HTMLElement>('button[aria-label^="tiny ·"]')!;
     expect(frame.textContent).toBe("");
     await act(async () => { frame.focus(); await new Promise(resolve => setTimeout(resolve, 20)); });
     expect(document.activeElement).toBe(frame);
     expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain("checkout · tiny");
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});
+
+it("lists every span of a large trace in one list, children under their parents and indented", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  const base = traceFixture.data.spans[0];
+  const at = (ms: number) => new Date(Date.parse(base.start) + ms).toISOString();
+  // 300 spans: a root, then children listed before their parents and out of start order.
+  const spans = [...Array.from({ length: 299 }, (_, i) => ({ ...base, span_id: `s${299 - i}`, parent_span_id: 299 - i === 1 ? "root" : `s${Math.floor((299 - i) / 2) || 1}`, operation: `op-${299 - i}`, start: at(299 - i), duration_ms: 1 })), { ...base, duration_ms: 400 }];
+  try {
+    await act(async () => root.render(<MantineProvider><Waterfall spans={spans} dark={false} /></MantineProvider>));
+    const rows = [...node.querySelectorAll<HTMLElement>("tbody tr")];
+    expect(rows).toHaveLength(300);
+    expect(node.textContent).not.toMatch(/Next page|of 300/);
+    expect(rows.slice(0, 4).map(row => [row.querySelector("p")?.textContent, row.dataset.depth])).toEqual([["cart", "0"], ["op-1", "1"], ["op-2", "2"], ["op-4", "3"]]);
+    const parentOf = new Map(spans.map(span => [span.operation, span.parent_span_id]));
+    const seen = new Set<string | undefined>(["root"]);
+    for (const row of rows) { const operation = row.querySelector("p")!.textContent!; expect(seen.has(parentOf.get(operation) ?? "root")).toBe(true); seen.add(spans.find(span => span.operation === operation)!.span_id); }
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});
+
+it("sizes the flame graph to its container instead of a fixed minimum width", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  try {
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><TraceDetailView result={traceFixture} dark={false} /></QueryClientProvider></MantineProvider>));
+    await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
+    // A fixed minimum (760 px) overflowed the 682 px drawer at 1440 px and forced a horizontal scroll.
+    expect(node.querySelector("[data-flame-graph]")).not.toBeNull();
+    expect(node.querySelector("[data-flame-graph] .mantine-ScrollArea-root")).toBeNull();
+    expect([...node.querySelectorAll<HTMLElement>("[data-flame-graph] *")].some(el => el.style.minWidth.includes("rem"))).toBe(false);
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});
+
+it("keeps flame ticks on one line and folds services past the palette into one legend entry", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  const [first] = traceFixture.data.spans;
+  const spans = Array.from({ length: 8 }, (_, i) => ({ ...first, span_id: `s${i}`, parent_span_id: i ? "s0" : undefined, service: `svc${i}`, duration_ms: i ? 1000 : 3_020_000 }));
+  try {
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><TraceDetailView result={{ ...traceFixture, data: { ...traceFixture.data, spans } }} dark={false} /></QueryClientProvider></MantineProvider>));
+    await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
+    const ticks = [...node.querySelectorAll<HTMLElement>("[data-flame-graph] > div:first-child > *")];
+    expect(ticks.at(-1)?.textContent).toBe("50m 20s");
+    expect(ticks.every(tick => tick.style.whiteSpace === "nowrap")).toBe(true);
+    const legend = [...node.querySelectorAll("[data-flame-legend] > *")].map(item => item.textContent);
+    expect(legend).toEqual(["svc0", "svc1", "svc2", "svc3", "svc4", "svc5", "2 other services: svc6, svc7"]);
+    // The folded entry is reachable by keyboard and shows the names on focus.
+    const others = node.querySelector<HTMLElement>("[data-flame-others]")!;
+    expect(others.tabIndex).toBe(0);
+    await act(async () => others.focus());
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")?.textContent).toBe("svc6, svc7"));
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});
+
+it("puts the truncation notice beside the chart and says the timeline covers the loaded spans", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  const [span] = traceFixture.data.spans;
+  // 500 of 1300 spans loaded: the loaded spans run 35 hours of a 102-hour trace.
+  const spans = [{ ...span, duration_ms: 35 * 3_600_000 }];
+  const data = { ...traceFixture.data, spans, duration_ms: 102 * 3_600_000, span_count: 1300 };
+  try {
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><TraceDetailView result={{ ...traceFixture, data }} dark={false} /></QueryClientProvider></MantineProvider>));
+    const notice = node.querySelector<HTMLElement>("[data-trace-truncated]")!;
+    expect(notice.textContent).toContain(`The timeline shows the loaded spans: ${duration(35 * 3_600_000)} of the trace's ${duration(102 * 3_600_000)}.`);
+    // Above the chart, not under the correlated logs.
+    expect(notice.compareDocumentPosition(node.querySelector("[data-waterfall]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
+    expect(node.querySelector("[data-flame-duration]")?.textContent).toBe(`${duration(35 * 3_600_000)} of ${duration(102 * 3_600_000)} shown`);
+    expect(notice.compareDocumentPosition(node.querySelector("[data-flame-graph]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});
+
+it("drops flame ticks whose labels would touch on a narrow axis", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  let resize: ResizeObserverCallback = () => {};
+  vi.stubGlobal("ResizeObserver", class { constructor(callback: ResizeObserverCallback) { resize = callback; } observe() {} unobserve() {} disconnect() {} });
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  const [span] = traceFixture.data.spans;
+  const data = { ...traceFixture.data, spans: [{ ...span, duration_ms: 35 * 3_600_000 + 57 * 60_000 }] };
+  const ticks = () => [...node.querySelectorAll<HTMLElement>("[data-flame-graph] > div:first-child > *")].map(tick => tick.textContent);
+  const width = (px: number) => act(async () => resize([{ contentRect: { width: px } } as ResizeObserverEntry], {} as ResizeObserver));
+  try {
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><TraceDetailView result={{ ...traceFixture, data }} dark={false} /></QueryClientProvider></MantineProvider>));
+    await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
+    await width(800);
+    expect(ticks()).toHaveLength(5);
+    // The flame axis inside a 400 px drawer: the 75% and end labels came within 3 px.
+    await width(330);
+    expect(ticks()).toHaveLength(3);
+    expect(ticks().at(-1)).toBe(duration(data.spans[0].duration_ms));
+    await width(120);
+    expect(ticks()).toHaveLength(2);
+    expect(node.querySelectorAll("[data-flame-graph] > div:last-child > div[style*='border-left']")).toHaveLength(2);
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});
+
+it("dismisses the other-services names with Escape before the drawer closes", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  const [first] = traceFixture.data.spans;
+  const spans = Array.from({ length: 8 }, (_, i) => ({ ...first, span_id: `s${i}`, parent_span_id: i ? "s0" : undefined, service: `svc${i}` }));
+  const onClose = vi.fn();
+  const escape = (target: Element) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  try {
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><Drawer opened onClose={onClose} transitionProps={{ duration: 0 }}><TraceDetailView result={{ ...traceFixture, data: { ...traceFixture.data, spans } }} dark={false} /></Drawer></QueryClientProvider></MantineProvider>));
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
+    const others = document.querySelector<HTMLElement>("[data-flame-others]")!;
+    await act(async () => others.focus());
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")?.textContent).toBe("svc6, svc7"));
+    await escape(others);
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+    await escape(others);
+    expect(onClose).toHaveBeenCalledOnce();
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});
+
+it("dismisses hover-opened other-services names with Escape before the drawer closes, and opens them on touch", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  const [first] = traceFixture.data.spans;
+  const spans = Array.from({ length: 8 }, (_, i) => ({ ...first, span_id: `s${i}`, parent_span_id: i ? "s0" : undefined, service: `svc${i}` }));
+  const onClose = vi.fn();
+  const escape = (target: Element) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  try {
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><Drawer opened onClose={onClose} transitionProps={{ duration: 0 }}><TraceDetailView result={{ ...traceFixture, data: { ...traceFixture.data, spans } }} dark={false} /></Drawer></QueryClientProvider></MantineProvider>));
+    const toggle = [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!;
+    await act(async () => toggle.click());
+    toggle.focus();
+    const others = document.querySelector<HTMLElement>("[data-flame-others]")!;
+    // Hovered while focus stays on the view toggle.
+    await act(async () => { others.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })); });
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")?.textContent).toBe("svc6, svc7"));
+    await escape(toggle);
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => { others.dispatchEvent(new Event("touchstart", { bubbles: true })); });
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")?.textContent).toBe("svc6, svc7"));
+    await escape(toggle);
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")).toBeNull());
+    await escape(toggle);
+    expect(onClose).toHaveBeenCalledOnce();
   } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
 });

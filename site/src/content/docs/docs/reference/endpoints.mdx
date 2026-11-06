@@ -1,0 +1,107 @@
+---
+title: Endpoints
+description: The operational HTTP endpoints a Fanout instance exposes, and what each one requires.
+summary: Health, readiness, metrics, profiling and the protocol endpoints, with the credential each expects.
+read_when:
+  - You are configuring a load balancer, a probe or a Prometheus scrape.
+  - You need to know which endpoints are reachable without authentication.
+status: preview
+---
+
+Everything below is served by the same HTTP listener as the browser client, on
+`FANOUT_ADDR` (`127.0.0.1:7520` by default; the image sets `:7520`).
+
+[HTTP routes](/docs/reference/api) lists every route and the credential it requires.
+
+## Health
+
+| Path | Requires | Reports |
+|---|---|---|
+| `/healthz` | nothing | Liveness — the process is up and its own work on the query engine is not stalled |
+| `/readyz` | nothing | Readiness — storage is attached, plus resolved runtime sizing; a busy engine, or a query running past its deadline, reads `degraded` |
+
+Use `/healthz` for restart decisions and `/readyz` for traffic decisions.
+
+`/healthz` fails when a Parquet publication holds reads for 10 minutes, or
+when an idle engine does not answer a ping. A query running past its deadline
+never fails it: a restart would not stop the query from running again.
+
+Fanout exits with status 1 on a fatal query engine error, or when a stall
+that fails `/healthz` lasts another 25 seconds. Run it under a
+supervisor that restarts on exit: Docker or Compose with
+`restart: unless-stopped`, systemd with `Restart=on-failure`, or Kubernetes.
+Docker's `HEALTHCHECK` alone marks a container unhealthy but does not restart
+it.
+
+## Operations
+
+| Path | Requires |
+|---|---|
+| `/metrics` | `operations:read`, or a service credential |
+| `/debug/pprof/*` | `operations:read` |
+
+`/metrics` is Prometheus exposition. It accepts a service credential as well
+as an admin session, which is how a scraper reaches it without a browser login;
+set `FANOUT_METRICS_TOKEN`. `FANOUT_METRICS_PUBLIC=true` permits unauthenticated
+scrapes and emits a startup warning.
+
+Metrics reveal traffic volumes, query activity and resource use. Keep `/metrics`
+private or authenticate scrapes with `FANOUT_METRICS_TOKEN`.
+
+`/debug/pprof/*` is off unless `FANOUT_PPROF_ENABLED=true`, and is admin-only
+even then. Profiling output can contain memory contents, which is why it sits
+behind `operations:read` rather than `telemetry:read`.
+
+## Protocol
+
+| Path | Purpose |
+|---|---|
+| `/mcp` | External MCP clients; OAuth access token |
+| `/api/mcp` | Browser MCP; browser session and `telemetry:read` |
+| `/api/auth/oauth/*` | Browser authorization and connected-agent management; browser session |
+| `/.well-known/*` | OAuth discovery for MCP clients |
+| `/oauth/register`, `/oauth/token` | OAuth client registration and token issue |
+
+## Ingest
+
+Both OTLP transports share `FANOUT_ADDR` with the application and require
+`Authorization: Bearer <ingest-token>`. Browser sessions and MCP OAuth tokens
+cannot authorize ingest, and an ingest token cannot authorize browser API calls.
+
+| Transport | Endpoint |
+|---|---|
+| OTLP/gRPC | Same host and port, using HTTP/2 |
+| OTLP/HTTP | `POST /v1/traces`, `POST /v1/metrics`, `POST /v1/logs` |
+
+For OTLP/HTTP, give a general exporter endpoint the base URL
+`http://host:7520`. Signal-specific endpoint settings include the full signal
+path. Unknown `/v1/*` paths return 404 and unsupported methods return 405,
+without falling through to the browser application. The HTTP handler accepts
+protobuf and gzip, with a 64 MiB decompressed body limit.
+
+See [send your first telemetry](/docs/get-started/send-telemetry).
+
+## Restrict the network surface
+
+Keep the backend listener private when a proxy serves the browser publicly.
+To keep ingest private, deny `/v1`, `/v1/*` and
+`/opentelemetry.proto.collector.*` at the public proxy. Verify both OTLP
+transports from outside the private network.
+
+Never ship the shared ingest token in browser or mobile code. Send public-client
+telemetry through a Collector or gateway you control. That gateway handles
+client authentication, rate limits and privacy controls, then forwards to
+private Fanout. Propagate `traceparent` and `tracestate` to correlate backend
+requests.
+
+For gRPC, forward HTTP/2 to the backend: h2c for plaintext or HTTP/2 over TLS.
+Set `FANOUT_PUBLIC_URL` to the public HTTPS origin. Preserve the public Host
+header for MCP and trust forwarded client IPs only from configured proxy CIDRs.
+See [TLS](/docs/guides/tls) and [hardening](/docs/guides/hardening).
+
+## What to alert on
+
+The endpoints tell you the instance is up; the metrics tell you whether it is
+coping. Watch repeated restarts, readiness failures, ingest authentication
+failures, telemetry drops, sustained query latency, and free disk space.
+[Troubleshooting](/docs/guides/troubleshooting) covers what each one usually means.

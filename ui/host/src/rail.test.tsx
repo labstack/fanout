@@ -43,7 +43,7 @@ function mount(props: Partial<Parameters<typeof Rail>[0]> = {}) {
   const root = createRoot(container);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const handlers = {
-    onNewChat: vi.fn(), onSelectThread: vi.fn(), onDeletedThread: vi.fn(), onSelectDashboard: vi.fn(), onCreateDashboard: vi.fn(), onInvestigateService: vi.fn(),
+    onNewChat: vi.fn(), onSelectThread: vi.fn(), onDeletedThread: vi.fn(), onSelectDashboard: vi.fn(), onCreateDashboard: vi.fn(), onNewDashboard: vi.fn(), onNavigate: vi.fn(), onInvestigateService: vi.fn(),
   };
   const ref = createRef<RailHandle>();
   const render = () => root.render(
@@ -178,24 +178,41 @@ describe("Rail", () => {
     await act(async () => root.unmount());
   });
 
-  it("offers New dashboard when the dashboard list is empty and the agent is available", async () => {
+  it("offers New dashboard and, with chat, Create with AI", async () => {
     fetchMock.mockImplementation(async (input, init) => String(input) === "/api/dashboards" ? json({ dashboards: [] }) : respond(input, init));
     const { root, handlers, render } = mount();
     await act(async () => render());
     await vi.waitFor(() => expect(document.body.textContent).toContain("New dashboard"));
-    const create = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((item) => item.textContent?.trim() === "New dashboard");
-    await act(async () => create!.click());
+    const button = (name: string) => Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((item) => item.textContent?.trim() === name)!;
+    await act(async () => button("New dashboard").click());
+    expect(handlers.onNewDashboard).toHaveBeenCalledOnce();
+    await act(async () => button("Create with AI").click());
     expect(handlers.onCreateDashboard).toHaveBeenCalledOnce();
-    expect(document.body.textContent).not.toContain("Create with AI");
     await act(async () => root.unmount());
   });
 
-  it("hides New dashboard for an empty list when the agent is unavailable", async () => {
+  it("links Explore, Logs and Traces with or without chat and marks the current page", async () => {
+    fetchMock.mockImplementation(async (input) => new URL(String(input), "http://localhost").pathname === "/api/agent/threads" ? json({ items: [], next_cursor: null }) : json({ dashboards: [] }));
+    for (const agentAvailable of [true, false]) {
+      const { root, render, handlers } = mount({ agentAvailable, activePath: "/logs" });
+      await act(async () => render());
+      const link = (path: string) => [...document.querySelectorAll<HTMLAnchorElement>(`a[href="${path}"]`)].at(-1)!;
+      expect(["/explore", "/logs", "/traces", "/alerts"].map(path => link(path).textContent)).toEqual(["Explore", "Logs", "Traces", "Alerts"]);
+      expect(link("/logs").getAttribute("aria-current")).toBe("page");
+      expect(link("/explore").getAttribute("aria-current")).toBeNull();
+      await act(async () => link("/traces").click());
+      expect(handlers.onNavigate).toHaveBeenCalledWith("/traces");
+      await act(async () => root.unmount());
+      document.body.innerHTML = "";
+    }
+  });
+
+  it("offers New dashboard without chat", async () => {
     fetchMock.mockImplementation(async () => json({ dashboards: [] }));
     const { root, render } = mount({ agentAvailable: false });
     await act(async () => render());
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    expect(document.body.textContent).not.toContain("New dashboard");
+    expect(document.body.textContent).toContain("New dashboard");
     expect(document.body.textContent).not.toContain("Create with AI");
     await act(async () => root.unmount());
   });
@@ -236,6 +253,33 @@ describe("Rail", () => {
     expect(document.body.textContent).not.toContain("Create with AI");
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/agent/threads"))).toBe(false);
     await act(async () => root.unmount());
+  });
+
+  it("hides dashboard chat origins when chat is disabled", async () => {
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/dashboards"
+      ? json({ dashboards: [{ id: "board", name: "Checkout", origin: { thread_id: "source", message_id: "request", request_excerpt: "Build checkout" } }] })
+      : respond(input, init));
+    const { root, render } = mount({ agentAvailable: false });
+    try {
+      await act(async () => render());
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Checkout"));
+      expect(document.querySelector('a[href^="/chat/"]')).toBeNull();
+      expect(document.body.textContent).not.toContain("Built from:");
+    } finally { await act(async () => root.unmount()); }
+  });
+
+  it("searches dashboards without offering service investigations when chat is disabled", async () => {
+    const { root, render } = mount({ agentAvailable: false });
+    try {
+      await act(async () => render());
+      await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
+      await act(async () => setValue(document.querySelector('input[aria-label="Search chats, dashboards and services"]')!, "payments"));
+      await vi.waitFor(() => expect(document.body.textContent).toContain("No matching dashboards"));
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)); });
+      expect(document.body.textContent).not.toContain("Services");
+      expect(document.querySelector('a[href^="/chat/"]')).toBeNull();
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/telemetry/schema"))).toBe(false);
+    } finally { await act(async () => root.unmount()); }
   });
 
   it("searches chats on the server and filters dashboards locally", async () => {

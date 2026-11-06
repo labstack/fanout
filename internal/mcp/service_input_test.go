@@ -11,8 +11,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/querytest"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -20,7 +21,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func serviceInputFixture(t testing.TB) (*Server, *query.Duck, *telemetrystore.Repository, time.Time, time.Time) {
+func serviceInputFixture(t testing.TB) (*Server, *engine.Duck, *telemetrystore.Repository, time.Time, time.Time) {
 	t.Helper()
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 4, RollupInterval: time.Hour}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
@@ -28,7 +29,7 @@ func serviceInputFixture(t testing.TB) (*Server, *query.Duck, *telemetrystore.Re
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = repo.Close() })
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +40,7 @@ func serviceInputFixture(t testing.TB) (*Server, *query.Duck, *telemetrystore.Re
 	for i, service := range []string{"checkout", "fraud-detection", "accounting"} {
 		for j := range 6 - 2*i {
 			n := from.Add(time.Minute).UnixNano() + int64(j)
-			batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: service, TraceID: service, SpanID: fmt.Sprint(j), Name: "orders process", Kind: "SPAN_KIND_CONSUMER", StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, IngestedAt: n, DBSystem: "postgresql", PeerService: "broker", Attributes: map[string]any{"messaging.system": "kafka"}})
+			batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: service, TraceID: service, SpanID: fmt.Sprint(j), Name: "orders process", Kind: "SPAN_KIND_CONSUMER", StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, IngestedAt: n, PeerService: "broker", Attributes: map[string]any{"db.system.name": "postgresql", "messaging.system": "kafka"}})
 		}
 	}
 	batch.Logs = []telemetry.Log{{Namespace: "shop", ServiceName: "logger", TraceID: "logs-only", TimeUnixNanos: from.Add(time.Minute).UnixNano(), Severity: "INFO", Body: "log only"}}
@@ -49,7 +50,10 @@ func serviceInputFixture(t testing.TB) (*Server, *query.Duck, *telemetrystore.Re
 	if err := repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)
 	}
-	executor := panel.NewExecutor(duck, 30)
+	if err := querytest.RefreshSpanRollup(duck.DB); err != nil {
+		t.Fatal(err)
+	}
+	executor := query.NewExecutor(duck, 30)
 	queries := observability.New(duck, duck, 30)
 	executor.SetRollupReader(queries)
 	s := NewWithIntelligence(queries, nil, executor, nil, "test")
@@ -110,13 +114,13 @@ func TestServiceInputsKeepKnownAndIdleServices(t *testing.T) {
 				}
 				continue
 			}
-			if err != nil || result.IsError || len(out.Results) != 4 || out.Results[3].Status != panel.StatusOK {
+			if err != nil || result.IsError || len(out.Results) != 4 || out.Results[3].Status != query.StatusOK {
 				t.Fatalf("cached=%v %s: %+v %v", cached, service, out, err)
 			}
 		}
 	}
 	result, out, err := s.logs(t.Context(), nil, LogsInput{Service: "logger", Namespace: "shop", From: &from, To: &to})
-	if err != nil || result.IsError || len(out.Results) == 0 || out.Results[0].Status != panel.StatusOK {
+	if err != nil || result.IsError || len(out.Results) == 0 || out.Results[0].Status != query.StatusOK {
 		t.Fatalf("log-only service lost: %+v %+v %v", result, out, err)
 	}
 	result, out, err = s.trace(t.Context(), nil, TraceInput{Service: "checkout", Namespace: "shop", From: &from, To: &to})
@@ -135,7 +139,7 @@ func (e *serviceGuidanceSpy) ServiceGuidance(ctx context.Context, start, end tim
 	return e.panelExecutor.ServiceGuidance(ctx, start, end, namespace, service)
 }
 
-func (e *serviceGuidanceSpy) EmptyGuidance(ctx context.Context, req panel.RunRequest) (string, string, error) {
+func (e *serviceGuidanceSpy) EmptyGuidance(ctx context.Context, req query.RunRequest) (string, string, error) {
 	for _, p := range req.Dashboard.Panels {
 		if p.Query != nil {
 			for _, f := range p.Query.Where {
@@ -151,7 +155,7 @@ func (e *serviceGuidanceSpy) EmptyGuidance(ctx context.Context, req panel.RunReq
 
 func TestServiceInputsWithResultsSkipMembership(t *testing.T) {
 	s, duck, _, from, to := serviceInputFixture(t)
-	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','broker',6,1,0,'call')`, from.Add(time.Minute)); err != nil {
+	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) VALUES ('shop',?,'checkout','broker',6,1,0,'call')`, from.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	spy := &serviceGuidanceSpy{panelExecutor: s.panels}
@@ -194,23 +198,23 @@ func TestServiceInputsValidateOnlyAfterAllResultsEmpty(t *testing.T) {
 		unknown  bool
 		empty    bool
 	}{
-		{name: "unknown", service: "missing", statuses: []string{panel.StatusEmpty, panel.StatusEmpty}, lookups: 1, unknown: true, empty: true},
-		{name: "known empty", service: "idle", statuses: []string{panel.StatusEmpty, panel.StatusEmpty}, lookups: 1, empty: true},
-		{name: "no service", statuses: []string{panel.StatusEmpty, panel.StatusEmpty}, empty: true},
-		{name: "one populated", service: "missing", statuses: []string{panel.StatusEmpty, panel.StatusOK}},
-		{name: "panel error", service: "missing", statuses: []string{panel.StatusEmpty, panel.StatusError}},
+		{name: "unknown", service: "missing", statuses: []string{query.StatusEmpty, query.StatusEmpty}, lookups: 1, unknown: true, empty: true},
+		{name: "known empty", service: "idle", statuses: []string{query.StatusEmpty, query.StatusEmpty}, lookups: 1, empty: true},
+		{name: "no service", statuses: []string{query.StatusEmpty, query.StatusEmpty}, empty: true},
+		{name: "one populated", service: "missing", statuses: []string{query.StatusEmpty, query.StatusOK}},
+		{name: "panel error", service: "missing", statuses: []string{query.StatusEmpty, query.StatusError}},
 		{name: "execution error", service: "missing", runErr: errors.New("execution failed")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ran := false
-			spy := &serviceGuidanceSpy{panelExecutor: receiptExecutor{panelExecutor: executor, run: func(context.Context, panel.RunRequest) ([]panel.Result, error) {
+			spy := &serviceGuidanceSpy{panelExecutor: receiptExecutor{panelExecutor: executor, run: func(context.Context, query.RunRequest) ([]query.Result, error) {
 				ran = true
 				if spyCalls := s.panels.(*serviceGuidanceSpy).calls; spyCalls != 0 {
 					t.Errorf("membership ran before preset: %d lookups", spyCalls)
 				}
-				var results []panel.Result
+				var results []query.Result
 				for i, status := range tc.statuses {
-					results = append(results, panel.Result{ID: fmt.Sprint(i), Status: status})
+					results = append(results, query.Result{ID: fmt.Sprint(i), Status: status})
 				}
 				return results, tc.runErr
 			}}}
@@ -247,7 +251,7 @@ func TestServiceGuidanceBoundsOversizedName(t *testing.T) {
 
 func TestServiceInputsClampWindowBeforeValidation(t *testing.T) {
 	s, duck, repo, _, to := serviceInputFixture(t)
-	executor := panel.NewExecutor(duck, 7)
+	executor := query.NewExecutor(duck, 7)
 	queries := observability.New(duck, duck, 7)
 	executor.SetRollupReader(queries)
 	s.panels, s.queries = executor, queries
@@ -345,13 +349,13 @@ func TestServiceGuidanceLimitsSuggestionsAndScopesAliases(t *testing.T) {
 	for i := range 12 {
 		for j := range 20 - i {
 			n := from.Add(2*time.Minute).UnixNano() + int64(j)
-			batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: fmt.Sprintf("rank%02d", i), TraceID: fmt.Sprint(i), SpanID: fmt.Sprint(j), StartUnixNanos: n, EndUnixNanos: n + 1, PeerService: "alias", DBSystem: "alias", Attributes: map[string]any{"messaging.system": "alias"}})
+			batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: fmt.Sprintf("rank%02d", i), TraceID: fmt.Sprint(i), SpanID: fmt.Sprint(j), StartUnixNanos: n, EndUnixNanos: n + 1, PeerService: "alias", Attributes: map[string]any{"db.system.name": "alias", "messaging.system": "alias"}})
 		}
 	}
 	if err := repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','external',9,1,0,'call'),('other',?,'elsewhere','external',99,1,0,'call')`, from.Add(time.Minute), from.Add(time.Minute)); err != nil {
+	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) VALUES ('shop',?,'checkout','external',9,1,0,'call'),('other',?,'elsewhere','external',99,1,0,'call')`, from.Add(time.Minute), from.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	message, err := s.panels.ServiceGuidance(t.Context(), from, to, "shop", "external")
@@ -406,7 +410,7 @@ func BenchmarkServiceInput(b *testing.B) {
 		b.Fatal(err)
 	}
 	d := fragmentPreset("performance", "checkout", "shop", "", "", 0)
-	d.Time = panel.Time{From: &from, To: &to, Refresh: "off"}
+	d.Time = query.Time{From: &from, To: &to, Refresh: "off"}
 	for _, name := range []string{"rollup_check", "inventory_check", "unknown_guidance", "preset_baseline", "preset_lazy"} {
 		b.Run(name, func(b *testing.B) {
 			for b.Loop() {
@@ -419,7 +423,7 @@ func BenchmarkServiceInput(b *testing.B) {
 				case "unknown_guidance":
 					_, err = s.panels.ServiceGuidance(b.Context(), from, to, "shop", "kafka")
 				case "preset_baseline":
-					_, _, err = s.runFragment(b.Context(), panel.RunRequest{Dashboard: d}, "preset")
+					_, _, err = s.runFragment(b.Context(), query.RunRequest{Dashboard: d}, "preset")
 				case "preset_lazy":
 					_, _, err = s.performance(b.Context(), nil, PerformanceInput{Service: "checkout", Namespace: "shop", From: &from, To: &to})
 				}
@@ -460,7 +464,7 @@ func BenchmarkServiceInputRetainedBatches(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
-				duck, err := query.NewDuck(b.Context(), cfg, repo)
+				duck, err := engine.NewDuck(b.Context(), cfg, repo)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -468,7 +472,7 @@ func BenchmarkServiceInputRetainedBatches(b *testing.B) {
 				if err := duck.DB.QueryRow(`SELECT count(*) FROM read_batches`).Scan(&cached); err != nil || cached != 0 {
 					b.Fatalf("expected cold batch cache: %d %v", cached, err)
 				}
-				executor := panel.NewExecutor(duck, 7)
+				executor := query.NewExecutor(duck, 7)
 				queries := observability.New(duck, duck, 7)
 				executor.SetRollupReader(queries)
 				s := NewWithIntelligence(queries, nil, executor, nil, "test")
@@ -477,7 +481,7 @@ func BenchmarkServiceInputRetainedBatches(b *testing.B) {
 					service = "kafka"
 				}
 				d := fragmentPreset("performance", service, "shop", "", "", 0)
-				d.Time = panel.Time{From: &from, To: &to, Refresh: "off"}
+				d.Time = query.Time{From: &from, To: &to, Refresh: "off"}
 				var out PanelFragment
 				var message string
 				b.StartTimer()
@@ -487,7 +491,7 @@ func BenchmarkServiceInputRetainedBatches(b *testing.B) {
 				case "cold_unknown_guidance":
 					message, err = executor.ServiceGuidance(b.Context(), from, to, "shop", "kafka")
 				case "cold_preset_baseline", "cold_unknown_baseline":
-					_, out, err = s.runFragment(b.Context(), panel.RunRequest{Dashboard: d}, "preset")
+					_, out, err = s.runFragment(b.Context(), query.RunRequest{Dashboard: d}, "preset")
 				case "cold_preset_lazy", "cold_unknown_lazy":
 					_, out, err = s.performance(b.Context(), nil, PerformanceInput{Service: service, Namespace: "shop", From: &from, To: &to})
 				}
@@ -511,9 +515,9 @@ func BenchmarkServiceInputRetainedBatches(b *testing.B) {
 						b.Fatalf("expected four panel results: %+v", out.Results)
 					}
 					for _, result := range out.Results {
-						want := panel.StatusOK
+						want := query.StatusOK
 						if name == "cold_unknown_baseline" {
-							want = panel.StatusEmpty
+							want = query.StatusEmpty
 						}
 						if result.Status != want {
 							b.Fatalf("preset failed: %+v", result)

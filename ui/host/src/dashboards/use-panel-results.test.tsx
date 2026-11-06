@@ -117,6 +117,37 @@ it("loads only missing visible panels after visibility changes during an in-flig
   } finally { await host.dispose(); }
 });
 
+// The whole batch used to arrive at once, so a dashboard showed nothing until
+// its slowest panel finished.
+it("shows each streamed panel as soon as it arrives and keeps loading only the rest", async () => {
+  const slow = deferred<void>();
+  wire.panels.mockImplementation(async (body: QueryBody, _signal: AbortSignal, onResult: (r: PanelResult) => void) => {
+    onResult(resultFor("loaded")); onResult(resultFor("a"));
+    await slow.promise;
+    return body.panels!.map(resultFor);
+  });
+  const host = await mountVisibility(["loaded", "a", "b", "c"]);
+  try {
+    await waitForHook(() => {
+      expect(host.current.results.get("a")?.status).toBe("ok");
+      expect(host.current.fetching).toBe(true);
+      expect(host.current.fetchingIds).toEqual(["b", "c"]);
+    });
+    await act(async () => slow.resolve());
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.size).toBe(4); });
+    // A refresh's earlier data never overwrites results streamed since.
+    const again = deferred<void>();
+    const fresh = { ...resultFor("a"), elapsed_ms: 99 };
+    wire.panels.mockImplementation(async (body: QueryBody, _signal: AbortSignal, onResult: (r: PanelResult) => void) => {
+      onResult(fresh); await again.promise; return body.panels!.map(id => id === "a" ? fresh : resultFor(id));
+    });
+    await act(async () => host.current.refetch());
+    await waitForHook(() => expect(host.current.results.get("a")?.elapsed_ms).toBe(99));
+    await act(async () => again.resolve());
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.elapsed_ms).toBe(99); });
+  } finally { await host.dispose(); }
+});
+
 it("keeps one batch in flight when manual refresh is repeated during a fetch", async () => {
   const pending = deferred<PanelResult[]>();
   wire.panels.mockResolvedValueOnce([resultFor("loaded")]).mockImplementation(() => pending.promise);
@@ -269,9 +300,9 @@ it.each([new Error("Network disconnected"),new DOMException("Request aborted","A
     wire.panels.mockImplementation((body:QueryBody)=>Promise.resolve(body.panels!.map(resultFor)));
     const retry=[...host.node.querySelectorAll<HTMLButtonElement>('[data-panel="a"] button')].find(button=>button.textContent==="Retry")!;
     await act(async()=>retry.click());
-    await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("a")?.status).toBe("ok");expect(host.current.results.get("b")?.status).toBe("ok");});
-    expect(wire.panels).toHaveBeenCalledTimes(before+1);expect(wire.panels.mock.lastCall![0].panels).toEqual(["a","b"]);
-    expect(host.node.textContent).not.toContain("This panel failed");
+    await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("a")?.status).toBe("ok");expect(host.current.results.get("b")?.error).toBe(error.message);});
+    expect(wire.panels).toHaveBeenCalledTimes(before+1);expect(wire.panels.mock.lastCall![0].panels).toEqual(["a"]);
+    expect(host.node.querySelector('[data-panel="a"]')!.textContent).not.toContain("This panel failed");
   }finally{await host.dispose();}
 });
 
@@ -308,7 +339,7 @@ it("loads a newly visible panel normally after a different lazy batch failed", a
 });
 
 
-it.each(["Invalid measure","Query execution failed"])("retries only failed transport panels, excluding a returned panel error: %s", async message => {
+it.each(["Invalid measure","Query execution failed"])("retries a failed transport panel, not a returned panel error: %s", async message => {
   const queryError = {id:"loaded",elapsed_ms:0,status:"error" as const,error:message};
   wire.panels.mockResolvedValueOnce([queryError]).mockRejectedValue(new Error("Offline"));
   const host = await mountVisibility(["loaded"], visibilitySpec, true);
@@ -317,19 +348,19 @@ it.each(["Invalid measure","Query execution failed"])("retries only failed trans
     await act(async()=>within(host.node).getByRole("button", {name: /loaded menu/}).click());
     expect(document.body.textContent).toContain("Ask Fanout to fix it");
     const before = wire.panels.mock.calls.length;
-    await act(async () => host.current.retry());
+    await act(async () => host.current.retry("loaded"));
     expect(wire.panels).toHaveBeenCalledTimes(before);
     await host.show(["loaded","a","b"]);
     await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.error).toBe("Offline"); });
     wire.panels.mockImplementation((body:QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
-    await act(async () => host.current.retry());
+    await act(async () => host.current.retry("a"));
     await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.status).toBe("ok"); });
-    expect(wire.panels.mock.lastCall![0].panels).toEqual(["a","b"]);
+    expect(wire.panels.mock.lastCall![0].panels).toEqual(["a"]);
     expect(host.current.results.get("loaded")).toEqual(queryError);
   } finally { await host.dispose(); }
 });
 
-it.each([false,true])("queues a transport Retry during an unrelated lazy batch and sends its exact panels after settlement (unrelated failure=%s)", async failure => {
+it.each([false,true])("queues transport Retries during an unrelated lazy batch and sends the clicked panels after settlement (unrelated failure=%s)", async failure => {
   wire.panels.mockResolvedValueOnce([resultFor("loaded")]).mockRejectedValue(new Error("Offline"));
   const host = await mountVisibility(["loaded"]);
   try {
@@ -341,7 +372,7 @@ it.each([false,true])("queues a transport Retry during an unrelated lazy batch a
     await host.show(["c"]);
     await waitForHook(() => expect(host.current.fetchingIds).toEqual(["c"]));
     const before = wire.panels.mock.calls.length;
-    await act(async () => {host.current.retry();host.current.retry();});
+    await act(async () => {host.current.retry("a");host.current.retry("b");host.current.retry("a");});
     expect(wire.panels).toHaveBeenCalledTimes(before);
     await act(async () => pending.resolve([resultFor("c")]));
     await waitForHook(() => { expect(wire.panels).toHaveBeenCalledTimes(before+1); expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.status).toBe("ok"); });
@@ -350,7 +381,7 @@ it.each([false,true])("queues a transport Retry during an unrelated lazy batch a
 });
 
 
-it("retries the clicked transport batch without re-requesting a different failed batch", async () => {
+it("retries only the clicked panel, not the rest of its failed batch", async () => {
   wire.panels.mockResolvedValueOnce([resultFor("loaded")]).mockRejectedValue(new Error("Offline"));
   const host=await mountVisibility(["loaded"],visibilitySpec,true);
   try {
@@ -363,7 +394,7 @@ it("retries the clicked transport batch without re-requesting a different failed
     const retry=[...host.node.querySelectorAll<HTMLButtonElement>('[data-panel="a"] button')].find(button=>button.textContent==="Retry")!;
     await act(async()=>retry.click());
     await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("a")?.status).toBe("ok");});
-    expect(wire.panels.mock.lastCall![0].panels).toEqual(["a","b"]);
+    expect(wire.panels.mock.lastCall![0].panels).toEqual(["a"]);
     expect(host.current.results.get("c")?.error).toBe("Offline");
   } finally {await host.dispose();}
 });
@@ -376,12 +407,12 @@ it("restores query error actions when a transport retry returns a panel error wh
     wire.panels.mockRejectedValue(new Error("Offline"));await act(async()=>host.current.refetch());
     await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("loaded")?.error).toBe("Offline");});
     wire.panels.mockResolvedValue([{id:"loaded",status:"error",elapsed_ms:0,error:"Invalid query"}]);
-    await act(async()=>host.current.retry());
+    await act(async()=>host.current.retry("loaded"));
     await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("loaded")?.error).toBe("Invalid query");});
     expect(host.current.results.get("loaded")?.frame).toEqual(resultFor("loaded").frame);
     await act(async()=>within(host.node).getByRole("button", {name: /loaded menu/}).click());
     expect(document.body.textContent).toContain("Ask Fanout to fix it");
-    const before=wire.panels.mock.calls.length;await act(async()=>host.current.retry());expect(wire.panels).toHaveBeenCalledTimes(before);
+    const before=wire.panels.mock.calls.length;await act(async()=>host.current.retry("loaded"));expect(wire.panels).toHaveBeenCalledTimes(before);
   } finally {await host.dispose();}
 });
 
@@ -390,7 +421,7 @@ const failureCases = [
   {name: "unintentional abort", failure: new DOMException("Request aborted", "AbortError"), retryable: true},
   ...[408, 429, 500, 504].map(status => ({name: "HTTP " + status, failure: new ApiError("Request failed", status), retryable: true})),
   {name: "missing result", message: undefined, retryable: true},
-  {name: "dashboard execution timeout", message: "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard.", retryable: true},
+  {name: "server busy", message: "Not run: other queries kept the server busy. Refresh to try again.", retryable: true},
   {name: "query execution timeout", message: "The query took longer than 10 seconds. Narrow the time range or add filters.", retryable: true},
   {name: "server retryable failure", message: "Transient failure with new wording", retryable: true},
   {name: "timeout explicitly not retryable", message: "The query took longer than 10 seconds. Narrow the time range or add filters.", retryable: false},
@@ -427,7 +458,7 @@ it.each([200, 388].flatMap(height => [false, true].flatMap(stale => failureCases
       wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
       await act(async () => retry.click());
       await waitForHook(() => {expect(wire.panels).toHaveBeenCalledTimes(before + 1); expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.error).toBeUndefined();});
-      expect(wire.panels.mock.lastCall![0].panels).toEqual(["a", "b"]);
+      expect(wire.panels.mock.lastCall![0].panels).toEqual(["a"]);
       if (scenario.stale) expect(host.current.results.get("c")?.frame).toEqual(resultFor("c").frame);
     } else {
       expect(actions.queryByRole(role, {name: "Retry", hidden: role === "menuitem"})).toBeNull();
@@ -475,8 +506,9 @@ it("retries only timeouts and missing results in a mixed returned batch", async 
     wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
     const before = wire.panels.mock.calls.length;
     await act(async () => retries[0].click());
-    await waitForHook(() => {expect(wire.panels).toHaveBeenCalledTimes(before + 1); expect(host.current.fetching).toBe(false); expect(host.current.results.get("c")?.status).toBe("ok");});
-    expect(wire.panels.mock.lastCall![0].panels).toEqual(["a", "c"]);
+    await waitForHook(() => {expect(wire.panels).toHaveBeenCalledTimes(before + 1); expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.status).toBe("ok");});
+    expect(wire.panels.mock.lastCall![0].panels).toEqual(["a"]);
+    expect(host.current.results.get("c")?.error).toContain("No result was returned");
     expect(host.current.results.get("b")?.error).toBe("Invalid query");
     expect(host.current.results.get("loaded")?.frame).toEqual(resultFor("loaded").frame);
   } finally {await host.dispose();}
@@ -509,4 +541,114 @@ it("merges new batches after remounting a cached panel query", async () => {
     await act(async () => second.current.refetch());
     await waitForHook(() => {expect(second.current.fetching).toBe(false); expect(second.current.results.get("loaded")?.frame?.values).toEqual([[8]]);});
   } finally {await second.dispose(); client.clear(); clock.mockRestore();}
+});
+
+// A refresh on a small host must not resend every panel the server turned away
+// in the same batch that starved them: they follow the rest in small groups.
+it("reruns busy panels after the rest in small groups, stopping when the server is still busy", async () => {
+  const spec: DashboardSpec = {version: 1, name: "Busy", time: {range: "1h"}, panels: ["a", "b", "c", "d", "e", "f"].map(id => ({id, title: id, viz: "stat" as const, query: {from: "spans" as const, measures: ["count()"]}}))};
+  const busy = (id: string): PanelResult => ({id, status: "error", elapsed_ms: 0, error: "Not run: other queries kept the server busy. Refresh to try again.", reason: "busy", retryable: true});
+  wire.panels.mockResolvedValueOnce([resultFor("a"), resultFor("b"), ...["c", "d", "e", "f"].map(busy)]);
+  const host = await mountVisibility(spec.panels.map(p => p.id), spec);
+  try {
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("f")?.reason).toBe("busy");});
+    // The first group recovers; the second is turned away again, so the third is not sent.
+    wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(id => id === "e" ? busy(id) : resultFor(id))));
+    await act(async () => host.current.refetch());
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("c")?.status).toBe("ok");});
+    expect(wire.panels.mock.calls.slice(1).map(call => call[0].panels)).toEqual([["a", "b"], ["c", "d"], ["e", "f"]]);
+    wire.panels.mockClear();
+    await act(async () => host.current.refetch());
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(wire.panels).toHaveBeenCalledTimes(2);});
+    expect(wire.panels.mock.calls.map(call => call[0].panels)).toEqual([["a", "b", "c", "d", "f"], ["e"]]);
+    wire.panels.mockClear();
+    wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(id => ["a", "b"].includes(id) ? resultFor(id) : busy(id))));
+    await act(async () => host.current.refetch());
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(wire.panels).toHaveBeenCalledTimes(2);});
+    // e was busy before this refresh; c, d and f were not, so they went with the first batch.
+    expect(wire.panels.mock.calls.map(call => call[0].panels)).toEqual([["a", "b", "c", "d", "f"], ["e"]]);
+    expect(host.current.results.get("e")?.error).toContain("Not run");
+  } finally { await host.dispose(); }
+});
+
+it("keeps the last result of busy panels a stopped refresh did not send", async () => {
+  const spec: DashboardSpec = {version: 1, name: "Busy", time: {range: "1h"}, panels: ["a", "b", "c", "d", "e"].map(id => ({id, title: id, viz: "stat" as const, query: {from: "spans" as const, measures: ["count()"]}}))};
+  const busy = (id: string): PanelResult => ({id, status: "error", elapsed_ms: 0, error: "Not run: busy", reason: "busy", retryable: true});
+  wire.panels.mockResolvedValueOnce([resultFor("a"), ...["b", "c", "d", "e"].map(busy)]);
+  const host = await mountVisibility(spec.panels.map(p => p.id), spec);
+  try {
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("e")?.reason).toBe("busy");});
+    wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(id => id === "a" ? resultFor(id) : busy(id))));
+    await act(async () => host.current.refetch());
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(wire.panels).toHaveBeenCalledTimes(3);});
+    expect(wire.panels.mock.calls.slice(1).map(call => call[0].panels)).toEqual([["a"], ["b", "c"]]);
+    for (const id of ["d", "e"]) expect(host.current.results.get(id)).toMatchObject({reason: "busy", error: "Not run: busy"});
+  } finally { await host.dispose(); }
+});
+
+it("claims no update while every panel the server turned away has not run", async () => {
+  const spec: DashboardSpec = {version: 1, name: "Busy", time: {range: "1h"}, panels: ["a", "b"].map(id => ({id, title: id, viz: "stat" as const, query: {from: "spans" as const, measures: ["count()"]}}))};
+  const busy = (id: string): PanelResult => ({id, status: "error", elapsed_ms: 0, error: "Not run: busy", reason: "busy", retryable: true});
+  wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(busy)));
+  const host = await mountVisibility(spec.panels.map(p => p.id), spec);
+  try {
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("b")?.reason).toBe("busy");});
+    expect(host.current.updatedAt).toBeNull();
+    wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(id => id === "a" ? resultFor(id) : busy(id))));
+    await act(async () => host.current.refetch());
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.status).toBe("ok");});
+    expect(host.current.updatedAt).toEqual(expect.any(Number));
+    // A refresh the server turns away entirely keeps a's frame, and the time it really ran.
+    const ran = host.current.updatedAt;
+    wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(busy)));
+    await act(async () => host.current.refetch());
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.reason).toBe("busy");});
+    expect(host.current.results.get("a")?.frame).toBeDefined();
+    expect(host.current.updatedAt).toBe(ran);
+  } finally { await host.dispose(); }
+});
+
+// System overview on a cold load: three panels below the fold came back busy
+// from the first full batch and never ran, because scrolling to them only
+// fetched panels without a result.
+it("runs a busy panel once it scrolls into view, without retrying it while it stays in view", async () => {
+  const spec: DashboardSpec = {version: 1, name: "Busy", time: {range: "1h"}, panels: ["top", "below"].map(id => ({id, title: id, viz: "stat" as const, query: {from: "spans" as const, measures: ["count()"]}}))};
+  const busy = (id: string): PanelResult => ({id, status: "error", elapsed_ms: 0, error: "Not run: busy", reason: "busy", retryable: true});
+  wire.panels.mockImplementation((body: QueryBody) => Promise.resolve((body.panels?.length ? body.panels : ["top", "below"]).map(id => id === "top" ? resultFor(id) : busy(id))));
+  const host = await mountVisibility([], spec);
+  try {
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("below")?.reason).toBe("busy");});
+    await host.show(["top"]);
+    await act(async () => {});
+    expect(wire.panels).toHaveBeenCalledTimes(1);
+    // Scrolled into view, it runs once; turned away again, it waits for a refresh or Retry.
+    await host.show(["top", "below"]);
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(wire.panels).toHaveBeenCalledTimes(2);});
+    expect(wire.panels.mock.calls[1][0].panels).toEqual(["below"]);
+    await act(async () => {});
+    expect(wire.panels).toHaveBeenCalledTimes(2);
+    // Out of view and back again, it runs again, and this time it recovers.
+    await host.show(["top"]);
+    wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
+    await host.show(["top", "below"]);
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("below")?.status).toBe("ok");});
+    expect(wire.panels.mock.calls[2][0].panels).toEqual(["below"]);
+  } finally { await host.dispose(); }
+});
+
+it("asks the server to skip kept results only for a refresh the user pressed", async () => {
+  const spec: DashboardSpec = {version: 1, name: "Fresh", time: {range: "1h"}, panels: ["a"].map(id => ({id, title: id, viz: "stat" as const, query: {from: "spans" as const, measures: ["count()"]}}))};
+  wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } });
+  const host = await mountVisibility(["a"], spec, false, {client});
+  const fresh = () => wire.panels.mock.calls.map(call => call[3] === true);
+  try {
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(wire.panels).toHaveBeenCalledTimes(1);});
+    await act(async () => host.current.refetch());
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(wire.panels).toHaveBeenCalledTimes(2);});
+    // A refetch the user did not ask for, as the refresh interval runs it.
+    await act(async () => { await client.refetchQueries(); });
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(wire.panels).toHaveBeenCalledTimes(3);});
+    expect(fresh()).toEqual([false, true, false]);
+  } finally { await host.dispose(); }
 });

@@ -1,0 +1,126 @@
+---
+title: Query with Explore
+description: Run FanQL queries, search logs and traces, and save results to a dashboard.
+summary: FanQL queries, diagnostics, visualization choices and dashboard saving without an AI provider.
+read_when:
+  - You want to query telemetry without chat.
+  - You want to save an Explore result or a log or trace search to a dashboard.
+status: preview
+---
+
+## Run a query
+
+Open **Explore** in the sidebar. Choose a time range, then enter a query in the
+**Query** tab. Press Enter or select **Run**. Explore works without a configured
+AI provider.
+
+Count spans by service:
+
+```text
+spans | count() by service
+```
+
+Plot p95 span duration by service in five-minute buckets:
+
+```text
+spans | p95(duration) by service every 5m
+```
+
+Find warning and error logs from checkout:
+
+```text
+logs where service:checkout severity>=warn
+```
+
+Use service names present in your telemetry. See the
+[FanQL reference](/docs/reference/fanql) for syntax, fields and functions.
+
+## Use the Builder tab
+
+Select **Builder** to choose a source, measures, filters, grouping fields,
+time buckets and a row limit. **Query** and **Builder** edit the same FanQL
+query. Builder changes appear under **As FanQL**. Select **Run** to execute.
+Complex filters and measures remain as chips; edit them in **Query**.
+If the Query tab says the text is read-only, keep editing in Builder.
+
+## Use the SQL tab
+
+Select **SQL** to write a separate statement. Switching tabs does not convert
+FanQL to SQL. Run one read-only `SELECT` with a time filter, for example:
+
+```sql
+SELECT service, count(*) AS spans
+FROM spans
+WHERE $__window(start_time)
+GROUP BY service
+```
+
+Explore shows SQL results as a table. See the
+[guarded SQL rules](/docs/guides/dashboards#use-guarded-sql) and
+[rollup relations](/docs/reference/mcp#panel-sql-relations) for limits and
+rollup columns. The `get_telemetry_schema` MCP tool lists the columns of
+`spans`, `logs` and `metrics`.
+
+## Read diagnostics
+
+When a query has problems, the editor marks the affected text and lists messages
+below it. Problems prevent execution. Use **Replace with** when a suggested fix
+fits, or edit the text yourself, then run again. Notices provide guidance and
+do not block execution.
+
+The result's **Ran as** line shows the canonical query. If you edit a query or a
+run fails, the previous result can remain visible. Check its status before
+reading it as the result of your current query.
+
+## Pick a visualization
+
+After parsing, the visualization picker offers types compatible with the query.
+Choose one to rerun it. Options that need settings such as minimum and maximum
+values or thresholds stay disabled until those settings are supplied in a
+dashboard panel.
+
+Buttons with an ellipsis offer a query rewrite. Hover to inspect the proposed
+text before selecting one. The rewritten query appears in the editor and runs.
+
+## Search Logs and Traces
+
+Open **Logs** or **Traces** in the sidebar. Their search bars accept FanQL filters
+only. Leave out the source, `where` and aggregation clauses.
+
+On Logs, enter:
+
+```text
+service:checkout severity>=warn
+```
+
+On Traces, enter:
+
+```text
+status:error duration>500ms
+```
+
+Press Enter or select **Search**. The service, severity, error and duration
+controls add filters to the typed search. Use the time picker and order control
+to change the window and ordering.
+
+Trace results list traces with matching spans. The displayed root span can have
+different values from the span that matched; see
+[trace semantics](/docs/reference/fanql#visualization-and-trace-semantics).
+
+## Save to a dashboard
+
+After a successful run with data, select **Save to dashboard** in Explore, Logs
+or Traces. If you changed the query or filters, run them again first.
+
+Choose an existing dashboard or **New dashboard**, enter a panel title and select
+**Save**. A new dashboard also needs a name. Fanout opens the saved dashboard.
+Existing dashboards keep their time settings; new ones use the selected window.
+See [dashboard controls](/docs/guides/dashboards) for further changes.
+
+## Use HTTP or MCP
+
+The [HTTP API reference](/docs/reference/api) lists FanQL parse, format,
+completion and reference routes, plus panel query and dashboard routes.
+Over MCP, [query_telemetry](/docs/reference/mcp#query_telemetry) accepts FanQL
+text with a panel. Use [create_dashboard](/docs/reference/mcp#create_dashboard)
+or [edit_dashboard](/docs/reference/mcp#edit_dashboard) to save panels.

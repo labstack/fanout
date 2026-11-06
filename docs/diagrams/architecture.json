@@ -279,17 +279,17 @@
       ],
       "sources": [
         {
-          "path": "internal/query/duck.go",
+          "path": "internal/engine/duck.go",
           "line": 240,
           "end_line": 244
         },
         {
-          "path": "internal/query/duck.go",
+          "path": "internal/engine/duck.go",
           "line": 505,
           "end_line": 522
         },
         {
-          "path": "internal/query/duck.go",
+          "path": "internal/engine/duck.go",
           "line": 627,
           "end_line": 653
         }

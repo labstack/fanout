@@ -1,0 +1,422 @@
+package query
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/labstack/fanout/internal/engine"
+)
+
+// Value is a variable's current value. JSON: a string, a list of strings, or
+// "$__all".
+type Value struct {
+	All    bool
+	Values []string
+}
+
+func valueOf(s string) Value {
+	if s == AllValue {
+		return Value{All: true}
+	}
+	return Value{Values: []string{s}}
+}
+
+func (v Value) MarshalJSON() ([]byte, error) {
+	if v.All {
+		return json.Marshal(AllValue)
+	}
+	if len(v.Values) == 1 {
+		return json.Marshal(v.Values[0])
+	}
+	if v.Values == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(v.Values)
+}
+
+func (v *Value) UnmarshalJSON(data []byte) error {
+	var one string
+	if err := json.Unmarshal(data, &one); err == nil {
+		*v = valueOf(one)
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(data, &many); err != nil {
+		return errors.New("a variable value is a string or a list of strings")
+	}
+	if len(many) == 1 && many[0] == AllValue {
+		*v = Value{All: true}
+		return nil
+	}
+	*v = Value{Values: many}
+	return nil
+}
+
+// Scope is everything a compiled query depends on besides the spec.
+type Scope struct {
+	Start, End   time.Time
+	FreshTo      time.Time // Ingest horizon for minute rollups.
+	RollupSource string
+	Rollup       bool
+	NoTop        bool          // Table trends select displayed tuples after aggregation.
+	Interval     time.Duration // bucket width; zero means no time grouping
+	Vars         map[string]Value
+}
+
+// Column describes one frame column.
+type Column struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Role string `json:"role"`
+	Unit string `json:"unit,omitempty"`
+}
+
+// Compiled is one statement ready to run.
+type Compiled struct {
+	HasTotals     bool
+	ranking       *Ranking
+	rankingFloor  bool
+	rankOffset    int
+	SQL           string
+	Args          []any
+	Columns       []Column
+	TrendInterval time.Duration
+	TrendStart    time.Time
+}
+
+// dropped reports whether a filter references a variable set to
+// All; such a filter is removed rather than compared with NULL.
+func (s Scope) dropped(f Filter) bool {
+	for _, name := range f.Params {
+		v := s.Vars[name]
+		if v.All {
+			return true
+		}
+	}
+	return false
+}
+
+func (s Scope) lookup(f Filter) func(string) ([]any, bool, error) {
+	return func(name string) ([]any, bool, error) {
+		v, ok := s.Vars[name]
+		if !ok {
+			return nil, false, fmt.Errorf("$%s has no value", name)
+		}
+		values := make([]any, len(v.Values))
+		for i, value := range v.Values {
+			if f.PatternParams[name] && len(value) > engine.MaxPatternBytes {
+				return nil, false, patternTooLong(name)
+			}
+			values[i] = value
+		}
+		return values, f.InParams[name], nil
+	}
+}
+
+// patternTooLong reports a variable whose value is too long for the pattern
+// it fills: a pattern costs its length times the text's per row.
+func patternTooLong(name string) error {
+	return Problems{{Path: "vars." + name, Message: fmt.Sprintf("$%s is a pattern of at most %d bytes", name, engine.MaxPatternBytes)}}
+}
+
+// buildWhere renders the read window and the active filters. The window is
+// always the first predicate: the snapshot binder prunes files by it.
+func buildWhere(sig *signal, filters []Filter, scope Scope) (string, []any, error) {
+	column := quoteIdent(sig.time)
+	start := scope.Start
+	if scope.Rollup {
+		column = quoteIdent("bucket")
+		start = start.Truncate(time.Minute)
+	}
+	clauses := []string{fmt.Sprintf("%s >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND %s < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS", column, column)}
+	args := []any{start.UTC(), scope.End.UTC()}
+	for _, f := range filters {
+		if scope.dropped(f) {
+			continue
+		}
+		clause, values, err := filterClause(f, scope)
+		if err != nil {
+			return "", nil, err
+		}
+		clauses = append(clauses, clause)
+		args = append(args, values...)
+	}
+	where := strings.Join(clauses, " AND ")
+	if scope.Rollup {
+		where = strings.ReplaceAll(where, "?::TIMESTAMP_NS::TIMESTAMPTZ_NS", "?::TIMESTAMP_NS")
+	}
+	return where, args, nil
+}
+
+// filterClause renders one filter that the scope keeps. A variable bound to
+// no values matches nothing.
+func filterClause(f Filter, scope Scope) (string, []any, error) {
+	for _, name := range f.Params {
+		if v, ok := scope.Vars[name]; ok && !v.All && len(v.Values) == 0 {
+			return "FALSE", nil, nil
+		}
+	}
+	text, _, values, err := bindParams(f.Expr, scope.lookup(f))
+	if err != nil {
+		return "", nil, err
+	}
+	return "(" + text + ")", values, nil
+}
+
+// compileQuery turns a structured query into one statement. The bucket is
+// selected as "_t" and named "time" in the frame, so it never collides with a
+// signal's own time column.
+func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (Compiled, error) {
+	if p.Viz == "logs" || p.Viz == "log_patterns" || p.Viz == "traces" {
+		return compileRows(p, filters, scope)
+	}
+	if p.Viz == "heatmap" || p.Viz == "histogram" {
+		return compileDistribution(p, filters, scope)
+	}
+	if p.Viz == "scatter" || p.Viz == "state_timeline" {
+		return compileItems(p, measures, filters, scope)
+	}
+
+	if p.Query.From == "metrics" {
+		return compileMetricQuery(p, measures, filters, scope)
+	}
+
+	if rollupPlan(p, measures, filters, scope) {
+		return compileRollupQuery(p, measures, filters, scope)
+	}
+	return compileAggregateQuery(p, measures, filters, scope, false)
+}
+
+func compileAggregateQuery(p *Panel, measures []Measure, filters []Filter, scope Scope, rolled bool) (Compiled, error) {
+	q := p.Query
+	sig, ok := lookupSignal(q.From)
+	if !ok {
+		return Compiled{}, fmt.Errorf("unknown signal %q", q.From)
+	}
+	source := structuredSource(sig.name)
+	if rolled {
+		scope.Rollup = true
+		copied := *sig
+		copied.time = "bucket"
+		sig = &copied
+		source = rollupReadSource(rollupSource(p))
+	}
+	where, args, err := buildWhere(sig, filters, scope)
+	if err != nil {
+		return Compiled{}, err
+	}
+	dims := make([]FieldRef, 0, len(q.By))
+	for _, by := range q.By {
+		ref, err := sig.field(by)
+		if err != nil {
+			return Compiled{}, err
+		}
+		dims = append(dims, ref)
+	}
+	var selects, groups []string
+	var columns []Column
+	bucket := ""
+	if scope.Interval > 0 {
+		bucket = fmt.Sprintf("time_bucket(INTERVAL '%d seconds', %s::TIMESTAMP_NS)", int64(scope.Interval/time.Second), quoteIdent(sig.time))
+		selects = append(selects, "epoch_ms("+bucket+`)::BIGINT AS "_t"`)
+		groups = append(groups, bucket)
+		columns = append(columns, Column{Name: "time", Type: "time", Role: "time"})
+	}
+	top := 0
+	foldDimension := -1
+	if !scope.NoTop && bucket != "" && len(dims) == 1 {
+		top = p.Top()
+		foldDimension = 0
+	} else if !scope.NoTop && p.Viz == "bar" && len(dims) == 2 {
+		top = p.Top()
+		foldDimension = 1
+	}
+	for i, d := range dims {
+		expr := d.stringSQL()
+		if top > 0 && i == foldDimension {
+			expr = "_fold"
+		}
+		selects = append(selects, fmt.Sprintf("coalesce(%s, '') AS %s", expr, quoteIdent(d.alias())))
+		groups = append(groups, expr)
+		columns = append(columns, Column{Name: d.alias(), Type: "string", Role: "dimension"})
+	}
+	seconds := scope.Interval.Seconds()
+	if seconds == 0 {
+		seconds = scope.End.Sub(scope.Start).Seconds()
+	}
+	partition := ""
+	if bucket != "" {
+		partition = "PARTITION BY " + bucket
+	}
+	hasTotals := bucket != "" && (p.Viz == "stat" || p.Viz == "gauge")
+	quantiles := map[int]Measure{}
+	for _, m := range measures {
+		expr := measureExprSQL(m, sig, seconds, partition)
+		if rolled {
+			expr = rollupMeasureSQL(m, coveredSecondsSQL(scope, bucket, hasTotals), partition)
+		} else if hasTotals {
+			expr = strings.ReplaceAll(expr, "count(*) / "+sqlFloat(seconds), "count(*) / (CASE WHEN grouping("+bucket+")=1 THEN "+sqlFloat(scope.End.Sub(scope.Start).Seconds())+" ELSE "+sqlFloat(seconds)+" END)")
+		}
+		if rolled && histogramMeasure(m) {
+			quantiles[len(selects)] = m
+			expr = "NULL::DOUBLE"
+		}
+		selects = append(selects, expr+" AS "+quoteIdent(m.Alias))
+		unit := m.Unit
+		if unit == "none" {
+			unit = "" // The catalog cannot infer a physical unit for this field.
+		}
+		columns = append(columns, Column{Name: m.Alias, Type: "number", Role: "measure", Unit: unit})
+	}
+	var b strings.Builder
+	var ranking *Ranking
+	rankingFloor := false
+	b.WriteString("WITH base AS (SELECT * FROM " + source + " WHERE " + where + ")")
+	if top > 0 {
+		first := measures[0]
+		better := p.Better
+		if better == "" {
+			better = inferBetterExpr(first.Expr, p, sig)
+		}
+		value, samples, extra, order := rankingOrder(first, sig, better)
+		base, _, _, _ := affineBase(first.Expr)
+		if call, ok := base.(MeasureCall); ok && call.Func == "rate" {
+			value = measureSQL(Measure{Func: call.Func}, sig, scope.End.Sub(scope.Start).Seconds(), "")
+		}
+		rankingFloor = strings.HasPrefix(order, "(n >= 20)")
+		rule := rankRule(first, sig, better)
+		if rule.Rule == "value_floor" {
+			value = measureExprSQL(first, sig, scope.End.Sub(scope.Start).Seconds(), "")
+		}
+		ranking = &Ranking{Rule: rule.Rule, Better: rule.Better, Floor: rule.Floor, SupportColumn: samples, TieBreakers: []string{"n desc", "dimension asc"}}
+
+		if rolled {
+			value, samples, extra = rollupRankingSQL(extra, first, scope.End.Sub(scope.Start).Seconds())
+		}
+		if rolled && histogramMeasure(first) {
+			dimension := "coalesce(" + dims[foldDimension].stringSQL() + ", '')"
+			histogramAggregate(&b, "candidates", "base", []string{dimension + " AS d", "NULL::DOUBLE AS value", samples + " AS n"}, []string{"d", "value", "n"}, []string{dimension}, false, map[int]Measure{1: first})
+			fmt.Fprintf(&b, ", top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", order, top)
+		} else {
+			fmt.Fprintf(&b, ", candidates AS (SELECT coalesce(%s, '') AS d, %s AS value, %s AS n%s FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", dims[foldDimension].stringSQL(), value, samples, extra, order, top)
+		}
+		dim := dims[foldDimension].stringSQL()
+		fmt.Fprintf(&b, ", other AS (SELECT 'Other (' || count(*)::VARCHAR || ')' AS _other FROM candidates ANTI JOIN top USING(d)), folded AS (SELECT base.*, CASE WHEN top.d IS NOT NULL THEN coalesce(%s, '') ELSE other._other END AS _fold FROM base LEFT JOIN top ON coalesce(%s, '')=top.d CROSS JOIN other)", dim, dim)
+	}
+	rankOffset := b.Len() + len(" SELECT ") + len(strings.Join(selects, ", "))
+	from := "base"
+	if top > 0 {
+		from = "folded"
+	}
+	if len(quantiles) > 0 {
+		aliases := make([]string, len(columns))
+		projected := make([]string, len(columns))
+		for i, c := range columns {
+			aliases[i] = c.Name
+			if c.Role == "time" {
+				aliases[i] = "_t"
+			}
+			projected[i] = quoteIdent(aliases[i])
+		}
+		from = histogramAggregate(&b, "__panel_hist", from, selects, aliases, groups, hasTotals, quantiles)
+		rankOffset = b.Len() + len(" SELECT ") + len(strings.Join(projected, ", "))
+		b.WriteString(" SELECT " + strings.Join(projected, ", ") + " FROM " + from)
+	} else {
+		b.WriteString(" SELECT " + strings.Join(selects, ", ") + " FROM " + from)
+		if len(groups) > 0 {
+			if hasTotals {
+				b.WriteString(" GROUP BY GROUPING SETS ((" + strings.Join(groups, ", ") + "), (" + strings.Join(groups[1:], ", ") + "))")
+			} else {
+				b.WriteString(" GROUP BY " + strings.Join(groups, ", "))
+			}
+		}
+	}
+	order := orderAndLimit(p, measures, bucket != "", len(dims))
+	if hasTotals {
+		order = strings.Replace(order, `ORDER BY "_t"`, `ORDER BY "_t" NULLS FIRST`, 1)
+	}
+	b.WriteString(order)
+	return Compiled{HasTotals: hasTotals, SQL: b.String(), Args: args, Columns: columns, ranking: ranking, rankOffset: rankOffset, rankingFloor: rankingFloor}, nil
+}
+
+func measureSQL(m Measure, sig *signal, seconds float64, partition string) string {
+	if sig.name == "metrics" && m.Func != "count" && m.Func != "count_distinct" && m.Func != "share" {
+		panic("metric value and rate measures require compileMetricQuery")
+	}
+	switch m.Func {
+	case "count":
+		return "count(*)::DOUBLE"
+	case "rate":
+		return "count(*) / " + sqlFloat(seconds)
+	case "error_rate":
+		return "100.0 * avg(" + errorCase(sig) + ")"
+	case "share":
+		return fmt.Sprintf("100.0 * count(*) / sum(count(*)) OVER (%s)", partition)
+	case "avg", "min", "max", "sum":
+		return fmt.Sprintf("%s(%s)::DOUBLE", m.Func, m.Field.numberSQL())
+	case "last":
+		return fmt.Sprintf("arg_max(%s, %s)::DOUBLE", m.Field.numberSQL(), quoteIdent(sig.time))
+	case "count_distinct":
+		return fmt.Sprintf("count(DISTINCT %s)::DOUBLE", m.Field.stringSQL())
+	default:
+		return fmt.Sprintf("quantile_cont(%s, %s)::DOUBLE", m.Field.numberSQL(), strconv.FormatFloat(m.Q, 'f', -1, 64))
+	}
+}
+
+// Both displayed rates and ranking use exactly the same error definition.
+func errorCase(sig *signal) string {
+	if sig.name == "logs" {
+		return "CASE WHEN upper(severity) IN ('ERROR', 'FATAL', 'CRITICAL') OR severity_number >= 17 THEN 1.0 ELSE 0.0 END"
+	}
+	return "CASE WHEN status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END"
+}
+
+// Wilson's 95% lower bound (z=1.96), using candidate aggregate aliases.
+// Floating point divisors prevent integer division and n*n overflow.
+func wilsonLowerSQL() string {
+	return "greatest(0.0, (errors / n + 3.8416 / (2.0 * n) - 1.96 * sqrt((errors / n) * (1.0 - errors / n) / n + 3.8416 / (4.0 * n * n))) / (1.0 + 3.8416 / n))"
+}
+
+func sqlFloat(v float64) string {
+	text := strconv.FormatFloat(v, 'f', -1, 64)
+	if !strings.Contains(text, ".") {
+		text += ".0"
+	}
+	return text
+}
+
+func orderAndLimit(p *Panel, measures []Measure, bucketed bool, dims int) string {
+	if bucketed {
+		order := ` ORDER BY "_t"`
+		if dims > 0 {
+			order += ", 2"
+		}
+		return order + fmt.Sprintf(" LIMIT %d", maxSeriesPoints*(p.Top()+1))
+	}
+	limit := p.Query.Limit
+	if limit == 0 {
+		switch p.Viz {
+		case "bar":
+			limit = 10
+		case "table":
+			limit = 100
+		default:
+			limit = 1000
+		}
+	}
+	if len(measures) == 0 {
+		return fmt.Sprintf(" LIMIT %d", limit)
+	}
+	alias, direction := measures[0].Alias, "DESC"
+	if p.Query.Sort != "" {
+		alias = strings.TrimPrefix(p.Query.Sort, "+")
+		if strings.HasPrefix(p.Query.Sort, "+") {
+			direction = "ASC"
+		}
+	}
+	return fmt.Sprintf(" ORDER BY %s %s NULLS LAST LIMIT %d", quoteIdent(alias), direction, limit)
+}

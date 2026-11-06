@@ -8,7 +8,7 @@ import (
 
 	"github.com/labstack/fanout/internal/annotations"
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
@@ -18,7 +18,7 @@ func TestServiceDetectorsWeightMinutesBySpanCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if err := query.CreateCacheTables(db); err != nil {
+	if err := engine.CreateCacheTables(db); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Date(2026, 10, 1, 12, 15, 0, 0, time.UTC)
@@ -74,15 +74,8 @@ func TestServiceDetectorsWeightMinutesBySpanCount(t *testing.T) {
 	}
 }
 func TestDetectorsStopBeforeTheServiceWatermarkMinute(t *testing.T) {
-	db, err := sql.Open("duckdb", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err := query.CreateCacheTables(db); err != nil {
-		t.Fatal(err)
-	}
-	createDetectorLogs(t, db)
+	e := newDetectorEngine(t)
+	db := e.DB
 	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	for i, rate := range []float64{0, .5, 1} {
 		if _, err := db.Exec(`INSERT INTO service_rollup(namespace,bucket,service,spans,served_spans,p95_ms,error_rate) VALUES ('prod',?,'api',100,100,10,?)`, base.Add(time.Duration(i)*5*time.Minute), rate); err != nil {
@@ -95,7 +88,7 @@ func TestDetectorsStopBeforeTheServiceWatermarkMinute(t *testing.T) {
 	}
 	cfg := DefaultDetectorConfig()
 	cfg.LookbackWindow = 5 * time.Minute
-	detector := NewDetector(&query.Duck{DB: db}, cfg)
+	detector := NewDetector(e, cfg)
 	snapshot, err := detector.GenerateSnapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +112,7 @@ func TestDetectorPersistsEvaluatedWindowWhilePatternsRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,13 +4,13 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func TestChangesReportOnlyPanelsOutsideTheLongestCommonOrder(t *testing.T) {
-	before := panel.Dashboard{Name: "Order"}
+	before := query.Dashboard{Name: "Order"}
 	for _, id := range []string{"a", "b", "c", "d", "e"} {
-		before.Panels = append(before.Panels, panel.Panel{ID: id, Title: id, Viz: "text", Content: id})
+		before.Panels = append(before.Panels, query.Panel{ID: id, Title: id, Viz: "text", Content: id})
 	}
 	for _, tc := range []struct {
 		name                             string
@@ -25,10 +25,10 @@ func TestChangesReportOnlyPanelsOutsideTheLongestCommonOrder(t *testing.T) {
 		{name: "add", order: []string{"a", "new", "b", "c", "d", "e"}, added: []string{"new"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			after := panel.Dashboard{Name: before.Name}
+			after := query.Dashboard{Name: before.Name}
 			for _, id := range tc.order {
 				if id == "new" {
-					after.Panels = append(after.Panels, panel.Panel{ID: id, Title: id, Viz: "text", Content: id})
+					after.Panels = append(after.Panels, query.Panel{ID: id, Title: id, Viz: "text", Content: id})
 				}
 				for _, p := range before.Panels {
 					if p.ID == id {
@@ -57,15 +57,15 @@ func TestChangesReportOnlyPanelsOutsideTheLongestCommonOrder(t *testing.T) {
 }
 
 func TestChangesIgnoreNewNormalizationDefaultsWithoutMutatingSnapshots(t *testing.T) {
-	before := panel.Dashboard{Name: "Old defaults", Panels: []panel.Panel{
+	before := query.Dashboard{Name: "Old defaults", Panels: []query.Panel{
 		{ID: "a", Title: "A", Viz: "text", Content: "a"},
-		{ID: "b", Title: "B", Viz: "timeseries", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}},
+		{ID: "b", Title: "B", Viz: "timeseries", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}},
 	}}
 	after, err := clone(before)
 	if err != nil {
 		t.Fatal(err)
 	}
-	panel.Normalize(&after)
+	query.Normalize(&after)
 	after.Panels[0].Content = "edited"
 	original := mustJSON(before)
 	got := Changes(before, after)
@@ -79,7 +79,7 @@ func TestChangesIgnoreNewNormalizationDefaultsWithoutMutatingSnapshots(t *testin
 
 func TestDashboardChangesExcludeTheSpecFormatVersion(t *testing.T) {
 	before := textSpec("Format")
-	panel.Normalize(&before)
+	query.Normalize(&before)
 	after, _ := clone(before)
 	after.Version++
 	if got := Changes(before, after); len(got.DashboardFields) != 0 {
@@ -88,8 +88,8 @@ func TestDashboardChangesExcludeTheSpecFormatVersion(t *testing.T) {
 }
 
 func TestChangesNameOnlyCommittedPanelFields(t *testing.T) {
-	a := panel.Dashboard{Panels: []panel.Panel{{ID: "latency", Title: "Latency", Viz: "stat", Unit: "ms"}, {ID: "errors", Title: "Errors", Viz: "text", Content: "unchanged"}}}
-	b := panel.Dashboard{Panels: []panel.Panel{{ID: "latency", Title: "Latency", Viz: "stat", Unit: "s"}, {ID: "new", Title: "New", Viz: "text", Content: "note"}}}
+	a := query.Dashboard{Panels: []query.Panel{{ID: "latency", Title: "Latency", Viz: "stat", Unit: "ms"}, {ID: "errors", Title: "Errors", Viz: "text", Content: "unchanged"}}}
+	b := query.Dashboard{Panels: []query.Panel{{ID: "latency", Title: "Latency", Viz: "stat", Unit: "s"}, {ID: "new", Title: "New", Viz: "text", Content: "note"}}}
 	got := Changes(a, b)
 	if len(got.Panels) != 3 || got.Panels[0].PanelID != "latency" || got.Panels[0].Kind != "changed" || len(got.Panels[0].Fields) != 1 || got.Panels[0].Fields[0] != "unit" || got.Panels[1].PanelID != "new" || got.Panels[1].Kind != "added" || got.Panels[2].PanelID != "errors" || got.Panels[2].Kind != "removed" {
 		t.Fatalf("changes=%+v", got)
@@ -103,7 +103,7 @@ func TestChangesSeparatePackingFromAuthoredFieldsAndOrder(t *testing.T) {
 	a := threePanels()
 	PackMissing(a.Panels)
 	b, _ := clone(a)
-	b.Panels = []panel.Panel{b.Panels[0], b.Panels[2]}
+	b.Panels = []query.Panel{b.Panels[0], b.Panels[2]}
 	Compact(b.Panels)
 	got := Changes(a, b)
 	if !got.LayoutChanged || len(got.Panels) != 1 || got.Panels[0].PanelID != "b" || got.Panels[0].Kind != "removed" {
@@ -125,7 +125,7 @@ func TestChangesSeparatePackingFromAuthoredFieldsAndOrder(t *testing.T) {
 }
 
 func TestChangesReportWholeAuthoredFieldsAndDashboardFields(t *testing.T) {
-	a := panel.Dashboard{Name: "Before", Panels: []panel.Panel{{ID: "p", Title: "Before", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}, Thresholds: []panel.Threshold{{Value: 10, Status: "warn"}}}}}
+	a := query.Dashboard{Name: "Before", Panels: []query.Panel{{ID: "p", Title: "Before", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}, Thresholds: []query.Threshold{{Value: 10, Status: "warn"}}}}}
 	b, _ := clone(a)
 	b.Name = "After"
 	b.Description = "Description"
@@ -141,7 +141,7 @@ func TestChangesReportWholeAuthoredFieldsAndDashboardFields(t *testing.T) {
 func TestCreateChangesHaveNoLayoutOrDashboardChips(t *testing.T) {
 	after := textSpec("Created")
 	PackMissing(after.Panels)
-	got := Changes(panel.Dashboard{}, after)
+	got := Changes(query.Dashboard{}, after)
 	if got.LayoutChanged || len(got.DashboardFields) != 0 || len(got.Panels) != 1 || got.Panels[0].Kind != "added" {
 		t.Fatalf("create changes=%+v", got)
 	}

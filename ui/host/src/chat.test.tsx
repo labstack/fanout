@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FanoutAppContext, useFanoutApp, type FanoutAppContextValue } from "./app-context";
 import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
-import App from "./App";
+import App from "./app";
 import { ChatPage } from "./chat";
 import { saved as receiptFixture, build as receiptBuild, user, call, result } from "../tests/dashboard-receipts";
 import { fixture } from "../tests/fixtures";

@@ -125,14 +125,14 @@ func TestDescribeToolsIncludesIntelligenceSnapshot(t *testing.T) {
 		t.Fatalf("DescribeTools: %v", err)
 	}
 	for _, doc := range docs {
-		if doc.Name == "get_intelligence_snapshot" {
+		if doc.Name == "get_insights" {
 			if !doc.ReadOnly || doc.OpenWorld {
-				t.Fatalf("get_intelligence_snapshot annotations = %+v", doc)
+				t.Fatalf("get_insights annotations = %+v", doc)
 			}
 			return
 		}
 	}
-	t.Fatal("get_intelligence_snapshot is registered but absent from DescribeTools")
+	t.Fatal("get_insights is registered but absent from DescribeTools")
 }
 
 // Every tool must arrive with the facts the page is built from. A blank cell
@@ -179,7 +179,7 @@ func TestDescribeToolsReportsTheSharedObservabilityScope(t *testing.T) {
 	// a tool would silently switch off.
 	want := map[string]string{"window": "string", "namespace": "string", "limit": "integer", "from": "string", "to": "string"}
 
-	for _, name := range []string{"get_observability_overview", "get_service_topology"} {
+	for _, name := range []string{"get_overview", "get_service_topology"} {
 		var doc ToolDoc
 		var found bool
 		for _, candidate := range docs {
@@ -253,7 +253,7 @@ func TestDescribeToolsDocumentsFragmentResourcesAndAppHelpers(t *testing.T) {
 	for _, doc := range docs {
 		found[doc.Name] = doc
 	}
-	for _, name := range []string{"query_telemetry", "get_observability_overview", "get_service_topology", "get_service_performance", "inspect_trace", "search_logs"} {
+	for _, name := range []string{"query_telemetry", "get_overview", "get_service_topology", "get_service_performance", "inspect_trace", "search_logs"} {
 		if found[name].ResourceURI != panelsAppURI || found[name].AppOnly {
 			t.Fatalf("%s doc=%+v", name, found[name])
 		}
@@ -262,5 +262,25 @@ func TestDescribeToolsDocumentsFragmentResourcesAndAppHelpers(t *testing.T) {
 		if !found[name].AppOnly || found[name].ResourceURI != "" {
 			t.Fatalf("%s helper doc=%+v", name, found[name])
 		}
+	}
+}
+
+func TestToolCatalogueUsesCurrentNamesOnly(t *testing.T) {
+	docs, err := DescribeTools(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{}
+	for _, name := range []string{"get_overview", "get_insights", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs", "get_telemetry_schema", "query_telemetry", "preview_panels", "list_dashboards", "get_dashboard", "create_dashboard", "edit_dashboard", "replace_dashboard", "list_dashboard_versions", "restore_dashboard_version", "query_panel_fragment", "list_panel_exemplars", "resolve_panel_variables"} {
+		want[name] = true
+	}
+	for _, doc := range docs {
+		if !want[doc.Name] {
+			t.Errorf("unexpected tool %q", doc.Name)
+		}
+		delete(want, doc.Name)
+	}
+	for name := range want {
+		t.Errorf("missing tool %q", name)
 	}
 }

@@ -11,13 +11,13 @@ import (
 // other consumers. Keeping the interface narrow makes the endpoint independent
 // of how snapshots are generated or retained.
 type IntelligenceSnapshots interface {
-	LatestSnapshot() *intelligence.IntelligenceSnapshot
+	LatestSnapshot() *intelligence.Snapshot
 }
 
 // RegisterIntelligenceRoutes exposes the detector's latest completed snapshot.
 func RegisterIntelligenceRoutes(e *echo.Echo, snapshots IntelligenceSnapshots) {
 	h := &intelligenceHandler{snapshots: snapshots}
-	e.GET("/api/intelligence", h.latest, RequireCapability(ReadTelemetry))
+	e.GET("/api/insights", h.latest, RequireCapability(ReadTelemetry))
 }
 
 type intelligenceHandler struct {

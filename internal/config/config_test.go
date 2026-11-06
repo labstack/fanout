@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -28,8 +29,8 @@ func TestLoadReturnsDefaults(t *testing.T) {
 	if cfg.Addr != "127.0.0.1:7520" || cfg.DataDir != "./data" || cfg.IngestBatchSize != 50000 || cfg.RollupInterval != time.Minute || cfg.RetentionDays != 30 || cfg.DefaultNamespace != "default" || !cfg.MCPEnabled || !cfg.AlertEnabled || cfg.AIProvider != "" {
 		t.Fatal("built-in defaults were not resolved")
 	}
-	if cfg.DuckDBThreads != 0 || cfg.DuckDBMaxConns < minDuckDBConns || cfg.DuckDBMaxConns > maxAutoDuckDBConns {
-		t.Fatal("machine sizing did not preserve the connection and thread defaults")
+	if cfg.DuckDBThreads != runtime.GOMAXPROCS(0) || cfg.DuckDBMaxConns < minDuckDBConns || cfg.DuckDBMaxConns > maxAutoDuckDBConns {
+		t.Fatal("machine sizing did not resolve the connection and thread defaults")
 	}
 }
 

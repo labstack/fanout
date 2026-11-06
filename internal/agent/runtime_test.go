@@ -16,7 +16,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/auth"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 
 	"github.com/labstack/fanout/internal/dashboard"
 	controlstore "github.com/labstack/fanout/internal/store"
@@ -111,7 +111,7 @@ func TestRuntimeEmitsStandardAGUISequence(t *testing.T) {
 func TestRuntimeToolCallLoop(t *testing.T) {
 	provider := &scriptedProvider{steps: [][]StreamEvent{
 		{
-			{Type: EventToolUse, ToolCall: &ToolCall{ID: "call-1", Name: "get_observability_overview", Input: `{"window":"1h"}`}},
+			{Type: EventToolUse, ToolCall: &ToolCall{ID: "call-1", Name: "get_overview", Input: `{"window":"1h"}`}},
 			{Type: EventStop, StopReason: "tool_calls"},
 		},
 		{
@@ -120,7 +120,7 @@ func TestRuntimeToolCallLoop(t *testing.T) {
 		},
 	}}
 	tools := &fakeTools{
-		defs:      []ToolDef{{Name: "get_observability_overview"}},
+		defs:      []ToolDef{{Name: "get_overview"}},
 		execution: ToolExecution{Content: `{"ok":true}`, Structured: map[string]any{"ok": true}, AppResourceURI: "ui://overview"},
 	}
 	runtime := NewRuntime(provider, tools, nil)
@@ -134,7 +134,7 @@ func TestRuntimeToolCallLoop(t *testing.T) {
 		"RUN_STARTED", "TOOL_CALL_START", "TOOL_CALL_ARGS", "TOOL_CALL_END", "TOOL_CALL_RESULT",
 		"ACTIVITY_SNAPSHOT", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED")
 
-	if len(tools.calls) != 1 || tools.calls[0].Name != "get_observability_overview" || tools.calls[0].Input != `{"window":"1h"}` {
+	if len(tools.calls) != 1 || tools.calls[0].Name != "get_overview" || tools.calls[0].Input != `{"window":"1h"}` {
 		t.Fatalf("tool calls = %#v", tools.calls)
 	}
 
@@ -252,11 +252,11 @@ func TestRuntimeToolExecutionErrorFeedsModel(t *testing.T) {
 func TestRuntimeStepLimitExceeded(t *testing.T) {
 	provider := &scriptedProvider{steps: [][]StreamEvent{
 		{
-			{Type: EventToolUse, ToolCall: &ToolCall{ID: "call-loop", Name: "get_observability_overview", Input: `{}`}},
+			{Type: EventToolUse, ToolCall: &ToolCall{ID: "call-loop", Name: "get_overview", Input: `{}`}},
 			{Type: EventStop, StopReason: "tool_calls"},
 		},
 	}}
-	tools := &fakeTools{defs: []ToolDef{{Name: "get_observability_overview"}}, execution: ToolExecution{Content: `{}`}}
+	tools := &fakeTools{defs: []ToolDef{{Name: "get_overview"}}, execution: ToolExecution{Content: `{}`}}
 	runtime := &Runtime{provider: provider, tools: tools, maxSteps: 2}
 	emitter, output := newTestEmitter()
 	messages := []agtypes.Message{{ID: "user-1", Role: agtypes.RoleUser, Content: "loop"}}
@@ -346,9 +346,9 @@ func TestBuildOriginSkipsMissingMessageIdentity(t *testing.T) {
 
 type originValidator struct{}
 
-func (originValidator) Validate(_ context.Context, d *panel.Dashboard) error {
-	panel.Normalize(d)
-	if problems := panel.Validate(d); len(problems) > 0 {
+func (originValidator) Validate(_ context.Context, d *query.Dashboard) error {
+	query.Normalize(d)
+	if problems := query.Validate(d); len(problems) > 0 {
 		return problems
 	}
 	return nil

@@ -72,6 +72,14 @@ func TestResolveDuckDBMaxConnsScalesButIsBounded(t *testing.T) {
 	}
 }
 
+func TestResolveDuckDBMaxConnsKeepsInteractiveAndPanelSlots(t *testing.T) {
+	pool := resolveDuckDBMaxConns(8)
+	slots, _, _ := QueryAdmission(pool)
+	if pool != 12 || slots != 10 {
+		t.Fatalf("eight CPUs: pool=%d slots=%d, want twelve connections and ten admitted reads", pool, slots)
+	}
+}
+
 func TestParseCgroupMemoryLimitTreatsMaxAsUnlimited(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "memory.max")
@@ -217,7 +225,7 @@ func TestResolveLeavesExplicitValuesAlone(t *testing.T) {
 		t.Fatalf("DuckDBMaxConns = %d, want the operator's 9 untouched", cfg.DuckDBMaxConns)
 	}
 	sizing := cfg.RuntimeSizing()
-	if sizing.DuckDBMemoryAuto || sizing.DuckDBMaxConnsAuto {
+	if sizing.DuckDBMemoryAuto || sizing.DuckDBMaxConnsAuto || sizing.DuckDBThreadsAuto {
 		t.Fatalf("explicit values reported as automatic: %+v", sizing)
 	}
 	if sizing.DuckDBMemory != "12GB" || sizing.DuckDBMaxConns != 9 || sizing.DuckDBThreads != 4 {
@@ -233,8 +241,13 @@ func TestResolveFillsUnsetValues(t *testing.T) {
 	if cfg.DuckDBMaxConns < 2 {
 		t.Fatalf("DuckDBMaxConns = %d, want an auto-sized pool of at least 2", cfg.DuckDBMaxConns)
 	}
+	// DuckDB's own default counts the machine's hardware threads; the pool is
+	// sized to the CPUs this process may run on instead.
+	if cfg.DuckDBThreads != runtime.GOMAXPROCS(0) {
+		t.Fatalf("DuckDBThreads = %d, want GOMAXPROCS %d", cfg.DuckDBThreads, runtime.GOMAXPROCS(0))
+	}
 	sizing := cfg.RuntimeSizing()
-	if !sizing.DuckDBMemoryAuto || !sizing.DuckDBMaxConnsAuto {
+	if !sizing.DuckDBMemoryAuto || !sizing.DuckDBMaxConnsAuto || !sizing.DuckDBThreadsAuto {
 		t.Fatalf("resolved values not reported as automatic: %+v", sizing)
 	}
 	if sizing.DetectedMemoryBytes != detectAvailableMemory() {

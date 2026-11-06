@@ -10,9 +10,9 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/engine"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	controlstore "github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -27,7 +27,7 @@ func TestToolRegistryUnknownServiceBoundsOversizedAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestToolRegistryUnknownServiceBoundsOversizedAliases(t *testing.T) {
 	if err := repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)
 	}
-	executor := panel.NewExecutor(duck, 7)
+	executor := query.NewExecutor(duck, 7)
 	server := fanoutmcp.NewWithIntelligence(observability.New(duck, duck, 7), nil, executor, nil, "test")
 	registry, err := NewToolRegistry(t.Context(), server.MCP())
 	if err != nil {
@@ -81,7 +81,7 @@ func TestToolRegistryNoDataAndDashboardPanelErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,14 +99,14 @@ func TestToolRegistryNoDataAndDashboardPanelErrors(t *testing.T) {
 	if _, err := db.DB.Exec(`INSERT INTO users(id,email) VALUES ('owner','owner@example.test')`); err != nil {
 		t.Fatal(err)
 	}
-	executor := panel.NewExecutor(duck, 7)
+	executor := query.NewExecutor(duck, 7)
 	server := fanoutmcp.NewWithIntelligence(observability.New(duck, duck, 7), dashboard.New(db.DB, executor), executor, nil, "test")
 	registry, err := NewToolRegistry(t.Context(), server.MCP())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer registry.Close()
-	spec := panel.Dashboard{Name: "Empty", Time: panel.Time{From: &from, To: &to}, Panels: []panel.Panel{{ID: "p", Title: "Collector requests", Viz: "stat", Query: &panel.Query{From: "spans", Where: []string{"service = 'collector'"}, Measures: []string{"count()"}}}}}
+	spec := query.Dashboard{Name: "Empty", Time: query.Time{From: &from, To: &to}, Panels: []query.Panel{{ID: "p", Title: "Collector requests", Viz: "stat", Query: &query.Spec{From: "spans", Where: []string{"service = 'collector'"}, Measures: []string{"count()"}}}}}
 	for _, tc := range []struct {
 		name, code, want string
 		args             any

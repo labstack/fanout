@@ -1,0 +1,65 @@
+package query
+
+import (
+	"errors"
+	"fmt"
+	"math"
+	"time"
+)
+
+// ResolveWindow applies the executor's time bounds before callers validate or
+// execute a tool, so guidance and all subsequent queries use the same interval.
+func (e *Executor) ResolveWindow(start, end time.Time) (time.Time, time.Time, error) {
+	return resolveWindow(Time{From: &start, To: &end}, nil, e.now(), e.maxWindow)
+}
+
+// resolveWindow turns a dashboard time, optionally overridden by a panel,
+// into a concrete UTC range no longer than retention. A range longer than
+// retention keeps its end and loses its oldest part rather than failing.
+func resolveWindow(t Time, override *TimeOverride, now time.Time, maxWindow time.Duration) (time.Time, time.Time, error) {
+	var start, end time.Time
+	if t.From != nil && t.To != nil {
+		start, end = t.From.UTC(), t.To.UTC()
+		if !inTimestampNSRange(start) || !inTimestampNSRange(end) {
+			return time.Time{}, time.Time{}, errors.New("times must be within the TIMESTAMP_NS range (1677–2262)")
+		}
+	} else {
+		span, ok := ranges[t.Range]
+		if !ok {
+			return time.Time{}, time.Time{}, fmt.Errorf("unsupported range %q", t.Range)
+		}
+		end = now.UTC()
+		start = end.Add(-span)
+	}
+	if override != nil {
+		if override.Range != "" {
+			span, ok := ranges[override.Range]
+			if !ok {
+				return time.Time{}, time.Time{}, fmt.Errorf("unsupported range %q", override.Range)
+			}
+			start = end.Add(-span)
+		}
+		if override.Shift != "" {
+			shift, ok := ParseSpan(override.Shift)
+			if !ok {
+				return time.Time{}, time.Time{}, fmt.Errorf("unsupported shift %q", override.Shift)
+			}
+			start, end = start.Add(-shift), end.Add(-shift)
+		}
+	}
+	if !start.Before(end) {
+		return time.Time{}, time.Time{}, errors.New("the time range must start before it ends")
+	}
+	if !inTimestampNSRange(start) || !inTimestampNSRange(end) {
+		return time.Time{}, time.Time{}, errors.New("times must be within the TIMESTAMP_NS range (1677–2262)")
+	}
+	if maxWindow > 0 && end.Sub(start) > maxWindow {
+		start = end.Add(-maxWindow)
+	}
+	return start, end, nil
+}
+
+func inTimestampNSRange(t time.Time) bool {
+	// DuckDB reserves the signed extrema for infinite timestamps.
+	return !t.Before(time.Unix(0, math.MinInt64+1)) && !t.After(time.Unix(0, math.MaxInt64-1))
+}

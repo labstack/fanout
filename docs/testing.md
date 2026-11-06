@@ -181,7 +181,7 @@ The native tests exercise whole-window totals, bounded newest buckets
 and width-aware 24-hour bucket selection:
 
 ```sh
-just test ./internal/panel -run 'TestGaugeTotalsMatchStat|TestBudgetKeepsCompleteNewestBuckets|TestWidthAwareCellBuckets'
+just test ./internal/query -run 'TestGaugeTotalsMatchStat|TestBudgetKeepsCompleteNewestBuckets|TestWidthAwareCellBuckets'
 ```
 
 Use the pinned engine wrapper through `just test`, with the workspace's offline
@@ -263,7 +263,7 @@ evidence. Unknown cost stops further paid calls pending settlement.
 ## Documentation checks
 
 Dashboard workflow prose lives in
-`site/src/content/docs/guides/build-dashboards.mdx`. HTTP, MCP and role references
+`site/src/content/docs/docs/guides/dashboards.mdx`. HTTP, MCP and role references
 are generated from the server; change their generator sources when necessary,
 then regenerate and check:
 
@@ -346,3 +346,11 @@ until its resting-state link treatment is fixed. The selected chat timestamp
 also has a targeted contrast exception (3.9:1 on its light selection background). These exceptions preserve the
 shipping UI within this catalog-only change and should be removed when the
 product markup and semantic ink are corrected.
+
+## FanQL performance checks
+
+The FanQL tests always enforce allocation ceilings and bounded parser/renderer
+work. Wall-clock acceptance is opt-in: run `just fanql-perf`, or set
+`FANOUT_TEST_LATENCY=1` when running the FanQL tests through
+`scripts/with-duckdb.sh`. Use an uninstrumented build for timing; race builds
+still check deterministic work bounds but skip wall-clock assertions.

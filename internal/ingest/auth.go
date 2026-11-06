@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/labstack/fanout/internal/secret"
 	"github.com/labstack/fanout/internal/settings"
 )
 
@@ -65,6 +66,9 @@ func (a *ingestAuthorizer) authorize(ctx context.Context) error {
 // authorizeToken owns the transport-neutral credential policy. gRPC and HTTP
 // extract tokens from their respective headers, then share this verification.
 func (a *ingestAuthorizer) authorizeToken(ctx context.Context, token string) error {
+	if !secret.ValidSecret(token, "foi_") {
+		return errInvalidIngestToken
+	}
 	if a.settingsStore == nil {
 		// Defensive: production always wires a store (cmd/fanout/main.go). Reaching
 		// this path means a mis-wired init; fail closed and log so it surfaces.

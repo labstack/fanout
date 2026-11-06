@@ -7,7 +7,7 @@ import (
 )
 
 func TestDashboardScopeDocsMatchCatalog(t *testing.T) {
-	raw, err := os.ReadFile("../../site/src/content/docs/guides/connect-over-mcp.mdx")
+	raw, err := os.ReadFile("../../site/src/content/docs/docs/guides/mcp.mdx")
 	if err != nil {
 		t.Fatal(err)
 	}

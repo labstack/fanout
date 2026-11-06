@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	controlstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -38,17 +38,17 @@ func TestConcurrentFileBackedSaveReceiptsNameOnlyTheirOwnEdit(t *testing.T) {
 		t.Run(fmt.Sprint("explicit=", explicit), func(t *testing.T) {
 			s := newConcurrentFileServer(t)
 			const n = 6
-			spec := panel.Dashboard{Name: "Race"}
+			spec := query.Dashboard{Name: "Race"}
 			for i := 0; i < n; i++ {
-				spec.Panels = append(spec.Panels, panel.Panel{ID: fmt.Sprintf("p%d", i), Title: fmt.Sprintf("P%d", i), Viz: "text", Content: "base", Width: 12})
+				spec.Panels = append(spec.Panels, query.Panel{ID: fmt.Sprintf("p%d", i), Title: fmt.Sprintf("P%d", i), Viz: "text", Content: "base", Width: 12})
 			}
 			var mu sync.Mutex
-			checkedSpecs := map[string]panel.Dashboard{} // content signature -> spec checked
-			s.panels = receiptExecutor{run: func(_ context.Context, req panel.RunRequest) ([]panel.Result, error) {
-				out := make([]panel.Result, 0, len(req.Dashboard.Panels))
+			checkedSpecs := map[string]query.Dashboard{} // content signature -> spec checked
+			s.panels = receiptExecutor{run: func(_ context.Context, req query.RunRequest) ([]query.Result, error) {
+				out := make([]query.Result, 0, len(req.Dashboard.Panels))
 				sig := ""
 				for _, p := range req.Dashboard.Panels {
-					out = append(out, panel.Result{ID: p.ID, Status: "ok"})
+					out = append(out, query.Result{ID: p.ID, Status: "ok"})
 					sig += p.Content + ","
 				}
 				mu.Lock()

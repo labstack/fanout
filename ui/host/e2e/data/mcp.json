@@ -1,7 +1,7 @@
 {
   "overview": {
     "input": {
-      "name": "get_observability_overview",
+      "name": "get_overview",
       "arguments": {
         "from": "2026-10-18T17:50:00.493903Z",
         "to": "2026-10-19T17:50:00.493903Z"

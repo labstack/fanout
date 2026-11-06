@@ -1,0 +1,52 @@
+---
+title: Upgrade
+description: Replace a Fanout release and handle storage format changes.
+summary: Back up first, retain control state, and follow the target release notes.
+read_when:
+  - You are upgrading an existing instance.
+status: preview
+---
+
+## Upgrade an instance
+
+1. Read the target [GitHub Release](https://github.com/labstack/fanout/releases)
+   and pin its binary or image tag. Check for batch-format and API changes.
+2. Take and verify a [cold backup](/docs/guides/backup-and-restore).
+3. Stop Fanout and wait for it to exit.
+4. Replace the binary or image. Keep the data directory unless the release
+   requires the format-change procedure below.
+5. Start Fanout. Check `/readyz`, sign-in, configured OTLP transports and
+   representative queries.
+
+Pending control SQLite migrations run forward at startup. A rollback after
+migration is not assumed safe. Restore the complete pre-upgrade backup with
+the previous binary when rollback is required.
+
+## When a release changes the batch format
+
+[v2026.11.0-alpha](https://github.com/labstack/fanout/releases/tag/v2026.11.0-alpha)
+requires batch format 5 and cannot read format 4. For that upgrade:
+
+1. Stop Fanout and take a complete cold backup.
+2. Move `telemetry/` and `query/` out of the data directory. Keep them together
+   for recovery with the previous version.
+3. Keep `control/` in place. It preserves users, dashboards, alert rules and
+   the ingest token.
+4. Install the target binary or image and start Fanout with the same data
+   directory setting.
+5. Verify readiness and sign-in, then send new telemetry and check a query.
+
+Old telemetry is unavailable in the upgraded instance. Query state rebuilds
+from the new telemetry. Do not copy unsupported batches back into it.
+See [storage](/docs/concepts/storage) for the current format contract.
+
+This release also renames API and MCP contracts without aliases. Update scripts
+and clients using the release notes and [HTTP routes](/docs/reference/api).
+
+## When a release changes credential formats
+
+Ingest tokens use the `foi_` prefix. Fanout rejects tokens issued with the
+earlier `fo_` prefix. After upgrading, an administrator rotates the token in
+**Connect telemetry → Ingest token** and updates every collector. Unused login
+links issued before the upgrade stop working; request a new one. Connected MCP
+agents keep their OAuth tokens.

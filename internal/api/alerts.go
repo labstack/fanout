@@ -20,7 +20,7 @@ func RegisterAlertRoutes(e *echo.Echo, store *alert.Store, engine *alert.Engine)
 	e.GET("/api/alerting/summary", h.AlertSummary, read)
 	e.GET("/api/alerting/rules", h.ListRules, read)
 	e.POST("/api/alerting/rules", h.CreateRule, manage)
-	e.PUT("/api/alerting/rules/:id", h.UpdateRule, manage)
+	e.PUT("/api/alerting/rules/:id", h.ReplaceRule, manage)
 	e.DELETE("/api/alerting/rules/:id", h.DeleteRule, manage)
 	e.POST("/api/alerting/rules/:id/test", h.TestRule, manage)
 }
@@ -33,7 +33,7 @@ type alertHandler struct {
 // ListAlerts returns alerts with optional state/service/ruleID filters.
 func (h *alertHandler) ListAlerts(c *echo.Context) error {
 	if h.store == nil {
-		return c.JSON(200, []alert.Alert{})
+		return c.JSON(200, map[string][]alert.Alert{"alerts": {}})
 	}
 	state := c.QueryParam("state")
 	service := c.QueryParam("service")
@@ -47,13 +47,13 @@ func (h *alertHandler) ListAlerts(c *echo.Context) error {
 	if alerts == nil {
 		alerts = []alert.Alert{}
 	}
-	return c.JSON(200, alerts)
+	return c.JSON(200, map[string][]alert.Alert{"alerts": alerts})
 }
 
 // AlertSummary returns firing/pending/resolved counts.
 func (h *alertHandler) AlertSummary(c *echo.Context) error {
 	if h.store == nil {
-		return c.JSON(200, alert.AlertSummary{})
+		return c.JSON(200, alert.Summary{})
 	}
 	summary, err := h.store.AlertSummary()
 	if err != nil {
@@ -66,7 +66,7 @@ func (h *alertHandler) AlertSummary(c *echo.Context) error {
 // ListRules returns all alert rules.
 func (h *alertHandler) ListRules(c *echo.Context) error {
 	if h.store == nil {
-		return c.JSON(200, []alert.Rule{})
+		return c.JSON(200, map[string][]alert.Rule{"rules": {}})
 	}
 	rules, err := h.store.ListRules()
 	if err != nil {
@@ -76,7 +76,7 @@ func (h *alertHandler) ListRules(c *echo.Context) error {
 	if rules == nil {
 		rules = []alert.Rule{}
 	}
-	return c.JSON(200, rules)
+	return c.JSON(200, map[string][]alert.Rule{"rules": rules})
 }
 
 // CreateRule creates a new alert rule.
@@ -93,9 +93,8 @@ func (h *alertHandler) CreateRule(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "name and expression are required")
 	}
 
-	// Validate expression compiles
-	if _, err := alert.CompileExpression(req.Expression); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid expression: "+err.Error())
+	if err := checkRule(req, true); err != nil {
+		return err
 	}
 
 	created, err := h.store.CreateRule(req)
@@ -114,8 +113,8 @@ func (h *alertHandler) CreateRule(c *echo.Context) error {
 	return c.JSON(201, created)
 }
 
-// UpdateRule updates an existing alert rule.
-func (h *alertHandler) UpdateRule(c *echo.Context) error {
+// ReplaceRule replaces an existing alert rule.
+func (h *alertHandler) ReplaceRule(c *echo.Context) error {
 	if h.store == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "alerts not configured")
 	}
@@ -127,13 +126,15 @@ func (h *alertHandler) UpdateRule(c *echo.Context) error {
 	}
 	req.ID = id
 
-	if strings.TrimSpace(req.Expression) != "" {
-		if _, err := alert.CompileExpression(req.Expression); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid expression: "+err.Error())
-		}
+	// Headers are checked only when the replace changes them, so a rule saved
+	// before the check tightened can still be toggled or edited elsewhere.
+	stored, err := h.store.GetRule(id)
+	changed := err != nil || stored.WebhookHeaders != req.WebhookHeaders
+	if err := checkRule(req, changed); err != nil {
+		return err
 	}
 
-	updated, err := h.store.UpdateRule(req)
+	updated, err := h.store.ReplaceRule(req)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "rule not found")
@@ -148,15 +149,7 @@ func (h *alertHandler) UpdateRule(c *echo.Context) error {
 				slog.Error("alert rule updated but failed to compile in engine", "rule", updated.ID, "err", err)
 			}
 		} else {
-			h.engine.RemoveRule(updated.ID)
-			// Clear active alerts so they don't linger indefinitely
-			if activeAlerts, err := h.store.ListAlerts("", "", updated.ID); err == nil {
-				for _, a := range activeAlerts {
-					if a.State == "firing" || a.State == "pending" {
-						_ = h.store.DeleteAlert(a.ID)
-					}
-				}
-			}
+			h.engine.DisableRule(updated)
 		}
 	}
 
@@ -201,49 +194,32 @@ func (h *alertHandler) TestRule(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get rule")
 	}
 
-	prog, compileErr := alert.CompileExpression(rule.Expression)
-	if compileErr != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "expression compile error: "+compileErr.Error())
+	if _, err := alert.CompileExpression(rule.Expression); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid expression: "+err.Error())
 	}
-
-	envs := h.engine.BuildAllEnvs(c.Request().Context())
-
-	type testResult struct {
-		Service   string         `json:"service"`
-		Triggered bool           `json:"triggered"`
-		Error     string         `json:"error,omitempty"`
-		Env       alert.AlertEnv `json:"env"`
+	results, err := h.engine.Test(c.Request().Context(), rule)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "The rule could not be tested: "+err.Error()).Wrap(err)
 	}
-
-	var results []testResult
-	services := resolveTestServices(rule, envs)
-	for _, svc := range services {
-		env := envs[svc]
-		triggered, evalErr := alert.SafeEval(prog, env)
-		tr := testResult{
-			Service:   svc,
-			Triggered: triggered,
-			Env:       env,
-		}
-		if evalErr != nil {
-			tr.Error = evalErr.Error()
-		}
-		results = append(results, tr)
-	}
-
 	return c.JSON(200, map[string]any{
 		"rule":    rule,
 		"results": results,
 	})
 }
 
-func resolveTestServices(rule alert.Rule, envs map[string]alert.AlertEnv) []string {
-	if rule.Service == "" || rule.Service == "*" {
-		svcs := make([]string, 0, len(envs))
-		for svc := range envs {
-			svcs = append(svcs, svc)
+// checkRule rejects an expression that does not compile and, when headers is
+// set, webhook headers that are not a JSON object of valid HTTP headers. A
+// replace may omit the expression.
+func checkRule(rule alert.Rule, headers bool) error {
+	if strings.TrimSpace(rule.Expression) != "" {
+		if _, err := alert.CompileExpression(rule.Expression); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid expression: "+err.Error())
 		}
-		return svcs
 	}
-	return []string{rule.Service}
+	if headers {
+		if err := alert.CheckHeaders(rule.WebhookHeaders); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+	}
+	return nil
 }

@@ -6,6 +6,7 @@ import spec from "../../data/all-panels.json" with { type: "json" };
 import { inside, overlaps, type Rect } from "../../support/geometry";
 import { typeScale } from "../../../../tokens";
 import { chartLabel } from "../../support/setup-support";
+import { panelResults } from "../../support/query-results";
 
 type ObservedResult = { id: string; status: string; frame?: { rows: number; values: unknown[][] } };
 const root = fileURLToPath(new URL("../../../../../", import.meta.url));
@@ -18,7 +19,7 @@ const expectedElements: Record<string, string> = {
 };
 
 test("resolves dashboard variables through the panel route", async ({ request }) => {
-  const response = await request.post("/api/panels/variables/resolve", {
+  const response = await request.post("/api/queries/variables/resolve", {
     headers: { "Fanout-Request": "1" }, data: { dashboard: spec },
   });
   expect(response.status()).toBe(200);
@@ -94,10 +95,9 @@ async function mapGeometry(card: Locator) {
 test("all fifteen dashboard panels settle with valid geometry", async ({ page }) => {
   const results = new Map<string, ObservedResult>();
   page.on("response", async response => {
-    if (new URL(response.url()).pathname !== "/api/panels/query") return;
+    if (new URL(response.url()).pathname !== "/api/queries/run") return;
     try {
-      const body = await response.json();
-      for (const result of body.results ?? []) results.set(result.id, result);
+      for (const result of await panelResults(response)) results.set(result.id, result as ObservedResult);
     } catch { /* An aborted response cannot establish a terminal state. */ }
   });
   // Mantine persists its own preference; force the exact project theme before the SPA mounts.

@@ -13,7 +13,7 @@ function RailFrame({ children }: { children: ReactNode }) {
 }
 const meta = {
   id: "layout-rail", title: "Layout/Rail", component: Rail,
-  args: { agentAvailable: true, activeThreadID: "commerce-review", onNewChat: fn(), onSelectThread: fn(), onDeletedThread: fn(), onSelectDashboard: fn(), onCreateDashboard: fn() },
+  args: { agentAvailable: true, activeThreadID: "commerce-review", onNewChat: fn(), onSelectThread: fn(), onDeletedThread: fn(), onSelectDashboard: fn(), onCreateDashboard: fn(), onNewDashboard: fn(), onNavigate: fn() },
   parameters: { a11y: { config: { rules: railRules } } },
   decorators: [Story => <RailFrame><Story /></RailFrame>],
 } satisfies Meta<typeof Rail>;

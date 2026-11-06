@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/observability"
+	"github.com/labstack/fanout/internal/query"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +16,7 @@ type traceProbe struct {
 	scope   observability.Scope
 	id      string
 	bounded bool
+	bypass  bool
 	err     error
 }
 
@@ -22,6 +24,7 @@ func (p *traceProbe) Trace(ctx context.Context, s observability.Scope, id, servi
 	p.scope = s
 	p.id = id
 	_, p.bounded = ctx.Deadline()
+	p.bypass = query.BypassesCache(ctx)
 	return observability.Result[observability.TraceDetail]{}, p.err
 }
 func TestTraceRoutePreservesCapturedNanoseconds(t *testing.T) {
@@ -90,11 +93,11 @@ func TestTraceRouteClassifiesQueryFailures(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
 		want int
-	}{{context.Canceled, 499}, {context.DeadlineExceeded, 504}, {observability.ErrInvalidScope, 400}, {observability.ErrInvalidLimit, 400}, {errors.New("engine failure"), 500}} {
+	}{{context.Canceled, 499}, {context.DeadlineExceeded, 504}, {observability.ErrInvalidScope, 400}, {observability.ErrInvalidLimit, 400}, {errors.New("engine failure"), 500}, {query.ErrBusy, 503}} {
 		p.err = tc.err
 		rec := httptest.NewRecorder()
 		s.e.ServeHTTP(rec, sessionRequest("GET", "/api/traces/abc?from=2026-10-01T12:00:00Z&to=2026-10-01T13:00:00Z", nil, cookie))
-		if rec.Code != tc.want {
+		if rec.Code != tc.want || tc.want == 503 && rec.Header().Get("Retry-After") != "2" {
 			t.Fatalf("err=%v status=%d", tc.err, rec.Code)
 		}
 	}

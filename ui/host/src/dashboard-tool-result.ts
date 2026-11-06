@@ -1,7 +1,8 @@
 import type { Message } from "@ag-ui/client";
+import type { Problem } from "./api-error";
 import type { Change } from "./dashboard-receipt";
 
-export type PanelCheck = { id: string; status: string; rows?: number; diagnosis?: string; error?: string; elapsed_ms?: number };
+export type PanelCheck = { id: string; status: string; rows?: number; diagnosis?: string; error?: string; problems?: Problem[]; elapsed_ms?: number };
 export type SaveReceipt = {
   base_version: number; version: number; changes: Change[]; layout_changed: boolean; dashboard_fields?: string[];
   save_check: { checked: boolean; reason?: string; elapsed_ms: number; panels: PanelCheck[] };
@@ -27,7 +28,7 @@ function saveReceipt(v: unknown): v is SaveReceipt {
     && (c.fields === undefined || strings(c.fields) && !c.fields.includes("grid")) && (c.position_changed === undefined || typeof c.position_changed === "boolean"))) return false;
   const check = v.save_check;
   return object(check) && typeof check.checked === "boolean" && duration(check.elapsed_ms) && Array.isArray(check.panels) && check.panels.every(p => panelCheck(p) && Number.isInteger(p.rows) && Number(p.rows) >= 0) && new Set(check.panels.map(p => p.id)).size === check.panels.length
-    && (check.reason === undefined || typeof check.reason === "string") && (!check.checked || check.panels.every(p => p.status !== "not_run" && p.status !== "invalid"));
+    && (check.reason === undefined || typeof check.reason === "string") && (!check.checked || check.panels.every(p => p.status !== "not_run"));
 }
 
 /** Results are joined to a mutation call inside their own user turn, including

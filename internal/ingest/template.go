@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"hash/maphash"
 	"log/slog"
 	"regexp"
 	"runtime/debug"
+	"strings"
+	"sync"
 	"unicode/utf8"
 )
+
+// templateBodyLimit is how much of a body a template is derived from.
+const templateBodyLimit = 500
 
 var (
 	reUUID      = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
@@ -61,10 +67,64 @@ func safeNormalizeTemplate(body string) (tmpl string) {
 	return normalizeTemplate(body)
 }
 
+// templateCache memoizes safeNormalizeTemplate by body. A log stream repeats
+// a small set of bodies, and the template depends only on the body's first
+// 500 bytes, so under load most rows skip the eight regex passes, which cost
+// about as much CPU as encoding the row. The cache is direct-mapped: a body
+// hashes to one slot per shard and replaces whatever that slot held, which
+// bounds memory without an eviction list. Misses cost one hash and one
+// mutex per shard; a unique-body stream pays the regex passes as before.
+type templateCache struct {
+	seed   maphash.Seed
+	shards [templateCacheShards]templateShard
+}
+
+type templateShard struct {
+	mu    sync.Mutex
+	slots [templateCacheSlots]templateEntry
+}
+
+type templateEntry struct {
+	body, template string
+}
+
+const (
+	templateCacheShards = 64
+	templateCacheSlots  = 256
+)
+
+var templates = newTemplateCache()
+
+func newTemplateCache() *templateCache { return &templateCache{seed: maphash.MakeSeed()} }
+
+// template returns the body's template, from the cache when the same body
+// was seen recently.
+func (c *templateCache) template(body string) string {
+	body = truncateUTF8(body, templateBodyLimit)
+	h := maphash.String(c.seed, body)
+	shard := &c.shards[h%templateCacheShards]
+	slot := &shard.slots[(h/templateCacheShards)%templateCacheSlots]
+	shard.mu.Lock()
+	if slot.body == body {
+		tmpl := slot.template
+		shard.mu.Unlock()
+		return tmpl
+	}
+	shard.mu.Unlock()
+	tmpl := safeNormalizeTemplate(body)
+	// The truncated body, and a template that matched nothing, share memory
+	// with the request's full body. Copies keep a slot at 500 bytes instead of
+	// pinning a body of up to the request limit.
+	shard.mu.Lock()
+	slot.body, slot.template = strings.Clone(body), strings.Clone(tmpl)
+	shard.mu.Unlock()
+	return tmpl
+}
+
 // normalizeTemplate is the entry point. It truncates to 500 bytes (UTF-8
 // safe), detects JSON by leading '{', and dispatches accordingly.
 func normalizeTemplate(body string) string {
-	body = truncateUTF8(body, 500)
+	body = truncateUTF8(body, templateBodyLimit)
 	if len(body) > 0 && body[0] == '{' {
 		return normalizeJSON(body)
 	}

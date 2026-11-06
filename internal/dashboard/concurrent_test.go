@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/db/generated"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	appstore "github.com/labstack/fanout/internal/store"
 	"modernc.org/sqlite"
 )
@@ -166,21 +166,21 @@ func newConcurrentFileService(t *testing.T) *Service {
 	return New(sqlite.DB, structural{})
 }
 
-func concurrentSpec(n int) panel.Dashboard {
-	d := panel.Dashboard{Name: "Race"}
+func concurrentSpec(n int) query.Dashboard {
+	d := query.Dashboard{Name: "Race"}
 	for i := 0; i < n; i++ {
-		d.Panels = append(d.Panels, panel.Panel{ID: fmt.Sprintf("p%d", i), Title: fmt.Sprintf("P%d", i), Viz: "text", Content: "base", Width: 12})
+		d.Panels = append(d.Panels, query.Panel{ID: fmt.Sprintf("p%d", i), Title: fmt.Sprintf("P%d", i), Viz: "text", Content: "base", Width: 12})
 	}
 	return d
 }
 
-func storedVersionSpec(t *testing.T, s *Service, id string, version int) panel.Dashboard {
+func storedVersionSpec(t *testing.T, s *Service, id string, version int) query.Dashboard {
 	t.Helper()
 	raw, err := generated.New(s.db).GetDashboardVersion(t.Context(), generated.GetDashboardVersionParams{DashboardID: id, Version: int64(version)})
 	if err != nil {
 		t.Fatalf("version %d: %v", version, err)
 	}
-	var d panel.Dashboard
+	var d query.Dashboard
 	if err := json.Unmarshal([]byte(raw), &d); err != nil {
 		t.Fatal(err)
 	}

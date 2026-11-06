@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/telemetry"
 	"golang.org/x/sync/errgroup"
 )
@@ -49,9 +50,23 @@ const (
 	// minCompactionMergeInputs is the smallest group worth merging, and the
 	// floor the interrupted-pass halving stops at.
 	minCompactionMergeInputs = 2
-)
 
-var parquetSignals = [...]string{"spans", "logs", "metrics"}
+	// compactionSettledHours is how far an ingest hour trails the newest
+	// before its files may merge across the day. Hourly files keep narrow
+	// queries cheap, and a quiet install would otherwise keep one small file
+	// per hour per signal for its whole retention, 720 at 30 days.
+	compactionSettledHours = 24
+
+	// maxDayCompactionRows bounds a file merged across hours. Span files sort
+	// by trace, so a narrow query decodes the whole file, at about a million
+	// rows a second on two threads for an attribute filter, while each extra
+	// file costs a scan about a tenth of a millisecond. Merging busy hours
+	// would trade cheap files for slower narrow queries: on a 72-hour pico
+	// simulation, million-row day files cut 73 span files to 33 but slowed a
+	// one-minute attribute filter on old data from 0.12 to 0.66 seconds and a
+	// 24-hour one from 2.5 to 3.6. Only hours smaller than a busy one merge.
+	maxDayCompactionRows int64 = 250_000
+)
 
 type compactionMarker struct {
 	Output telemetry.BatchMetadata `json:"output"`
@@ -115,19 +130,22 @@ func clearCompactionAttempt(root string) error {
 	return nil
 }
 
+// A compactionKey names a group: an ingest hour and generation, or, for
+// settled files, the first hour of their day.
 type compactionKey struct {
-	day        int64
+	window     int64
 	generation uint32
+	day        bool
 }
 
-// ParquetPublisher lets the query layer exclude readers only for the atomic
-// namespace swap; storage owns native merges and crash-safe replacement state.
+// ParquetPublisher lets the query layer wrap the atomic catalog swap; storage
+// owns native merges, crash-safe replacement state and deferred deletion.
 type ParquetPublisher interface {
 	PublishParquet(context.Context, func(context.Context) error) error
 	PublishParquetReplacement(context.Context, telemetry.BatchMetadata, []string, func(context.Context) error) error
 }
 
-// CompactParquet combines one same-day, same-generation group. The output is
+// CompactParquet combines one same-window, same-generation group. The output is
 // prepared outside the query gate and swapped as one batch directory.
 func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublisher, maxBatches int) (int, error) {
 	if publisher == nil || maxBatches < minCompactionInputs {
@@ -170,9 +188,14 @@ func (r *Repository) compactParquet(ctx context.Context, publisher ParquetPublis
 	if len(selected) < minCompactionMergeInputs {
 		return 0, nil
 	}
+	// Day groups mix generations; the output sits above all of them.
+	var generation uint32
+	for _, batch := range selected {
+		generation = max(generation, batch.Generation)
+	}
 	output := telemetry.BatchMetadata{
 		ID: fmt.Sprintf("compact-%d", time.Now().UnixNano()), MinIngestedNanos: math.MaxInt64,
-		Generation: selected[0].Generation + 1,
+		Generation: generation + 1,
 	}
 	marker := compactionMarker{Output: output, Inputs: make([]string, 0, len(selected))}
 	for _, batch := range selected {
@@ -209,8 +232,9 @@ func (r *Repository) compactParquet(ctx context.Context, publisher ParquetPublis
 		inputs []string
 		output string
 	}
-	plans := make([]mergePlan, 0, len(parquetSignals))
-	for _, signal := range parquetSignals {
+	plans := make([]mergePlan, 0, len(telemetry.Signals))
+	for _, s := range telemetry.Signals {
+		signal := s.Name
 		inputs := make([]string, 0, len(selected))
 		for _, batch := range selected {
 			path := filepath.Join(r.Parquet.BatchPath(batch.ID), signal+".parquet")
@@ -231,7 +255,7 @@ func (r *Repository) compactParquet(ctx context.Context, publisher ParquetPublis
 	if err := writeCompactionAttempt(r.root, len(selected)); err != nil {
 		return 0, err
 	}
-	err := r.mergeCompaction(ctx, selected[0].Generation, len(selected), func(ctx context.Context) error {
+	err := r.mergeCompaction(ctx, generation, len(selected), func(ctx context.Context) error {
 		group, mergeCtx := errgroup.WithContext(ctx)
 		for _, plan := range plans {
 			group.Go(func() error {
@@ -322,29 +346,38 @@ func selectCompactionBatchesWithHigherCap(batches []telemetry.BatchMetadata, max
 	if maxBatches < minCompactionMergeInputs {
 		return nil
 	}
+	hour := int64(telemetry.CompactionWindow)
 	groups := make(map[compactionKey][]telemetry.BatchMetadata)
+	var spread []telemetry.BatchMetadata
+	newest := int64(math.MinInt64)
 	for _, batch := range batches {
 		if batch.MaxIngestedNanos <= 0 {
 			continue
 		}
-		key := compactionKey{day: batch.MaxIngestedNanos / int64(24*time.Hour), generation: batch.Generation}
+		newest = max(newest, batch.MaxIngestedNanos/hour)
+		// A file spanning more than an hour came from a day merge; only its
+		// day group may take it, under the day bound.
+		if batch.MinIngestedNanos > 0 && batch.MaxIngestedNanos-batch.MinIngestedNanos >= hour {
+			spread = append(spread, batch)
+			continue
+		}
+		key := compactionKey{window: batch.MaxIngestedNanos / hour, generation: batch.Generation}
 		groups[key] = append(groups[key], batch)
 	}
 	// Under writer pressure, reclaim generation-0 debt before starting a
-	// potentially long higher-generation merge, even on an older day. Within
-	// that priority keep the normal order: oldest day, then highest generation.
-	// Below pressure, higher generations run first within each day so continuous
+	// potentially long higher-generation merge, even in an older window. Within
+	// that priority keep the normal order: oldest window, then highest
+	// generation. Below pressure, higher generations run first within each
+	// window so continuous
 	// ingest cannot starve them.
 	pressure := debt >= telemetry.CompactionDebtLimit/2
-	newestDay := int64(math.MinInt64)
-	for key := range groups {
-		if key.day > newestDay {
-			newestDay = key.day
+	candidates := make(map[compactionKey][]telemetry.BatchMetadata, len(groups))
+	days := make(map[int64][]telemetry.BatchMetadata)
+	for _, batch := range spread {
+		if window := batch.MaxIngestedNanos / hour; window < newest-compactionSettledHours {
+			days[window/24] = append(days[window/24], batch)
 		}
 	}
-	var chosen compactionKey
-	var selected []telemetry.BatchMetadata
-	found := false
 	for key, group := range groups {
 		batchCap := maxBatches
 		if key.generation > 0 {
@@ -354,15 +387,29 @@ func selectCompactionBatchesWithHigherCap(batches []telemetry.BatchMetadata, max
 		if pressure && key.generation == 0 {
 			rowLimit = telemetry.CompactionPressureMaxRows
 		}
-		candidate := selectBoundedCompactionGroup(group, batchCap, rowLimit, key.day < newestDay)
-		if len(candidate) < 2 {
-			continue
+		candidate := selectBoundedCompactionGroup(group, batchCap, rowLimit, key.window < newest)
+		if len(candidate) >= minCompactionMergeInputs {
+			candidates[key] = candidate
+		} else if key.window < newest-compactionSettledHours {
+			// A settled hour has nothing left to merge within itself.
+			days[key.window/24] = append(days[key.window/24], group...)
 		}
-		priority := pressure && key.generation == 0
-		chosenPriority := pressure && chosen.generation == 0
+	}
+	for day, group := range days {
+		if candidate := selectDayCompactionGroup(group, min(maxBatches, higherMaxBatches), maxDayCompactionRows); len(candidate) >= minCompactionMergeInputs {
+			candidates[compactionKey{window: day * 24, day: true}] = candidate
+		}
+	}
+	var chosen compactionKey
+	var selected []telemetry.BatchMetadata
+	found := false
+	for key, candidate := range candidates {
+		priority := pressure && key.generation == 0 && !key.day
+		chosenPriority := pressure && chosen.generation == 0 && !chosen.day
 		better := !found || priority && !chosenPriority ||
-			priority == chosenPriority && (key.day < chosen.day ||
-				key.day == chosen.day && key.generation > chosen.generation)
+			priority == chosenPriority && (key.window < chosen.window ||
+				key.window == chosen.window && key.generation > chosen.generation ||
+				key.window == chosen.window && key.generation == chosen.generation && chosen.day)
 		if better {
 			chosen, selected, found = key, candidate, true
 		}
@@ -433,12 +480,13 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 		saturated = true
 	}
 	// A group is worth merging when it is full, when a ceiling stopped it, or
-	// when it belongs to a day that has finished and already holds enough files
-	// to be worth the merge.
+	// when it belongs to a window that has finished and holds at least a pair.
 	//
-	// Holding out for a full group is right while a day is still being written:
-	// more batches are coming, and merging early wastes the work. It is wrong
-	// once the day is over, because the group will never grow again. On the
+	// Holding out for a full group is right while a window is still being
+	// written: more batches are coming, and merging early wastes the work. It
+	// is wrong once the window is over, because the group will never grow
+	// again. A finished hour merges even a pair, so a quiet install keeps at
+	// most one file per hour rather than up to seven. On the
 	// live box that stranded almost everything -- 1,243 batches in 69
 	// (day, generation) groups across 25 days, not one of them a candidate,
 	// because only the current day ever reached 128 files. Every compaction
@@ -448,8 +496,47 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 	if len(candidate) == maxBatches || saturated && len(candidate) >= 2 {
 		return candidate
 	}
-	if finished && len(candidate) >= minCompactionInputs {
+	if finished && len(candidate) >= minCompactionMergeInputs {
 		return candidate
+	}
+	return nil
+}
+
+// selectDayCompactionGroup takes the first run of files adjacent in ingest
+// time that fits the row, byte and count bounds, so each output covers one
+// stretch of the day and logs and metrics, which keep input order, stay in
+// time order. A file too large to join its neighbour ends the run.
+func selectDayCompactionGroup(group []telemetry.BatchMetadata, maxBatches int, rowLimit int64) []telemetry.BatchMetadata {
+	ordered := append([]telemetry.BatchMetadata(nil), group...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].MinIngestedNanos != ordered[j].MinIngestedNanos {
+			return ordered[i].MinIngestedNanos < ordered[j].MinIngestedNanos
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	var run []telemetry.BatchMetadata
+	var rows, bytes int64
+	for _, batch := range ordered {
+		batchRows, batchBytes := compactionBatchRows(batch), compactionBatchBytes(batch)
+		if batchRows <= 0 || batchRows >= rowLimit {
+			if len(run) >= minCompactionMergeInputs {
+				return run
+			}
+			run, rows, bytes = nil, 0, 0
+			continue
+		}
+		if len(run) == maxBatches || rows > rowLimit-batchRows || bytes > maxCompactionBytes-batchBytes {
+			if len(run) >= minCompactionMergeInputs {
+				return run
+			}
+			run, rows, bytes = nil, 0, 0
+		}
+		run = append(run, batch)
+		rows += batchRows
+		bytes += batchBytes
+	}
+	if len(run) >= minCompactionMergeInputs {
+		return run
 	}
 	return nil
 }
@@ -483,12 +570,15 @@ func compactionBatchRows(batch telemetry.BatchMetadata) int64 {
 
 // CompactParquetPass starts complete compactions until the phase budget
 // expires. The phase budget never cancels an in-flight merge; only blocking
-// ingest debt preempts unprepared higher-generation work.
+// ingest debt preempts unprepared higher-generation work. Read pressure must not
+// delay debt retirement: growing file counts hurts both reads and ingestion.
 func (r *Repository) CompactParquetPass(ctx context.Context, publisher ParquetPublisher, maxBatches int, budget time.Duration) (int, error) {
 	if maxBatches <= 0 || budget <= 0 {
 		return 0, nil
 	}
-	deadline := time.Now().Add(budget)
+	started := time.Now()
+	defer func() { metrics.CompactionPassSeconds.Observe(time.Since(started).Seconds()) }()
+	deadline := started.Add(budget)
 	total := 0
 	for {
 		count, err := r.CompactParquet(ctx, publisher, maxBatches)

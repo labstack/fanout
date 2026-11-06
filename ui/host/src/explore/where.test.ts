@@ -1,0 +1,45 @@
+import { describe, expect, it } from "vitest";
+import { durationMs, durationText, operators, parseWhere, printWhere } from "./where";
+
+describe("where entries", () => {
+  it("round-trips each operator", () => {
+    for (const op of operators) {
+      const entry = `duration_ms ${op} 500`;
+      expect(parseWhere(entry)).toEqual({ field: "duration_ms", op, value: "500", quoted: false });
+      expect(printWhere(parseWhere(entry)!)).toBe(entry);
+    }
+  });
+
+  it("quotes strings and doubles single quotes", () => {
+    expect(printWhere({ field: "service", op: "=", value: "O'Brien", quoted: true })).toBe("service = 'O''Brien'");
+    expect(parseWhere("service = 'O''Brien'")).toEqual({ field: "service", op: "=", value: "O'Brien", quoted: true });
+    expect(printWhere({ field: "duration_ms", op: ">", value: "fast", quoted: false })).toBe("duration_ms > 'fast'");
+  });
+
+  it("keeps the literal type it read", () => {
+    expect(printWhere(parseWhere("http_status_code = '500'")!)).toBe("http_status_code = '500'");
+    expect(printWhere(parseWhere("attributes['code'] = 200")!)).toBe("attributes['code'] = 200");
+  });
+
+  it("reads attribute keys", () => {
+    expect(parseWhere("attributes['http.route'] = '/cart'")).toEqual({ field: "attributes['http.route']", op: "=", value: "/cart", quoted: true });
+  });
+
+  it("keeps a dashboard variable unquoted", () => {
+    expect(parseWhere("service = $service")).toEqual({ field: "service", op: "=", value: "$service", quoted: false });
+    expect(printWhere({ field: "service", op: "=", value: "$service", quoted: true }, ["service"])).toBe("service = $service");
+    expect(printWhere({ field: "service", op: "=", value: "$other", quoted: true }, ["service"])).toBe("service = '$other'");
+  });
+
+  it("leaves boolean logic and functions alone", () => {
+    expect(parseWhere("service = 'a' OR service = 'b'")).toBeUndefined();
+    expect(parseWhere("contains(body, 'timeout')")).toBeUndefined();
+    expect(parseWhere("service IN ('a', 'b')")).toBeUndefined();
+  });
+
+  it("reads durations as milliseconds and prints them in the largest exact unit", () => {
+    expect(["100", "100ms", "1.5s", "1.1s", "2m", "1h", "250us", "100 MS"].map(durationMs)).toEqual([100, 100, 1500, 1100, 120000, 3600000, 0.25, 100]);
+    expect(["100ms!", "fast", "1.5", "-1s"].map(durationMs)).toEqual([undefined, undefined, 1.5, undefined]);
+    expect([100, 1500, 1100, 120000, 3600000, 0.25, 1001].map(durationText)).toEqual(["100ms", "1.5s", "1.1s", "2m", "1h", "250us", "1.001s"]);
+  });
+});

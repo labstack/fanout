@@ -166,7 +166,7 @@ func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"caller", "callee", "edge_type", "calls", "average_ms", "error_rate"}).
 			AddRow("checkout", "postgres", "call", int64(10), 12.5, 0.0))
 
-	mock.ExpectQuery(regexp.QuoteMeta(topologyExternalQuery)).WithArgs(start, end, "prod", "prod", "", "", "", start, end, start, end, 50).WillReturnRows(sqlmock.NewRows([]string{"caller", "callee", "calls", "average_ms", "error_rate", "spans", "peer_error_rate", "p50", "p95"}))
+	mock.ExpectQuery(regexp.QuoteMeta(topologyPeersQuery)).WithArgs(start, end, "prod", "prod", "", "", "", start, end, 50).WillReturnRows(sqlmock.NewRows([]string{"caller", "callee", "calls", "average_ms", "error_rate", "spans", "peer_error_rate", "p50", "p95"}))
 	result, err := svc.Topology(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, 50)
 	if err != nil {
 		t.Fatalf("Topology: %v", err)
@@ -186,9 +186,9 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	svc, mock, repository := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	mock.ExpectQuery(regexp.QuoteMeta(recentTraceQuery)).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
-		WillReturnRows(sqlmock.NewRows([]string{"trace_id"}).AddRow("trace-1"))
+	mock.ExpectQuery(regexp.QuoteMeta(queryrows.CompletedTraceQuery)).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"namespace", "trace_id", "has_error"}).AddRow("prod", "trace-1", 1))
 	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "trace-fixture", Spans: []telemetry.Span{
 		{Namespace: "prod", TraceID: "trace-1", SpanID: "root", ServiceName: "checkout", Name: "POST /pay", Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 200, StatusCode: "STATUS_CODE_ERROR", StatusMsg: "declined"},
 		{Namespace: "prod", TraceID: "trace-1", SpanID: "child", ParentSpanID: "root", ServiceName: "payments", Name: "charge", Kind: "CLIENT", StartUnixNanos: start.Add(20 * time.Millisecond).UnixNano(), DurationMS: 80, StatusCode: "OK"},
@@ -199,7 +199,7 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 		t.Fatalf("commit trace fixture: %v", err)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs("trace-1", start, end, "prod", "prod", 20).
+		WithArgs("trace-1", start, end, true, "prod", 20).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
 			AddRow(start.Add(150*time.Millisecond), "ERROR", "checkout", "payment declined", "trace-1", "root").
 			AddRow(start.Add(160*time.Millisecond), "ERROR", "payments", `charge failed: token=abc123 {"client_secret":"cs_live_9"}`, "trace-1", "child"))
@@ -237,7 +237,7 @@ func TestTraceLogsUseFullScopeEventTimeAcrossBatches(t *testing.T) {
 		}
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs("trace-order", start, start.Add(time.Hour), "prod", "prod", 10).
+		WithArgs("trace-order", start, start.Add(time.Hour), true, "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
 			AddRow(start.Add(10*time.Millisecond), "", "", "earliest", "trace-order", "").
 			AddRow(start.Add(20*time.Millisecond), "", "", "middle", "trace-order", "").
@@ -263,7 +263,7 @@ func TestTraceUsesIndexedParquet(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs("parquet-trace", start, end, "prod", "prod", 10).
+		WithArgs("parquet-trace", start, end, true, "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
 			AddRow(start.Add(time.Millisecond), "ERROR", "checkout", "token=secret", "parquet-trace", "root"))
 	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "parquet-trace", "", 10)
@@ -295,7 +295,7 @@ func TestTraceCombinesIndexedSpansAcrossBatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs("split-trace", start, end, "prod", "prod", 10).
+		WithArgs("split-trace", start, end, true, "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
 	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "split-trace", "", 10)
 	if err != nil {
@@ -321,7 +321,7 @@ func TestTraceReadsRecentRootFromParquetIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs("new-trace", start, end, "prod", "prod", 10).
+		WithArgs("new-trace", start, end, true, "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
 	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "new-trace", "", 10)
 	if err != nil {
@@ -347,7 +347,7 @@ func TestTraceFiltersIndexedSpansByNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs("shared-trace", start, end, "prod", "prod", 10).
+		WithArgs("shared-trace", start, end, true, "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
 	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "shared-trace", "", 10)
 	if err != nil {

@@ -142,13 +142,13 @@ func (w *traceIndexWriter) fail(err error) error {
 	return err
 }
 
-func writeTraceIndex(path string, rows []spanParquetRow) error {
+func writeTraceIndex(path string, hashes []uint64) error {
 	writer, err := newTraceIndexWriter(path)
 	if err != nil {
 		return err
 	}
-	for i := range rows {
-		if err := writer.Append(rows[i].TraceHash); err != nil {
+	for _, hash := range hashes {
+		if err := writer.Append(hash); err != nil {
 			writer.Abort()
 			return err
 		}
@@ -216,6 +216,10 @@ func (index traceIndex) Lookup(hash uint64) (match traceRange, found bool, err e
 		return traceRange{}, false, err
 	}
 	defer func() { err = errors.Join(err, file.Close()) }()
+	return index.lookup(file, hash)
+}
+
+func (index traceIndex) lookup(file *os.File, hash uint64) (traceRange, bool, error) {
 	low, high := uint64(0), index.entries
 	for low < high {
 		middle := low + (high-low)/2

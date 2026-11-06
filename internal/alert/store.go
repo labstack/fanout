@@ -45,16 +45,16 @@ func ruleToCreateParams(r Rule) generated.CreateRuleParams {
 		ForSeconds:      int64(r.ForSeconds),
 		CooldownS:       int64(r.CooldownS),
 		RepeatIntervalS: int64(r.RepeatIntervalS),
-		WebhookUrl:      nullString(r.WebhookURL),
+		WebhookURL:      nullString(r.WebhookURL),
 		WebhookHeaders:  nullString(r.WebhookHeaders),
 		WebhookTemplate: nullString(r.WebhookTemplate),
 		NotifyOnResolve: boolToInt64(r.NotifyOnResolve),
 	}
 }
 
-// ruleToUpdateParams converts a domain Rule to generated UpdateRuleParams.
-func ruleToUpdateParams(r Rule) generated.UpdateRuleParams {
-	return generated.UpdateRuleParams{
+// ruleToReplaceParams converts a domain Rule to generated ReplaceRuleParams.
+func ruleToReplaceParams(r Rule) generated.ReplaceRuleParams {
+	return generated.ReplaceRuleParams{
 		ID:              r.ID,
 		Name:            r.Name,
 		Description:     nullString(r.Description),
@@ -65,7 +65,7 @@ func ruleToUpdateParams(r Rule) generated.UpdateRuleParams {
 		ForSeconds:      int64(r.ForSeconds),
 		CooldownS:       int64(r.CooldownS),
 		RepeatIntervalS: int64(r.RepeatIntervalS),
-		WebhookUrl:      nullString(r.WebhookURL),
+		WebhookURL:      nullString(r.WebhookURL),
 		WebhookHeaders:  nullString(r.WebhookHeaders),
 		WebhookTemplate: nullString(r.WebhookTemplate),
 		NotifyOnResolve: boolToInt64(r.NotifyOnResolve),
@@ -85,7 +85,7 @@ func alertRuleToRule(ar generated.AlertRule) Rule {
 		ForSeconds:      int(ar.ForSeconds),
 		CooldownS:       int(ar.CooldownS),
 		RepeatIntervalS: int(ar.RepeatIntervalS),
-		WebhookURL:      ar.WebhookUrl.String,
+		WebhookURL:      ar.WebhookURL.String,
 		WebhookHeaders:  ar.WebhookHeaders.String,
 		WebhookTemplate: ar.WebhookTemplate.String,
 		NotifyOnResolve: ar.NotifyOnResolve != 0,
@@ -105,7 +105,7 @@ func genAlertToAlert(ga generated.Alert) Alert {
 		FiredAt:            ga.FiredAt.String,
 		ResolvedAt:         ga.ResolvedAt.String,
 		RepeatedAt:         ga.RepeatedAt.String,
-		LastEval:           ga.LastEval.String,
+		LastEvaluatedAt:    ga.LastEvaluatedAt.String,
 		LastDeliveryStatus: ga.LastDeliveryStatus.String,
 		LastDeliveryAt:     ga.LastDeliveryAt.String,
 		CreatedAt:          ga.CreatedAt,
@@ -126,9 +126,10 @@ func alertToUpsertParams(a Alert) generated.UpsertAlertParams {
 		FiredAt:            nullString(a.FiredAt),
 		ResolvedAt:         nullString(a.ResolvedAt),
 		RepeatedAt:         nullString(a.RepeatedAt),
-		LastEval:           nullString(a.LastEval),
+		LastEvaluatedAt:    nullString(a.LastEvaluatedAt),
 		LastDeliveryStatus: nullString(a.LastDeliveryStatus),
 		LastDeliveryAt:     nullString(a.LastDeliveryAt),
+		CreatedAt:          a.CreatedAt,
 	}
 }
 
@@ -184,9 +185,9 @@ func (s *Store) ListEnabledRules() ([]Rule, error) {
 	return rules, nil
 }
 
-// UpdateRule updates a rule by ID and returns the updated record.
-func (s *Store) UpdateRule(r Rule) (Rule, error) {
-	ar, err := s.q.UpdateRule(context.Background(), ruleToUpdateParams(r))
+// ReplaceRule replaces a rule by ID and returns the persisted record.
+func (s *Store) ReplaceRule(r Rule) (Rule, error) {
+	ar, err := s.q.ReplaceRule(context.Background(), ruleToReplaceParams(r))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Rule{}, fmt.Errorf("store: rule %q not found", r.ID)
 	}
@@ -212,8 +213,27 @@ func (s *Store) DeleteRule(id string) error {
 	return nil
 }
 
-// UpsertAlert inserts or updates an alert instance keyed on (rule_id, service).
+// UpsertAlert inserts an alert episode, or updates the one with a.ID. Each
+// episode is its own row; at most one per (rule_id, service) is open.
 func (s *Store) UpsertAlert(a Alert) (Alert, error) {
+	// Only the engine starts an episode. An update without a start keeps the
+	// stored one; a new alert must bring its own.
+	if a.CreatedAt == "" {
+		if a.ID == "" {
+			return Alert{}, fmt.Errorf("store: new alert (%q, %q) needs created_at", a.RuleID, a.Service)
+		}
+		if _, err := s.q.GetAlertByID(context.Background(), a.ID); errors.Is(err, sql.ErrNoRows) {
+			return Alert{}, fmt.Errorf("store: new alert (%q, %q) needs created_at", a.RuleID, a.Service)
+		} else if err != nil {
+			return Alert{}, fmt.Errorf("store: get alert: %w", err)
+		}
+	} else {
+		started, err := parseStoredTime(a.CreatedAt)
+		if err != nil {
+			return Alert{}, fmt.Errorf("store: alert created_at: %w", err)
+		}
+		a.CreatedAt = formatStoredTime(started)
+	}
 	if a.ID == "" {
 		id, err := newID()
 		if err != nil {
@@ -228,7 +248,8 @@ func (s *Store) UpsertAlert(a Alert) (Alert, error) {
 	return genAlertToAlert(ga), nil
 }
 
-// GetAlert retrieves an alert by (rule_id, service).
+// GetAlert retrieves the latest episode of (rule_id, service): the open one
+// when there is one, else the most recent resolved one.
 func (s *Store) GetAlert(ruleID, service string) (Alert, error) {
 	ga, err := s.q.GetAlert(context.Background(), generated.GetAlertParams{
 		RuleID:  ruleID,
@@ -316,15 +337,14 @@ func (s *Store) DeleteAlert(id string) error {
 	return nil
 }
 
-// UpdateDeliveryStatus updates only the delivery status columns for a (rule_id, service) pair.
+// UpdateDeliveryStatus updates only the delivery status columns of one alert episode.
 // This is used by fireWebhookAsync to avoid overwriting alert state that may have changed
 // between when the goroutine was launched and when the webhook completed.
-func (s *Store) UpdateDeliveryStatus(ruleID, service, status, deliveredAt string) error {
+func (s *Store) UpdateDeliveryStatus(id, status, deliveredAt string) error {
 	err := s.q.UpdateDeliveryStatus(context.Background(), generated.UpdateDeliveryStatusParams{
 		LastDeliveryStatus: nullString(status),
 		LastDeliveryAt:     nullString(deliveredAt),
-		RuleID:             ruleID,
-		Service:            service,
+		ID:                 id,
 	})
 	if err != nil {
 		return fmt.Errorf("store: update delivery status: %w", err)
@@ -333,12 +353,12 @@ func (s *Store) UpdateDeliveryStatus(ruleID, service, status, deliveredAt string
 }
 
 // AlertSummary returns counts of alerts grouped by state.
-func (s *Store) AlertSummary() (AlertSummary, error) {
+func (s *Store) AlertSummary() (Summary, error) {
 	rows, err := s.q.AlertSummary(context.Background())
 	if err != nil {
-		return AlertSummary{}, fmt.Errorf("store: alert summary: %w", err)
+		return Summary{}, fmt.Errorf("store: alert summary: %w", err)
 	}
-	var sum AlertSummary
+	var sum Summary
 	for _, row := range rows {
 		switch row.State {
 		case "firing":

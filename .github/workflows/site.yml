@@ -1,6 +1,6 @@
 # Publishing the documentation site.
 #
-# The reference under site/src/content/docs/reference/settings is generated from
+# The reference under site/src/content/docs/docs/reference is generated from
 # internal/config and committed, and `just check` fails a change that edits one
 # without regenerating. That gate is worth nothing if the published site is not
 # the gated tree, so publication is something the repository does rather than

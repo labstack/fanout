@@ -1,7 +1,7 @@
 # Authentication and access operations
 
 Operator reference for running Fanout's authentication safely. Settings are
-environment variables; see the [settings reference](https://fanout.run/reference/configuration).
+environment variables; see the [settings reference](https://fanout.run/docs/reference/configuration).
 
 ## First run
 
@@ -22,7 +22,7 @@ stderr containing a **setup URL**:
 
 Setup credential behavior:
 
-- The credential carries 128 bits of entropy and lives only in memory. It is
+- The credential carries 256 bits of entropy and lives only in memory. It is
   never written to the database.
 - It is consumed the moment the first administrator is committed, before any
   other setup work. A later failure in that request does not leave a live
@@ -98,7 +98,8 @@ login links are unavailable in that mode.
 All user-management routes require an administrator. User projections, including
 `GET /api/auth/me` and `GET /api/users`, expose `display_name` and `status`.
 Status is either `active` or `suspended`; roles remain `viewer`, `operator`,
-and `admin`.
+and `admin`. `GET /api/users` returns `{"users": [...]}`, including an empty array
+when there are no users.
 
 - `POST /api/users` provisions an account with `email`, `display_name`, and
   `role`. New accounts have status `active`.

@@ -39,8 +39,13 @@
 
 - Keep credentials, private telemetry, local workstation paths, and private AI
   session links out of tracked files, commit messages, and pull request descriptions.
+  `.gitleaks.toml` holds the rules; lefthook and the Leaks workflow enforce them.
+  Squash merges take the pull request title and description.
 - Keep local agent caches, indexes, evaluation records, and browser evidence out
   of both Git and the Docker build context. Git ignores do not exclude Docker inputs.
+- Design proposals live in `docs/proposals/NNNN-slug.md` and decision records
+  in `docs/adr/NNNN-slug.md`. Agent working plans and scratch specs stay out of
+  the repository.
 
 ## Control database
 
@@ -90,10 +95,15 @@
   Analytical service/edge watermark lag is separate. Completed-batch writes
   have their own gate and write-pool slot; analytical writes use disjoint tables.
   Maintenance must hold both gates for checkpointing.
-- Batch format 4, including its physical schema, is the only accepted telemetry
-  format. Schema changes require a format version change. Disable schema unioning
-  and Hive partition inference; use native Parquet binding so VARIANT extracts
-  can reach the scan. Pre-project hot messaging fields into scalar read-view
+- Batch format 5, including its physical schema, is the only accepted telemetry
+  format. Schema changes require a format version change. Ingest copies standard
+  semconv keys into typed dedicated columns, converting values of another type
+  by fixed rules; a value with no conversion leaves the column NULL and is
+  counted as a spill. The map keeps every value as sent, and the column is the
+  key's read value. No storage column holds JSON: repeated
+  values are typed lists. Every signal's files keep their declared sort order.
+  Disable schema unioning and Hive partition inference; use native Parquet
+  binding so VARIANT extracts can reach the scan. Pre-project hot messaging fields into scalar read-view
   columns; this preview does not push general VARIANT extracts across views.
   Reject unsupported metadata before cleanup or schema rewriting, preserve those files, and add
   no legacy reader or format fallback.
@@ -102,8 +112,9 @@
   cast returned timestamps and datetime-function arguments only. Every engine
   connection uses UTC. Do not change Parquet UTC-instant semantics for speed.
 - Offline verification reuses one bounded, non-spilling native engine to decode
-  all Parquet columns and checks physical schemas, complete span sort tuples,
-  and exact index ranges. Operational errors and unsupported formats never
+  all Parquet columns and checks physical schemas, every signal's complete sort
+  tuples, exact index ranges, dedicated columns against their converted map
+  values and spill counts, and list lengths. Operational errors and unsupported formats never
   authorize quarantine. Discarded hashes force decoding; they are not checksums.
 - Keep DuckDB 2's memory-governed asynchronous I/O defaults unless measurements
   justify tuning them. Do not force an unbounded read-ahead depth.

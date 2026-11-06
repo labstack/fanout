@@ -1,0 +1,143 @@
+message metrics {
+	optional binary _r_container_id (STRING);
+	optional binary _r_container_image_name (STRING);
+	optional binary _r_deployment_environment_name (STRING);
+	optional binary _r_k8s_cluster_name (STRING);
+	optional binary _r_k8s_cluster_uid (STRING);
+	optional binary _r_k8s_container_name (STRING);
+	optional int64 _r_k8s_container_restart_count (INT(64,true));
+	optional binary _r_k8s_cronjob_name (STRING);
+	optional binary _r_k8s_cronjob_uid (STRING);
+	optional binary _r_k8s_daemonset_name (STRING);
+	optional binary _r_k8s_daemonset_uid (STRING);
+	optional binary _r_k8s_deployment_name (STRING);
+	optional binary _r_k8s_deployment_uid (STRING);
+	optional binary _r_k8s_job_name (STRING);
+	optional binary _r_k8s_job_uid (STRING);
+	optional binary _r_k8s_namespace_name (STRING);
+	optional binary _r_k8s_node_name (STRING);
+	optional binary _r_k8s_node_uid (STRING);
+	optional binary _r_k8s_pod_hostname (STRING);
+	optional binary _r_k8s_pod_ip (STRING);
+	optional binary _r_k8s_pod_name (STRING);
+	optional binary _r_k8s_pod_start_time (STRING);
+	optional binary _r_k8s_pod_uid (STRING);
+	optional binary _r_k8s_replicaset_name (STRING);
+	optional binary _r_k8s_replicaset_uid (STRING);
+	optional binary _r_k8s_statefulset_name (STRING);
+	optional binary _r_k8s_statefulset_uid (STRING);
+	optional binary _r_service_instance_id (STRING);
+	optional binary _r_service_version (STRING);
+	optional group attributes (VARIANT) {
+		required binary metadata;
+		optional binary value;
+		optional group typed_value {
+			required group messaging.destination.name {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group messaging.system {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+		}
+	}
+	required binary description (STRING);
+	optional group exemplar_attributes (LIST) {
+		repeated group list {
+			optional group element (VARIANT) {
+				required binary metadata;
+				required binary value;
+			}
+		}
+	}
+	optional group exemplar_span_ids (LIST) {
+		repeated group list {
+			required binary element (STRING);
+		}
+	}
+	optional group exemplar_times (LIST) {
+		repeated group list {
+			required int64 element (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+		}
+	}
+	optional group exemplar_trace_ids (LIST) {
+		repeated group list {
+			required binary element (STRING);
+		}
+	}
+	optional group exemplar_values (LIST) {
+		repeated group list {
+			required double element;
+		}
+	}
+	optional group exp_negative_counts (LIST) {
+		repeated group list {
+			required int64 element (INT(64,false));
+		}
+	}
+	optional int32 exp_negative_offset (INT(32,true));
+	optional group exp_positive_counts (LIST) {
+		repeated group list {
+			required int64 element (INT(64,false));
+		}
+	}
+	optional int32 exp_positive_offset (INT(32,true));
+	optional int32 exp_scale (INT(32,true));
+	optional int64 exp_zero_count (INT(64,false));
+	optional double exp_zero_threshold;
+	required int32 flags (INT(32,false));
+	optional group hist_bounds (LIST) {
+		repeated group list {
+			required double element;
+		}
+	}
+	optional int64 hist_count (INT(64,false));
+	optional group hist_counts (LIST) {
+		repeated group list {
+			required int64 element (INT(64,false));
+		}
+	}
+	optional double hist_max;
+	optional double hist_min;
+	optional double hist_sum;
+	required int64 ingested_at (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+	required int64 ingested_unix_nano (INT(64,true));
+	required int64 metric_time (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+	required binary name (STRING);
+	required binary namespace (STRING);
+	optional group quantile_values (LIST) {
+		repeated group list {
+			required double element;
+		}
+	}
+	optional group quantiles (LIST) {
+		repeated group list {
+			required double element;
+		}
+	}
+	optional group resource (VARIANT) {
+		required binary metadata;
+		optional binary value;
+		optional group typed_value {
+			required group service.name {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group service.namespace {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+		}
+	}
+	required binary scope_name (STRING);
+	required binary scope_version (STRING);
+	required int64 series_id (INT(64,false));
+	required binary service (STRING);
+	required int64 start_time_unix_nano (INT(64,true));
+	optional binary temporality (STRING);
+	required int64 time_unix_nano (INT(64,true));
+	required binary type (STRING);
+	required binary unit (STRING);
+	optional double value;
+}

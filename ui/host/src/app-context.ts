@@ -45,7 +45,7 @@ export const createDashboardPrompt = "Build me a dashboard for my services, show
 // may reach for the view.
 const toolLabels: Record<string, { activity: string; title: string }> = {
   query_telemetry: { activity: "Querying telemetry…", title: "Telemetry panels" },
-  get_observability_overview: { activity: "Checking system health…", title: "System health" },
+  get_overview: { activity: "Checking system health…", title: "System health" },
   get_service_topology: { activity: "Mapping service dependencies…", title: "Service map" },
   get_service_dependencies: { activity: "Tracing service dependencies…", title: "Service dependencies" },
   list_panel_exemplars: { activity: "Finding example traces…", title: "Example traces" },
@@ -54,7 +54,7 @@ const toolLabels: Record<string, { activity: string; title: string }> = {
   get_service_performance: { activity: "Reading performance signals…", title: "Performance" },
   inspect_trace: { activity: "Inspecting a trace…", title: "Trace lookup" },
   search_logs: { activity: "Searching logs…", title: "Logs" },
-  get_intelligence_snapshot: { activity: "Reviewing detected anomalies…", title: "Detected anomalies" },
+  get_insights: { activity: "Reviewing detected anomalies…", title: "Detected anomalies" },
   get_telemetry_schema: { activity: "Reading what telemetry exists…", title: "Telemetry discovery" },
   preview_panels: { activity: "Checking dashboard panels…", title: "Panel check" },
   list_dashboards: { activity: "Looking through your dashboards…", title: "Dashboards" },

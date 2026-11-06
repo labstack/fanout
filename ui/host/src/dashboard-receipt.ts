@@ -21,7 +21,7 @@ export type BuildReceipt = {
   save_attempts: Array<{call_id:string;state:Stage["state"] | "retried"}>;
   explanations: string[]; context_counts: { deploys: number; anomalies: number }; saved?: DashboardToolResult;
 };
-const contextTools = new Set(["get_intelligence_snapshot", "query_telemetry", "get_observability_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs"]);
+const contextTools = new Set(["get_insights", "query_telemetry", "get_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs"]);
 const namedProblems = (value: unknown, id: string): Problem[] => Array.isArray(value) ? value.flatMap(p => object(p) && typeof p.path === "string" && typeof p.message === "string" ? [{panel_id:id,path:p.path,message:p.message}] : []) : [];
 const toolCode = (content: unknown) => { const error = jsonObject(content)?.error; return object(error) ? error.code : undefined; };
 export const interruptedResult = (message:Message) => message.role === "tool" && toolCode(message.content) === "interrupted";
@@ -97,7 +97,7 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
       unmatchedPreview = false;
       for (const id of expected) previewFailures.delete(id);
       for (const p of checked) {
-        const issues = namedProblems((p as unknown as Record<string, unknown>).problems, p.id);
+        const issues = namedProblems(p.problems, p.id);
         if (p.status !== "not_run") clearProblems(p.id,issues);
         else {
           const priorIssues = outstanding.get(p.id) ?? [];
@@ -135,9 +135,12 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
         receipt.panel_count = saved.receipt.save_check.panels.length;
         stages.draft = {state:"complete"};
         const retained = new Set(saved.receipt.save_check.panels.map(p => p.id));
-        for(const p of saved.receipt.save_check.panels) if(executed(p)) {
-          clearProblems(p.id,[]);
-          previewFailures.delete(p.id);
+        for(const p of saved.receipt.save_check.panels) {
+          if(p.status === "invalid") clearProblems(p.id,namedProblems(p.problems,p.id));
+          else if(executed(p)) {
+            clearProblems(p.id,[]);
+            previewFailures.delete(p.id);
+          }
         }
         corrections = corrections.filter(p => retained.has(p.panel_id));
         receipt.problems = [...outstanding.values()].flat().filter(p=>retained.has(p.panel_id));

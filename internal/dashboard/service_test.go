@@ -9,17 +9,17 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
 // structural validates without DuckDB; filter checks are covered in
-// internal/panel and by TestDefaultSpecPassesTheFullCheck.
+// internal/query and by TestDefaultSpecPassesTheFullCheck.
 type structural struct{}
 
-func (structural) Validate(_ context.Context, d *panel.Dashboard) error {
-	panel.Normalize(d)
-	if problems := panel.Validate(d); len(problems) > 0 {
+func (structural) Validate(_ context.Context, d *query.Dashboard) error {
+	query.Normalize(d)
+	if problems := query.Validate(d); len(problems) > 0 {
 		return problems
 	}
 	return nil
@@ -31,7 +31,7 @@ type blockingValidator struct {
 	blocked atomic.Bool
 }
 
-func (v *blockingValidator) Validate(ctx context.Context, d *panel.Dashboard) error {
+func (v *blockingValidator) Validate(ctx context.Context, d *query.Dashboard) error {
 	if d.Panels[0].Content == "first writer" && v.blocked.CompareAndSwap(false, true) {
 		close(v.entered)
 		select {
@@ -149,7 +149,7 @@ func TestRestoreMutationUsesSuccessfulOptimisticBase(t *testing.T) {
 func TestMutationBeforeDoesNotShareNestedFields(t *testing.T) {
 	s := newTestService(t)
 	spec := threePanels()
-	spec.Panels[0].Thresholds = []panel.Threshold{{Value: 10, Status: "warn"}}
+	spec.Panels[0].Thresholds = []query.Threshold{{Value: 10, Status: "warn"}}
 	created, err := s.CreateWithChanges(t.Context(), "owner", spec, agent)
 	if err != nil {
 		t.Fatal(err)
@@ -157,7 +157,7 @@ func TestMutationBeforeDoesNotShareNestedFields(t *testing.T) {
 	if created.BaseVersion != 0 || !created.Record.IsDefault || len(created.Before.Panels) != 0 || spec.Panels[0].Grid != nil {
 		t.Fatalf("create=%+v input=%+v", created, spec)
 	}
-	m, err := s.update(t.Context(), "owner", created.Record.ID, 1, 0, agent, "", func(d panel.Dashboard) (panel.Dashboard, bool, error) {
+	m, err := s.update(t.Context(), "owner", created.Record.ID, 1, 0, agent, "", func(d query.Dashboard) (query.Dashboard, bool, error) {
 		d.Panels[0].Title = "Updated"
 		d.Panels[0].Thresholds[0].Value = 20
 		d.Panels[0].Grid.X++
@@ -187,8 +187,8 @@ func newTestService(t *testing.T) *Service {
 	return New(sqlite.DB, structural{})
 }
 
-func textSpec(name string) panel.Dashboard {
-	return panel.Dashboard{Name: name, Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
+func textSpec(name string) query.Dashboard {
+	return query.Dashboard{Name: name, Panels: []query.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
 }
 
 var agent = Author{Kind: "agent", ID: "owner"}
@@ -251,7 +251,7 @@ func TestOwnershipNamesAndValidation(t *testing.T) {
 	}
 	bad := textSpec("Bad")
 	bad.Panels[0].Viz = "piechart"
-	var problems panel.Problems
+	var problems query.Problems
 	if _, err := s.Create(t.Context(), "owner", bad, agent); !errors.As(err, &problems) {
 		t.Fatalf("invalid spec err = %v", err)
 	}
@@ -264,8 +264,8 @@ func TestOwnershipNamesAndValidation(t *testing.T) {
 	}
 }
 
-func threePanels() panel.Dashboard {
-	return panel.Dashboard{Name: "Layout", Panels: []panel.Panel{
+func threePanels() query.Dashboard {
+	return query.Dashboard{Name: "Layout", Panels: []query.Panel{
 		{ID: "a", Title: "A", Viz: "text", Content: "a", Width: 6, Height: "s"},
 		{ID: "b", Title: "B", Viz: "text", Content: "b", Width: 6, Height: "s"},
 		{ID: "c", Title: "C", Viz: "text", Content: "c", Width: 12, Height: "s"},
@@ -280,17 +280,17 @@ func TestReplaceRepacksOnlyWhenLayoutChanges(t *testing.T) {
 	}
 	// Removing a panel leaves no hole.
 	removed := created.Spec
-	removed.Panels = []panel.Panel{removed.Panels[0], removed.Panels[2]}
+	removed.Panels = []query.Panel{removed.Panels[0], removed.Panels[2]}
 	rec, err := s.Replace(t.Context(), "owner", created.ID, removed, 1, agent, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g := *rec.Spec.Panels[1].Grid; g != (panel.Grid{X: 0, Y: 3, W: 12, H: 3}) {
+	if g := *rec.Spec.Panels[1].Grid; g != (query.Grid{X: 0, Y: 3, W: 12, H: 3}) {
 		t.Fatalf("after removal c = %+v", g)
 	}
 	// A width change takes effect.
 	wide := rec.Spec
-	wide.Panels = append([]panel.Panel(nil), wide.Panels...)
+	wide.Panels = append([]query.Panel(nil), wide.Panels...)
 	wide.Panels[0].Width = 12
 	rec, err = s.Replace(t.Context(), "owner", created.ID, wide, 2, agent, "")
 	if err != nil || rec.Spec.Panels[0].Grid.W != 12 {
@@ -298,10 +298,10 @@ func TestReplaceRepacksOnlyWhenLayoutChanges(t *testing.T) {
 	}
 	// Same ids and sizes with moved grids keep their coordinates.
 	moved := rec.Spec
-	moved.Panels = append([]panel.Panel(nil), moved.Panels...)
-	moved.Panels[1].Grid = &panel.Grid{X: 0, Y: 8, W: 12, H: 3}
+	moved.Panels = append([]query.Panel(nil), moved.Panels...)
+	moved.Panels[1].Grid = &query.Grid{X: 0, Y: 8, W: 12, H: 3}
 	rec, err = s.Replace(t.Context(), "owner", created.ID, moved, 3, agent, "")
-	if err != nil || *rec.Spec.Panels[1].Grid != (panel.Grid{X: 0, Y: 8, W: 12, H: 3}) {
+	if err != nil || *rec.Spec.Panels[1].Grid != (query.Grid{X: 0, Y: 8, W: 12, H: 3}) {
 		t.Fatalf("layout save = %+v err %v", rec.Spec.Panels[1].Grid, err)
 	}
 }

@@ -10,7 +10,7 @@ import (
 
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func TestHistoricalDashboardHTTPReadRequiresOwnerAndReturnsSaveChanges(t *testing.T) {
@@ -28,7 +28,7 @@ func TestHistoricalDashboardHTTPReadRequiresOwnerAndReturnsSaveChanges(t *testin
 		t.Fatal(err)
 	}
 	service := dashboard.New(s.db.DB, structuralValidator{})
-	first, err := service.Create(t.Context(), owner.ID, panel.Dashboard{Name: "History", Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}, dashboard.Author{Kind: "agent", ID: owner.ID})
+	first, err := service.Create(t.Context(), owner.ID, query.Dashboard{Name: "History", Panels: []query.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}, dashboard.Author{Kind: "agent", ID: owner.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

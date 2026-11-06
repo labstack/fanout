@@ -6,15 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/parquet-go/parquet-go"
 )
 
 func TestParquetStorePublishesCompleteBatchAndRecovers(t *testing.T) {
@@ -76,10 +73,8 @@ func TestParquetStorePublishesCompleteBatchAndRecovers(t *testing.T) {
 	if !reflect.DeepEqual(spans, []IndexedSpan{wantIndexed}) {
 		t.Fatalf("trace projection mismatch\n got: %#v\nwant: %#v", spans, []IndexedSpan{wantIndexed})
 	}
-	gotSpan := readOneParquetRow[spanParquetRow](t, filepath.Join(batchDir, "spans.parquet"))
-	wantSpan := makeSpanParquetRow(span)
-	wantSpan.TraceHash = gotSpan.TraceHash
-	if !reflect.DeepEqual(gotSpan, wantSpan) {
+	gotSpan := fileRows(t, filepath.Join(batchDir, "spans.parquet"), Spans)[0]
+	if wantSpan := wantRow(Spans, &span); !reflect.DeepEqual(gotSpan, wantSpan) {
 		t.Fatalf("complete span row mismatch\n got: %#v\nwant: %#v", gotSpan, wantSpan)
 	}
 }
@@ -188,27 +183,27 @@ func TestParquetStorePreservesCompleteLogAndMetricRows(t *testing.T) {
 	}
 	metricRow := Metric{
 		Namespace: "tenant", EventUnixNanos: 21, TimeUnixNanos: 22, Name: "request.duration",
-		Description: "request latency", Unit: "ms", Type: "histogram", Temporality: "cumulative", ServiceName: "checkout", Value: 23.5,
-		HistBoundsJSON: `[1,5,10]`, HistCountsJSON: `[2,3,4,5]`, HistCount: 14, HistSum: 47,
-		ExemplarsJSON: `[{"trace_id":"trace"}]`, Attributes: map[string]any{"route": "/pay"},
+		Description: "request latency", Unit: "ms", Type: "histogram", Temporality: "cumulative", ServiceName: "checkout",
+		Histogram: Histogram{Count: 14, Sum: 47, HasSum: true, Bounds: []float64{1, 5, 10}, Counts: []uint64{2, 3, 4, 5}},
+		Exemplars: []Exemplar{{TraceID: "trace"}}, Attributes: map[string]any{"route": "/pay"},
 		Resource: map[string]any{"host": "one"}, ScopeName: "scope", ScopeVersion: "1.2.3", IngestedAt: 24,
 	}
 	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "complete-signals"}, nil, []Log{logRow}, []Metric{metricRow}); err != nil {
 		t.Fatal(err)
 	}
 	batchDir := store.BatchPath("complete-signals")
-	gotLog := readOneParquetRow[logParquetRow](t, filepath.Join(batchDir, "logs.parquet"))
-	if gotLog.LogTime != logRow.EventUnixNanos {
-		t.Fatalf("log event time = %d, want canonical %d", gotLog.LogTime, logRow.EventUnixNanos)
+	gotLog := fileRows(t, filepath.Join(batchDir, "logs.parquet"), Logs)[0]
+	if gotLog["log_time"] != logRow.EventUnixNanos {
+		t.Fatalf("log event time = %d, want canonical %d", gotLog["log_time"], logRow.EventUnixNanos)
 	}
-	if want := makeLogParquetRow(logRow); !reflect.DeepEqual(gotLog, want) {
+	if want := wantRow(Logs, &logRow); !reflect.DeepEqual(gotLog, want) {
 		t.Fatalf("log row mismatch\n got: %#v\nwant: %#v", gotLog, want)
 	}
-	gotMetric := readOneParquetRow[metricParquetRow](t, filepath.Join(batchDir, "metrics.parquet"))
-	if gotMetric.MetricTime != metricRow.EventUnixNanos {
-		t.Fatalf("metric event time = %d, want canonical %d", gotMetric.MetricTime, metricRow.EventUnixNanos)
+	gotMetric := fileRows(t, filepath.Join(batchDir, "metrics.parquet"), Metrics)[0]
+	if gotMetric["metric_time"] != metricRow.EventUnixNanos {
+		t.Fatalf("metric event time = %d, want canonical %d", gotMetric["metric_time"], metricRow.EventUnixNanos)
 	}
-	if want := makeMetricParquetRow(metricRow); !reflect.DeepEqual(gotMetric, want) {
+	if want := wantRow(Metrics, &metricRow); !reflect.DeepEqual(gotMetric, want) {
 		t.Fatalf("metric row mismatch\n got: %#v\nwant: %#v", gotMetric, want)
 	}
 }
@@ -394,9 +389,6 @@ func TestPublishReplacementKeepsOutputOnlyAfterSyncFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("replacement succeeded despite injected sync failure")
 	}
-	if _, err := os.Stat(store.BatchPath("input")); !os.IsNotExist(err) {
-		t.Fatalf("input was restored beside live output: %v", err)
-	}
 	if _, err := os.Stat(store.BatchPath("output")); err != nil {
 		t.Fatalf("replacement output missing: %v", err)
 	}
@@ -404,47 +396,25 @@ func TestPublishReplacementKeepsOutputOnlyAfterSyncFailure(t *testing.T) {
 	if len(metadata) != 1 || metadata[0].ID != "output" {
 		t.Fatalf("live batches after sync failure = %#v, want output only", metadata)
 	}
-}
-
-func TestPublishReplacementUnpublishesRecoveredOutputBeforeRetiringInputs(t *testing.T) {
-	store, err := OpenParquetStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	span := []Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 1}}
-	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	output := BatchMetadata{ID: "output"}
-	if err := store.CommitBatch(context.Background(), &output, span, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	blockedRetired := filepath.Join(store.BatchesDir(), "input.retired-output")
-	if err := os.Mkdir(blockedRetired, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(blockedRetired, "block"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	stage := filepath.Join(t.TempDir(), "recovery", "output")
-	err = store.PublishReplacement(stage, output, []string{"input"}, func(publish func(context.Context) error) error {
-		return publish(context.Background())
-	})
-	if err == nil {
-		t.Fatal("replacement succeeded despite blocked input retirement")
-	}
-	if _, err := os.Stat(store.BatchPath("output")); !os.IsNotExist(err) {
-		t.Fatalf("recovered output remained visible beside active input: %v", err)
+	// The output may not be durable, so its inputs are not queued for deletion.
+	if n, err := store.CollectRetired(); err != nil || n != 0 {
+		t.Fatalf("deleted %d inputs of an output that is not durable: %v", n, err)
 	}
 	if _, err := os.Stat(store.BatchPath("input")); err != nil {
-		t.Fatalf("input was not left queryable after rollback: %v", err)
+		t.Fatalf("input deleted before its replacement was durable: %v", err)
 	}
-	if _, err := os.Stat(stage); err != nil {
-		t.Fatalf("output was not preserved for the next recovery attempt: %v", err)
+	// Marker recovery retries the fsync, after which the input is deleted.
+	syncPublishedDirectory = originalSync
+	if err := store.PublishReplacement(filepath.Join(t.TempDir(), "missing-stage"), output, []string{"input"}, func(publish func(context.Context) error) error {
+		return publish(context.Background())
+	}); err != nil {
+		t.Fatal(err)
 	}
-	metadata := store.BatchMetadata()
-	if len(metadata) != 1 || metadata[0].ID != "input" {
-		t.Fatalf("live batches after rollback = %#v, want input only", metadata)
+	if n, err := store.CollectRetired(); err != nil || n != 1 {
+		t.Fatalf("collected %d inputs after recovery: %v", n, err)
+	}
+	if _, err := os.Stat(store.BatchPath("input")); !os.IsNotExist(err) {
+		t.Fatalf("input remains after recovery and collection: %v", err)
 	}
 }
 
@@ -492,12 +462,13 @@ func completeTestSpan() Span {
 		Namespace: "tenant", TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef",
 		ParentSpanID: "fedcba9876543210", ServiceName: "checkout", Name: "POST /orders", Kind: "SERVER",
 		StartUnixNanos: 10, EndUnixNanos: 20, DurationMS: 0.00001, StatusCode: "STATUS_CODE_ERROR", StatusMsg: "declined",
-		Resource: map[string]any{"host": "one"}, Attributes: map[string]any{"http.request.method": "POST"},
-		EventsJSON: `[{"name":"exception"}]`, LinksJSON: `[{"trace_id":"linked"}]`,
+		Resource:   map[string]any{"host": "one", "service.version": "4.5.6", "k8s.container.restart_count": "two"},
+		Attributes: map[string]any{"http.request.method": "POST", "http.response.status_code": int64(500), "server.port": "443"},
+		Events: []Event{{TimeUnixNanos: 15, Name: "exception", Attributes: map[string]any{"exception.type": "CardDeclined", "attempt": int64(2)}},
+			{TimeUnixNanos: 16, Name: "retry"}},
+		Links:      []Link{{TraceID: "linked", SpanID: "parent", TraceState: "a=b", Attributes: map[string]any{"sampled": true}}},
 		TraceState: "vendor=value", Flags: 1, ScopeName: "scope", ScopeVersion: "1.2.3", IngestedAt: 30,
-		HTTPMethod: "POST", HTTPStatusCode: "500", HTTPRoute: "/orders", DBSystem: "postgresql",
-		RPCMethod: "Create", RPCService: "orders.v1.Orders", PeerService: "payments", ServiceVersion: "4.5.6",
-		DeploymentEnv: "production", ExceptionType: "CardDeclined", ExceptionMessage: "declined",
+		RPCService: "orders.v1.Orders", PeerService: "payments", ExceptionType: "CardDeclined", ExceptionMessage: "declined",
 	}
 }
 
@@ -506,22 +477,6 @@ func traceAll(store *ParquetStore, traceID string) ([]IndexedSpan, error) {
 		TraceID: traceID, StartNanos: math.MinInt64, EndNanos: math.MaxInt64, Limit: maxTraceQueryResults,
 	})
 	return spans, err
-}
-
-func readOneParquetRow[T any](t *testing.T, path string) T {
-	t.Helper()
-	file, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	reader := parquet.NewGenericReader[T](file)
-	defer reader.Close()
-	var rows [1]T
-	if n, err := reader.Read(rows[:]); err != nil && !errors.Is(err, io.EOF) || n != 1 {
-		t.Fatalf("read %s: rows=%d err=%v", path, n, err)
-	}
-	return rows[0]
 }
 
 // TestCommitBatchDoesNotBlockIndefinitelyOnStalledPublication pins the

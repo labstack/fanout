@@ -1,0 +1,436 @@
+package query
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"github.com/labstack/fanout/internal/queryrows"
+	"log/slog"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+	"unicode/utf8"
+
+	"github.com/labstack/fanout/internal/telemetry"
+)
+
+type slowBatchEngine struct {
+	Engine
+	calls atomic.Int32
+}
+
+func (e *slowBatchEngine) QueryContext(ctx context.Context, _ string, _ ...any) (queryrows.Rows, error) {
+	e.calls.Add(1)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestAdmittedRefreshRunsEveryPanelOutsideQueueDeadline(t *testing.T) {
+	e := newFixtureExecutor(t)
+	slow := &slowBatchEngine{Engine: e.engine}
+	e.engine = slow
+	e.batchTimeout = 30 * time.Millisecond
+	e.timeout = 100 * time.Millisecond
+	e.parallel = 1
+	d := Dashboard{Name: "Deadline", Panels: []Panel{{ID: "fast", Title: "Fast", Viz: "text", Content: "done"}}}
+	for _, id := range []string{"slow", "queued"} {
+		d.Panels = append(d.Panels, Panel{ID: id, Title: id, Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}}})
+	}
+	started := time.Now()
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil || len(results) != 3 {
+		t.Fatalf("results=%+v err=%v", results, err)
+	}
+	if results[0].Status != StatusOK {
+		t.Fatalf("completed=%+v", results[0])
+	}
+	// Admission covers the refresh. Later siblings keep their own execution
+	// timeout even after the queue deadline, and are never refused as busy.
+	if time.Since(started) < 2*e.timeout {
+		t.Errorf("refresh finished before both panels ran: %s", time.Since(started))
+	}
+	for _, r := range results[1:] {
+		if r.Error != TimeoutError || r.Reason == ReasonBusy {
+			t.Errorf("admitted panel=%+v", r)
+		}
+	}
+	if slow.calls.Load() != 2 {
+		t.Errorf("started %d slow panels, want both", slow.calls.Load())
+	}
+}
+
+type delayedEngine struct {
+	Engine
+	delay time.Duration
+}
+
+func (e *delayedEngine) QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error) {
+	select {
+	case <-time.After(e.delay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return e.Engine.QueryContext(ctx, query, args...)
+}
+
+// A queued panel used to start its timeout before it reached the engine, so
+// waiting behind other panels used up its budget and it failed having barely
+// run. Each panel here runs well inside its timeout, but together they take
+// longer than one timeout.
+func TestQueuedPanelsKeepTheirWholeTimeout(t *testing.T) {
+	e := newFixtureExecutor(t)
+	e.engine = &delayedEngine{Engine: e.engine, delay: 50 * time.Millisecond}
+	e.admission = newReadAdmission(1, 0, 8)
+	e.timeout = 200 * time.Millisecond
+	d := Dashboard{Name: "Queue"}
+	for _, id := range []string{"a", "b", "c", "d", "e", "f"} {
+		d.Panels = append(d.Panels, Panel{ID: id, Title: id, Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}}})
+	}
+	started := time.Now()
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < e.timeout {
+		t.Fatalf("panels finished in %s; the test needs them to queue past one timeout", elapsed)
+	}
+	for _, r := range results {
+		if r.Status != StatusOK {
+			t.Errorf("%s = %s %q", r.ID, r.Status, r.Error)
+		}
+	}
+}
+
+func TestStreamEmitsEachPanelWhenItFinishes(t *testing.T) {
+	e := newFixtureExecutor(t)
+	slow := &slowBatchEngine{Engine: e.engine}
+	e.engine = slow
+	e.timeout = 200 * time.Millisecond
+	d := Dashboard{Name: "Stream", Panels: []Panel{
+		{ID: "slow", Title: "Slow", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}}},
+		{ID: "note", Title: "Note", Viz: "text", Content: "done"},
+	}}
+	started := time.Now()
+	var order []string
+	var at []time.Duration
+	err := e.Stream(t.Context(), RunRequest{Dashboard: d}, func(r Result) {
+		order = append(order, r.ID)
+		at = append(at, time.Since(started))
+	})
+	if err != nil || strings.Join(order, ",") != "note,slow" {
+		t.Fatalf("order=%v err=%v", order, err)
+	}
+	if at[0] >= e.timeout {
+		t.Fatalf("the finished panel waited %s for the slow one", at[0])
+	}
+}
+
+// A stream client that stops reading blocks emit. Its panels must not keep
+// their read slots while they wait to be written, or every other request
+// would be turned away as busy.
+func TestStalledStreamFreesReadSlots(t *testing.T) {
+	e := newFixtureExecutor(t)
+	e.admission = newReadAdmission(1, 0, 8)
+	e.batchTimeout = 2 * time.Second
+	panel := func(id string) Panel {
+		return Panel{ID: id, Title: id, Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}}}
+	}
+	stalled := Dashboard{Name: "Stalled", Panels: []Panel{panel("a"), panel("b")}}
+	release := make(chan struct{})
+	emitted := make(chan struct{}, 2)
+	done := make(chan error, 1)
+	go func() {
+		done <- e.Stream(t.Context(), RunRequest{Dashboard: stalled}, func(Result) {
+			emitted <- struct{}{}
+			<-release
+		})
+	}()
+	<-emitted
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: Dashboard{Name: "Other", Panels: []Panel{panel("c")}}})
+	close(release)
+	if err != nil || len(results) != 1 || results[0].Status != StatusOK {
+		t.Fatalf("other request behind a stalled stream: results=%+v err=%v", results, err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunPanelSelection(t *testing.T) {
+	e := newFixtureExecutor(t)
+	d := shopDashboard()
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d, Panels: []string{"notes", "notes"}})
+	if err != nil || len(results) != 1 {
+		t.Fatalf("duplicate results=%+v err=%v", results, err)
+	}
+	_, err = e.Run(t.Context(), RunRequest{Dashboard: d, Panels: []string{"notes", "notes", "notes", "notes", "notes", "notes"}})
+	var problems Problems
+	if !errors.As(err, &problems) || problems[0].Path != "panels" {
+		t.Fatalf("oversized selection=%v", err)
+	}
+}
+
+func TestValidationCaps(t *testing.T) {
+	for _, target := range []string{"query", "variable", "sql"} {
+		t.Run(target, func(t *testing.T) {
+			d := shopDashboard()
+			path := "panels[0].query.where"
+			limit := "16"
+			filters := make([]string, 17)
+			for i := range filters {
+				filters[i] = "service = 'checkout'"
+			}
+			switch target {
+			case "query":
+				d.Panels[0].Query.Where = filters
+			case "variable":
+				d.Variables[0].Where = filters
+				path = "variables[0].where"
+			case "sql":
+				d.Panels[0].Query = nil
+				d.Panels[0].SQL = "SELECT " + strings.Repeat(" ", 8001)
+				path = "panels[0].sql"
+				limit = "8000"
+			}
+			Normalize(&d)
+			problems := Validate(&d)
+			for _, p := range problems {
+				if p.Path == path && strings.Contains(p.Message, limit) {
+					return
+				}
+			}
+			t.Fatalf("missing %s limit %s: %v", path, limit, problems)
+		})
+	}
+}
+
+func TestBatchCellBudget(t *testing.T) {
+	e := newFixtureExecutor(t)
+	d := Dashboard{Name: "Budget"}
+	// Wide SQL frames test the shared budget independently of the row cap.
+	for i := range 40 {
+		d.Panels = append(d.Panels, Panel{ID: fmt.Sprintf("p%d", i), Title: "wide", Viz: "table", SQL: "SELECT a.span_id, a.service, a.operation, a.attributes['http.route'], a.status, a.duration_ms FROM spans a, spans b WHERE $__window(a.start_time)"})
+	}
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells := 0
+	truncated := false
+	for _, r := range results {
+		if r.Frame == nil {
+			t.Fatalf("frame missing: %+v", r)
+		}
+		cells += r.Frame.Rows*len(r.Frame.Columns) + len(r.Frame.Totals)
+		truncated = truncated || r.Frame.Truncated
+	}
+	if cells > 200000 || !truncated {
+		t.Fatalf("batch cells=%d truncated=%v", cells, truncated)
+	}
+}
+
+func TestSeriesRowCap(t *testing.T) {
+	// Many groups in each time bucket exceed the per-frame row limit.
+	duck, repo := newTestEngine(t)
+	spans := shopSpans()
+	base := spans[0]
+	for i := range 4000 {
+		sp := base
+		sp.SpanID = fmt.Sprintf("extra%d", i)
+		sp.TraceID = sp.SpanID
+		sp.ServiceName = fmt.Sprintf("svc%d", i%20)
+		sp.StartUnixNanos = fixtureStart.Add(time.Duration(i/20) * 10 * time.Second).UnixNano()
+		spans = append(spans, sp)
+	}
+	commit(t, repo, spans, nil)
+	e := NewExecutor(duck, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	d := shopDashboard()
+	d.Panels = d.Panels[:1]
+	d.Panels[0].Query.Where = []string{"operation IS NOT NULL"}
+	d.Panels[0].Query.By = []string{"service"}
+	d.Panels[0].Query.Bucket = "10s"
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := results[0].Frame; f.Rows <= 1000 || f.Truncated {
+		t.Fatalf("series rows=%d truncated=%v", f.Rows, f.Truncated)
+	}
+}
+
+type finalCountingEngine struct {
+	Engine
+	calls int
+}
+
+func (e *finalCountingEngine) QueryContext(ctx context.Context, q string, args ...any) (queryrows.Rows, error) {
+	e.calls++
+	return e.Engine.QueryContext(ctx, q, args...)
+}
+func TestBarSkipsTotalsAndGaugeSkipsComparison(t *testing.T) {
+	e := newFixtureExecutor(t)
+	e.parallel = 1
+	engine := &finalCountingEngine{Engine: e.engine}
+	e.engine = engine
+	d := shopDashboard()
+	d.Panels = []Panel{d.Panels[2], d.Panels[1]}
+	d.Panels[1].Viz = "gauge"
+	lo, hi := 0.0, 1000.0
+	d.Panels[1].Min = &lo
+	d.Panels[1].Max = &hi
+	compare := true
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d, Compare: &compare})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.calls != 2 {
+		t.Errorf("queries=%d want 2", engine.calls)
+	}
+	for _, r := range results {
+		if r.Previous != nil || (r.ID == d.Panels[0].ID && len(r.Frame.Totals) != 0) || (r.ID == d.Panels[1].ID && len(r.Frame.Totals) == 0) {
+			t.Errorf("unused frames=%+v", r)
+		}
+	}
+}
+
+func TestEmptyMultiSelectMatchesNothing(t *testing.T) {
+	e := newFixtureExecutor(t)
+	d := shopDashboard()
+	d.Variables[0].Multi = true
+	for i := range d.Panels {
+		if d.Panels[i].Query != nil {
+			for j := range d.Panels[i].Query.Where {
+				d.Panels[i].Query.Where[j] = strings.ReplaceAll(d.Panels[i].Query.Where[j], "service = $service", "service IN $service")
+			}
+		}
+	}
+	d.Variables[1].Where = []string{"service IN $service"}
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d, Panels: []string{"latency"}, Vars: map[string]Value{"service": {Values: []string{}}}})
+	if err != nil || results[0].Status != StatusEmpty {
+		t.Fatalf("empty selection=%+v err=%v", results, err)
+	}
+}
+
+func TestPanelErrorsRedactPaths(t *testing.T) {
+	for _, path := range []string{"/srv/data/telemetry/a.parquet", "/tmp/duckdb.db", "C:\\data\\telemetry\\a.parquet"} {
+		r := failed(Result{ID: "a"}, fmt.Errorf("IO Error: cannot open '%s'", path), context.Canceled)
+		if strings.Contains(r.Error, path) || r.Error != ReadFailure {
+			t.Errorf("leaked path: %s", r.Error)
+		}
+	}
+}
+
+func TestPanelOperationalErrorsKeepDetailsInLogs(t *testing.T) {
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer slog.SetDefault(old)
+	detail := strings.Repeat("memory pressure; ", 80) + "final diagnostic"
+	got := failed(Result{ID: "p"}, fmt.Errorf("IO Error at /srv/fanout/private.parquet: %s", detail), nil)
+	if strings.Contains(got.Error, "/srv/fanout/private.parquet") ||
+		got.Error != ReadFailure {
+		t.Fatalf("message lost or leaked: %q", got.Error)
+	}
+	if !strings.Contains(logs.String(), "final diagnostic") || !strings.Contains(logs.String(), "/srv/fanout/private.parquet") {
+		t.Fatalf("missing operational cause in logs: %s", logs.String())
+	}
+}
+
+func TestPanelErrorsKeepLongLogBindingDiagnosticsRedacted(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	n := fixtureStart.UnixNano()
+	commit(t, repo, nil, []telemetry.Log{{Namespace: "shop", Body: "token=bodysecret failed", BodyTemplate: "token=templatesecret failed", EventUnixNanos: n, IngestedAt: n}})
+	e := NewExecutor(engine, 30)
+	missing := strings.Repeat("missing_detail_", 60) + " /srv/fanout/private.parquet final diagnostic"
+	p := Panel{ID: "p", Title: "SQL", Viz: "table", SQL: fmt.Sprintf(`SELECT body, body_template, %q FROM logs WHERE $__window(time)`, missing)}
+	// Exercise the execution error boundary directly: Run's validation normally
+	// catches binding failures before execution, using the same native binder.
+	got := e.runPanel(t.Context(), &p, nil, Time{Range: "1h"}, fixtureStart.Add(time.Hour), nil, 800, false)
+	if got.Status != StatusError || strings.Contains(got.Error, "Binder Error") || len(got.Error) <= 500 || !strings.Contains(got.Error, "final diagnostic") {
+		t.Fatalf("binding diagnostic lost: %+v", got)
+	}
+	if strings.Contains(got.Error, "/srv/fanout/private.parquet") || strings.Contains(got.Error, "bodysecret") || strings.Contains(got.Error, "templatesecret") {
+		t.Fatalf("unsafe binding diagnostic: %q", got.Error)
+	}
+}
+
+func TestNormalizeBetter(t *testing.T) {
+	for _, tc := range []struct{ measure, filter, want string }{
+		{"p95(duration_ms)", "", "lower"}, {"error_rate()", "", "lower"}, {"count()", "status = 'STATUS_CODE_ERROR'", "lower"},
+		{"count()", "status != 'STATUS_CODE_ERROR'", "higher"}, {"count()", "NOT (status = 'STATUS_CODE_ERROR')", "higher"}, {"rate()", "", "higher"}, {"count()", "", "higher"}, {"count_distinct(service)", "", ""},
+	} {
+		d := Dashboard{Panels: []Panel{{Viz: "stat", Query: &Spec{From: "spans", Measures: []string{tc.measure}}}}}
+		if tc.filter != "" {
+			d.Panels[0].Query.Where = []string{tc.filter}
+		}
+		Normalize(&d)
+		if d.Panels[0].Better != "" {
+			t.Fatal("Normalize persisted a direction")
+		}
+		if inferBetter(&d.Panels[0]) != tc.want {
+			t.Errorf("%s %s better=%q want=%q", tc.measure, tc.filter, inferBetter(&d.Panels[0]), tc.want)
+		}
+	}
+}
+
+func TestPanelErrorsStopAtTheByteBoundOnARuneBoundary(t *testing.T) {
+	got := failed(Result{ID: "p"}, Problems{{Message: strings.Repeat("界", maxPanelErrorBytes)}}, nil)
+	if !utf8.ValidString(got.Error) || !strings.HasSuffix(got.Error, "…") || len(got.Error) > maxPanelErrorBytes+len("…") {
+		t.Fatalf("unbounded or split error: %d bytes", len(got.Error))
+	}
+}
+
+type countingParser struct {
+	Engine
+	parses atomic.Int32
+}
+
+func (e *countingParser) ParseSQL(ctx context.Context, query string) (map[string]any, error) {
+	e.parses.Add(1)
+	return e.Engine.ParseSQL(ctx, query)
+}
+
+// Saving a renamed or rearranged dashboard used to check every filter and SQL
+// panel again, which took seconds while panels were running.
+func TestValidateRechecksOnlyChangedPanels(t *testing.T) {
+	e := newFixtureExecutor(t)
+	counter := &countingParser{Engine: e.engine}
+	e.engine = counter
+	d := shopDashboard()
+	if err := e.Validate(t.Context(), &d); err != nil {
+		t.Fatal(err)
+	}
+	if counter.parses.Load() == 0 {
+		t.Fatal("the first check parsed nothing")
+	}
+	renamed := shopDashboard()
+	renamed.Name, renamed.Panels[0].Title, renamed.Panels[3].Title = "Shop copy", "P95", "Top services"
+	counter.parses.Store(0)
+	if err := e.Validate(t.Context(), &renamed); err != nil || counter.parses.Load() != 0 {
+		t.Fatalf("renaming re-parsed %d times, err=%v", counter.parses.Load(), err)
+	}
+	edited := shopDashboard()
+	edited.Panels[1].Query.Where = []string{"service = 'cart'"}
+	counter.parses.Store(0)
+	if err := e.Validate(t.Context(), &edited); err != nil || counter.parses.Load() == 0 {
+		t.Fatalf("an edited filter was not checked: err=%v", err)
+	}
+	edited.Panels[1].Query.Where = []string{"service = "}
+	if err := e.Validate(t.Context(), &edited); err == nil {
+		t.Fatal("an invalid edit passed on cached checks")
+	}
+}
+
+func TestDefaultExecutionBudgets(t *testing.T) {
+	e := NewExecutor(pooledEngine{pool: 4}, 30)
+	defer e.Close()
+	if e.batchTimeout != 12*time.Second || e.timeout != 10*time.Second {
+		t.Fatalf("batch=%s panel=%s", e.batchTimeout, e.timeout)
+	}
+	if !strings.Contains(BatchTimeoutError, "12 seconds") || !strings.Contains(TimeoutError, "10 seconds") {
+		t.Fatal("budget messages do not match their deadlines")
+	}
+}

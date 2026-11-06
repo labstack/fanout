@@ -6,6 +6,7 @@ import fixture from "../data/all-panels.json" with { type: "json" };
 import type { DashboardSpec, Panel, PanelResult } from "../../../panels/types";
 import type { PanelFragment } from "../../../panels/fragment";
 import { mountApp } from "./chat-harness";
+import { encodePanelResults, isStream, panelResults } from "./query-results";
 
 export const spec = fixture as DashboardSpec;
 export type Surface = "dashboard" | "chat";
@@ -57,11 +58,10 @@ function alter(result: PanelResult, scenario?: Scenario): PanelResult {
 export async function openSurface(page: Page, request: APIRequestContext, info: TestInfo, surface: Surface, panel?: Panel, scenario?: Scenario): Promise<Page | Frame> {
   const theme = themeFor(info);
   if (surface === "dashboard") {
-    if (scenario && scenario !== "stale") await page.route("**/api/panels/query", async route => {
+    if (scenario && scenario !== "stale") await page.route("**/api/queries/run", async route => {
       const response = await route.fetch();
-      const body = await response.json() as { results: PanelResult[] };
-      body.results = body.results.map(result => result.id === panel!.id ? alter(result, scenario) : result);
-      await route.fulfill({ response, json: body });
+      const results = (await panelResults(response)).map(result => result.id === panel!.id ? alter(result, scenario) : result);
+      await route.fulfill({ response, body: encodePanelResults(results, isStream(response)) });
     });
     await page.addInitScript(value => localStorage.setItem("mantine-color-scheme-value", value), theme);
     await page.goto(`/dashboards/${process.env.FANOUT_E2E_DASHBOARD_ID}`);
@@ -73,14 +73,14 @@ export async function openSurface(page: Page, request: APIRequestContext, info: 
   // State mutations below are explicitly synthetic, not telemetry.
   const panels = panel ? [panel] : spec.panels;
   const dashboard: DashboardSpec = { ...spec, variables: [{ name: "service", kind: "custom", options: ["checkout"], multi: true, include_all: true, default: "$__all" }], panels };
-  const response = await request.post("/api/panels/query", { headers: { "Fanout-Request": "1" }, data: { dashboard, vars: { service: "$__all" } } });
+  const response = await request.post("/api/queries/run", { headers: { "Fanout-Request": "1" }, data: { dashboard, vars: { service: "$__all" } } });
   expect(response.status()).toBe(200);
-  const body = await response.json() as { results: PanelResult[] };
-  expect(body.results).toHaveLength(panels.length);
-  for (const result of body.results) if (panels.find(p => p.id === result.id)?.viz !== "text") expect(result.status, result.id).toBe("ok");
+  const results = await panelResults(response);
+  expect(results).toHaveLength(panels.length);
+  for (const result of results) if (panels.find(p => p.id === result.id)?.viz !== "text") expect(result.status, result.id).toBe("ok");
   const fragment: PanelFragment = {
     view: { kind: "query", key: createHash("sha256").update(JSON.stringify(dashboard)).digest("hex") },
-    dashboard, results: body.results.map(result => result.id === panel?.id ? alter(result, scenario) : result), vars: { service: "$__all" },
+    dashboard, results: results.map(result => result.id === panel?.id ? alter(result, scenario) : result), vars: { service: "$__all" },
   };
   if (scenario === "stale") fragment.dashboard.variables!.push({ name: "probe", kind: "custom", options: ["before", "after"], default: "before" });
   const html = await readFile(fileURLToPath(new URL("../../../../internal/mcp/apps/panels.html", import.meta.url)), "utf8");
@@ -115,7 +115,7 @@ export async function chooseView(surface: Page | Frame, card: Locator, mode: "Da
 }
 export async function staleSurface(page: Page, surface: Page | Frame, kind: Surface, card: Locator) {
   if (kind === "dashboard") {
-    await page.route("**/api/panels/query", route => route.fulfill({ status: 503, json: { code: "query_unavailable", message: "Synthetic fixture: refresh unavailable." } }));
+    await page.route("**/api/queries/run", route => route.fulfill({ status: 503, json: { code: "query_unavailable", message: "Synthetic fixture: refresh unavailable." } }));
     await page.getByRole("button", { name: "Refresh now", exact: true }).click();
     // Only panels in view refresh; clicking the toolbar scrolled the card away.
     await card.scrollIntoViewIfNeeded();

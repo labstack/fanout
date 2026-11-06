@@ -3,46 +3,16 @@ package intelligence
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/annotations"
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/query/writegate"
+	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/writegate"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
-
-// Fail just one statement while retaining native DuckDB watermark reads and
-// all preceding anomaly queries, including when the third query fails.
-type detectorFailureConnector struct {
-	driver.Connector
-	fail string
-}
-
-func (c *detectorFailureConnector) Connect(ctx context.Context) (driver.Conn, error) {
-	conn, err := c.Connector.Connect(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return detectorFailureConn{Conn: conn, connector: c}, nil
-}
-
-type detectorFailureConn struct {
-	driver.Conn
-	connector *detectorFailureConnector
-}
-
-func (c detectorFailureConn) QueryContext(ctx context.Context, statement string, args []driver.NamedValue) (driver.Rows, error) {
-	if c.connector.fail != "" && strings.Contains(statement, c.connector.fail) {
-		return nil, context.DeadlineExceeded
-	}
-	return c.Conn.(driver.QueryerContext).QueryContext(ctx, statement, args)
-}
 
 func seedDetectorRecoveryRollup(t *testing.T, db *sql.DB, end time.Time) {
 	t.Helper()
@@ -68,23 +38,12 @@ func TestDetectorRetriesFailedQueriesAtUnchangedWatermark(t *testing.T) {
 				name = statement + "/previous"
 			}
 			t.Run(name, func(t *testing.T) {
-				native, err := duckdb.NewConnector("", nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer native.Close()
-				connector := &detectorFailureConnector{Connector: native}
-				db := sql.OpenDB(connector)
-				defer db.Close()
-				if err := query.CreateCacheTables(db); err != nil {
-					t.Fatal(err)
-				}
-				createDetectorLogs(t, db)
+				connector := newDetectorEngine(t)
 				end := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Hour)
-				seedDetectorRecoveryRollup(t, db, end)
-				d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+				seedDetectorRecoveryRollup(t, connector.DB, end)
+				d := NewDetector(connector, DefaultDetectorConfig())
 				if withPrevious {
-					d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: time.Now().Add(-time.Minute), evaluatedThrough: end.Add(-time.Minute), HealthScore: 85})
+					d.publishSnapshot(Snapshot{GeneratedAt: time.Now().Add(-time.Minute), evaluatedThrough: end.Add(-time.Minute), HealthScore: 85})
 					<-d.annotationBatches
 				}
 				previous := d.LatestSnapshot()
@@ -128,7 +87,7 @@ func TestDetectorRetriesPersistenceAtUnchangedWatermark(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +97,7 @@ func TestDetectorRetriesPersistenceAtUnchangedWatermark(t *testing.T) {
 	d := NewDetector(duck, DefaultDetectorConfig())
 	d.runCheck(t.Context())
 	previous := d.LatestSnapshot()
-	unlock := duck.WriteGate().Lock(writegate.WriteRollupService)
+	unlock := duck.WriteGate().Lock(writegate.RollupService)
 	defer func() {
 		if unlock != nil {
 			unlock()
@@ -211,30 +170,17 @@ func TestDetectorRetriesPatternFailureWithoutPublishingHealthySnapshot(t *testin
 			name = "previous"
 		}
 		t.Run(name, func(t *testing.T) {
-			native, err := duckdb.NewConnector("", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer native.Close()
-			connector := &detectorFailureConnector{Connector: native}
-			db := sql.OpenDB(connector)
-			defer db.Close()
-			if err := query.CreateCacheTables(db); err != nil {
-				t.Fatal(err)
-			}
-			createDetectorLogs(t, db)
+			connector := newDetectorEngine(t)
 			end := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
-			seedDetectorRecoveryRollup(t, db, end)
-			d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+			seedDetectorRecoveryRollup(t, connector.DB, end)
+			d := NewDetector(connector, DefaultDetectorConfig())
 			if withPrevious {
 				d.runCheck(t.Context())
 				<-d.annotationBatches
 			}
 			previous := d.LatestSnapshot()
 			at := time.Now().UTC().Add(-time.Minute)
-			if _, err := db.Exec(`INSERT INTO logs SELECT ?::TIMESTAMP_NS::TIMESTAMPTZ_NS, ?, 'failure', 'failure', 'ERROR', 'api', 'default' FROM range(10)`, at, at.UnixNano()); err != nil {
-				t.Fatal(err)
-			}
+			connector.commitFailures(t, at)
 			connector.fail = "AS occurrence_count"
 			if _, err := d.GenerateSnapshot(t.Context()); err == nil {
 				t.Fatal("pattern query failure was treated as an empty successful result")
@@ -256,21 +202,11 @@ func TestDetectorRetriesPatternFailureWithoutPublishingHealthySnapshot(t *testin
 }
 
 func TestDetectorKeepsUnpublishedFindingsWhenWatermarkAdvances(t *testing.T) {
-	native, err := duckdb.NewConnector("", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer native.Close()
-	connector := &detectorFailureConnector{Connector: native, fail: "AS occurrence_count"}
-	db := sql.OpenDB(connector)
-	defer db.Close()
-	if err := query.CreateCacheTables(db); err != nil {
-		t.Fatal(err)
-	}
-	createDetectorLogs(t, db)
+	connector := newDetectorEngine(t)
+	connector.fail = "AS occurrence_count"
 	end := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
-	seedDetectorRecoveryRollup(t, db, end)
-	d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+	seedDetectorRecoveryRollup(t, connector.DB, end)
+	d := NewDetector(connector, DefaultDetectorConfig())
 	for range 2 {
 		d.runCheck(t.Context())
 	}
@@ -280,15 +216,15 @@ func TestDetectorKeepsUnpublishedFindingsWhenWatermarkAdvances(t *testing.T) {
 	if d.evaluation == nil || len(d.evaluation.findings) != 3 {
 		t.Fatalf("missing successful anomaly evaluation: %+v", d.evaluation)
 	}
-	want := detectorAnnotations(IntelligenceSnapshot{Anomalies: d.evaluation.findings}, d.duck.DefaultNamespace())
+	want := detectorAnnotations(Snapshot{Anomalies: d.evaluation.findings}, d.duck.DefaultNamespace())
 
 	// Replace the failed-publication evaluation with a healthy, later window
 	// while patterns still fail, then recover at that new watermark.
 	advanced := end.Add(time.Minute)
-	if _, err := db.Exec(`UPDATE service_rollup SET error_rate=0,p95_ms=10,spans=100,served_spans=100`); err != nil {
+	if _, err := connector.DB.Exec(`UPDATE service_rollup SET error_rate=0,p95_ms=10,spans=100,served_spans=100`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE rollup_state SET last_ingested_unix_nano=? WHERE cache_key='service_rollup_v3'`, advanced.Add(30*time.Second).UnixNano()); err != nil {
+	if _, err := connector.DB.Exec(`UPDATE rollup_state SET last_ingested_unix_nano=? WHERE cache_key='service_rollup_v3'`, advanced.Add(30*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	d.runCheck(t.Context())
@@ -318,7 +254,7 @@ func TestDetectorKeepsUnpublishedFindingsWhenWatermarkAdvances(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}

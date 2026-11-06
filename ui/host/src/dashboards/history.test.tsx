@@ -45,7 +45,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   onRestored = vi.fn(); onClose = vi.fn();
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  render = async (opened = true, ready?: () => void) => { await act(async () => root.render(<MantineProvider theme={fanoutTheme} forceColorScheme={scheme}><QueryClientProvider client={client}><HistoryDrawer id="board" currentVersion={currentVersion} opened={opened} onClose={onClose} onRestored={onRestored} /></QueryClientProvider></MantineProvider>)); if (opened) await settle(ready); };
+  render = async (opened = true, ready?: () => void) => { await act(async () => root.render(<MantineProvider theme={fanoutTheme} forceColorScheme={scheme}><QueryClientProvider client={client}><HistoryDrawer id="board" currentVersion={currentVersion} currentSpec={record.spec} opened={opened} onClose={onClose} onRestored={onRestored} /></QueryClientProvider></MantineProvider>)); if (opened) await settle(ready); };
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); document.body.innerHTML = ""; vi.unstubAllGlobals(); });
 
@@ -153,6 +153,20 @@ it("offers a disabled Current version label and uses shared receipt layout chips
   expect([...document.querySelectorAll("[data-edit-chips] .mantine-Badge-label")].map(node => node.textContent)).toContain("Layout adjusted");
 });
 
+// Restoring a version identical to the current one added a duplicate version each time.
+it("disables restoring a version whose contents the dashboard already has, and explains the server's refusal", async () => {
+  api.getVersion.mockImplementation((_id, version) => Promise.resolve(version === 1 ? { ...historic(1), dashboard: { ...historic(1).dashboard, spec: record.spec } } : historic(version)));
+  await render();
+  await act(async () => button("Version 1").click()); await settle();
+  expect(button("Same as current")?.disabled).toBe(true);
+  expect(button("Restore version 1")).toBeUndefined();
+  await act(async () => button("Version 2").click()); await settle();
+  api.restoreVersion.mockRejectedValue(new ApiError("dashboard version is already current", 409, [], "already_current"));
+  await act(async () => button("Restore version 2").click()); await settle();
+  expect(document.body.textContent).toContain("The dashboard already has this version's contents, so there is nothing to restore.");
+  expect(document.body.textContent).not.toContain("This dashboard changed or its name conflicts");
+});
+
 it("uses the receipt's Layout adjusted chip for the server layout flag", async () => {
   await render();
   expect([...document.querySelectorAll("[data-edit-chips] .mantine-Badge-label")].map(node => node.textContent)).toContain("Layout adjusted");
@@ -190,6 +204,19 @@ it.each(["light", "dark"] as const)("uses the defined ok palette for success and
   expect(alert.style.getPropertyValue("--alert-bg")).toBe("var(--mantine-color-ok-light)");
   expect(alert.style.getPropertyValue("--alert-color")).toBe("var(--mantine-color-ok-light-color)");
   await render(false); await render(); expect(document.body.textContent).not.toContain("Restored v1 as v4");
+});
+
+it("moves focus to the restore confirmation", async () => {
+  api.restoreVersion.mockResolvedValue({ ...record, version: 4 });
+  await render(); await act(async () => button("Version 1").click()); await settle();
+  await act(async () => { button("Restore version 1").focus(); button("Restore version 1").click(); }); await settle();
+  expect(document.activeElement?.textContent).toContain("Restored v1 as v4");
+  // Focus says it, so a live region would announce it twice.
+  expect(document.activeElement?.getAttribute("role")).toBe("note");
+  // A second restore with the same confirmation takes focus again.
+  await act(async () => { button("Restore version 1").focus(); }); expect(document.activeElement?.textContent).not.toContain("Restored v1 as v4");
+  await act(async () => { button("Restore version 1").click(); }); await settle();
+  expect(document.activeElement?.textContent).toContain("Restored v1 as v4");
 });
 
 it("releases restore pending when the POST responds without waiting for or refetching the old panel batch", async () => {

@@ -1,8 +1,11 @@
 package ingest
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"unsafe"
 )
 
 // ---------------------------------------------------------------------------
@@ -303,4 +306,75 @@ func TestNormalizeTemplate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// templateCache
+// ---------------------------------------------------------------------------
+
+// The cache answers exactly what normalizeTemplate answers, for repeated,
+// colliding and over-long bodies alike, under concurrent use.
+func TestTemplateCacheMatchesNormalizeTemplate(t *testing.T) {
+	c := newTemplateCache()
+	bodies := []string{
+		"",
+		"user 550e8400-e29b-41d4-a716-446655440000 disconnected",
+		`{"msg":"connected from 10.0.0.1","code":200}`,
+		strings.Repeat("x", 510) + " 12345",
+		strings.Repeat("x", 510) + " 67890", // same template key after truncation
+	}
+	// More distinct bodies than slots in one shard, so slots are replaced.
+	for i := range templateCacheShards*templateCacheSlots + 100 {
+		bodies = append(bodies, fmt.Sprintf("request %d took %d ms from 10.0.0.%d", i, i*3, i%255))
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for round := range 2 {
+				for _, body := range bodies {
+					if got, want := c.template(body), normalizeTemplate(body); got != want {
+						t.Errorf("round %d: template(%q)\n got  %q\n want %q", round, body, got, want)
+						return
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// A slot holds its own copy of the truncated body and template, so caching a
+// large body does not keep the whole request body alive.
+func TestTemplateCacheDoesNotPinBodies(t *testing.T) {
+	c := newTemplateCache()
+	body := strings.Repeat("no placeholders here ", 1<<16) // 1.3 MiB, template = prefix
+	c.template(body)
+	start := uintptr(unsafe.Pointer(unsafe.StringData(body)))
+	end := start + uintptr(len(body))
+	for i := range c.shards {
+		for _, slot := range c.shards[i].slots {
+			for _, s := range []string{slot.body, slot.template} {
+				if p := uintptr(unsafe.Pointer(unsafe.StringData(s))); s != "" && p >= start && p < end {
+					t.Fatalf("slot shares memory with the %d-byte request body", len(body))
+				}
+			}
+		}
+	}
+}
+
+func BenchmarkTemplate(b *testing.B) {
+	body := "GET /api/users/42 from 10.0.0.1 took 12.5 ms"
+	b.Run("normalize", func(b *testing.B) {
+		for range b.N {
+			normalizeTemplate(body)
+		}
+	})
+	b.Run("cached", func(b *testing.B) {
+		c := newTemplateCache()
+		for range b.N {
+			c.template(body)
+		}
+	})
 }

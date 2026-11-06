@@ -75,7 +75,7 @@ describe("drill URL", () => {
 });
 
 const hostAPI = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn() }));
-const wire = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn() }));
+const wire = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn(), span: vi.fn(async () => ({ attributes: { "http.route": "/cart" }, resource: { "service.name": "checkout" }, events: [{ offset_ns: 0, name: "exception", attributes: { "exception.type": "Error", "exception.message": "boom" } }], scope: "" })) }));
 vi.mock("./api", () => ({
   queryExemplars: hostAPI.exemplars,
   getTrace: hostAPI.trace,
@@ -246,8 +246,17 @@ it("renders the existing waterfall and correlated logs with visible truncation",
   ).not.toBeNull();
   const row = document.body.querySelector('[aria-label^="cart on checkout took"]')!.closest("tr")!;
   try {
-    expect(row.hasAttribute("tabindex")).toBe(false);
-    expect(row.style.cursor).not.toBe("pointer");
+    expect(document.body.querySelector('[role="dialog"]')?.getAttribute("aria-labelledby")).toBeTruthy();
+    expect(document.getElementById(document.body.querySelector('[role="dialog"]')!.getAttribute("aria-labelledby")!)?.textContent).toBe("Trace");
+    // A span opens its details, read through the client.
+    await act(async () => { row.click(); await tick(); });
+    expect(wire.span).toHaveBeenCalledWith("abc", expect.objectContaining({ span_id: "root" }), expect.anything());
+    const details = document.body.querySelector("[data-span-details]")!;
+    expect(details.textContent).toContain("cart");
+    expect(details.textContent).toContain("Error");
+    await act(async () => { await tick(); });
+    expect(details.textContent).toContain("http.route");
+    expect(details.textContent).toContain("boom");
   } finally {
     await act(async () => root.unmount()); client.clear(); node.remove();
   }

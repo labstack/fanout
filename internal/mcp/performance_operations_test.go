@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -20,7 +20,7 @@ func TestPerformanceSlowOperationsAcrossProtocols(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = repo.Close() })
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,9 +36,13 @@ func TestPerformanceSlowOperationsAcrossProtocols(t *testing.T) {
 	add := func(namespace, service, operation, kind, route string, ms float64) {
 		n := from.Add(time.Minute).UnixNano()
 		id := fmt.Sprintf("span-%d", len(spans))
+		var attributes map[string]any
+		if route != "" {
+			attributes = map[string]any{"http.route": route}
+		}
 		spans = append(spans, telemetry.Span{
 			Namespace: namespace, ServiceName: service, TraceID: id, SpanID: id,
-			Name: operation, Kind: kind, HTTPRoute: route, DurationMS: ms,
+			Name: operation, Kind: kind, Attributes: attributes, DurationMS: ms,
 			StartUnixNanos: n, EndUnixNanos: n + int64(ms*1e6), IngestedAt: n,
 		})
 	}
@@ -60,7 +64,7 @@ func TestPerformanceSlowOperationsAcrossProtocols(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "operations", Spans: spans}); err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{panels: panel.NewExecutor(duck, 30)}
+	s := &Server{panels: query.NewExecutor(duck, 30)}
 	for _, tc := range cases {
 		t.Run(tc.protocol, func(t *testing.T) {
 			for _, limit := range []int{0, 1} {
@@ -85,7 +89,7 @@ func TestPerformanceSlowOperationsAcrossProtocols(t *testing.T) {
 				if limit > 0 {
 					wantOperations, wantP95 = wantOperations[:limit], wantP95[:limit]
 				}
-				if r.ID != "operations" || r.Status != panel.StatusOK || r.Frame == nil || r.Frame.Rows != len(wantOperations) {
+				if r.ID != "operations" || r.Status != query.StatusOK || r.Frame == nil || r.Frame.Rows != len(wantOperations) {
 					t.Fatalf("operations result = %+v", r)
 				}
 				if len(r.Frame.Columns) != 2 || r.Frame.Columns[0].Name != "operation" || r.Frame.Columns[1].Name != "p95" || !reflect.DeepEqual(r.Frame.Values[0], wantOperations) {

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,21 +10,23 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/querytest"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	appstore "github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestPreviewReportsTotalAndExecutedPanelTimings(t *testing.T) {
 	s := newPanelServer(t)
-	s.panels = receiptExecutor{panelExecutor: s.panels, run: func(_ context.Context, req panel.RunRequest) ([]panel.Result, error) {
-		return []panel.Result{{ID: req.Dashboard.Panels[0].ID, Status: "ok", ElapsedMS: 37}}, nil
+	s.panels = receiptExecutor{panelExecutor: s.panels, run: func(_ context.Context, req query.RunRequest) ([]query.Result, error) {
+		return []query.Result{{ID: req.Dashboard.Panels[0].ID, Status: "ok", ElapsedMS: 37}}, nil
 	}}
-	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "hello"}}})
+	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "hello"}}})
 	if err != nil || out.ElapsedMS < 0 || len(out.Panels) != 1 || (out.Panels[0].ElapsedMS == nil || *out.Panels[0].ElapsedMS != 37) || out.Panels[0].Status != "ok" {
 		t.Fatalf("out=%+v err=%v", out, err)
 	}
@@ -44,7 +47,7 @@ func panelServerFixtureAt(t *testing.T, seed bool, now time.Time) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,24 +65,30 @@ func panelServerFixtureAt(t *testing.T, seed bool, now time.Time) *Server {
 		var logs []telemetry.Log
 		for i := range 30 {
 			n := at.Add(time.Duration(i) * time.Second).UnixNano()
-			route := "/cart"
+			route := map[string]any{"http.route": "/cart"}
 			if i == 0 {
-				route = ""
+				route = nil
 			}
-			spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: fmt.Sprintf("trace-%d", i), SpanID: fmt.Sprintf("span-%d", i), Name: "GET cart", Kind: "SPAN_KIND_SERVER", StartUnixNanos: n, EndUnixNanos: n + 100000000, DurationMS: 100, HTTPRoute: route, StatusCode: "STATUS_CODE_ERROR", IngestedAt: n})
+			spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: fmt.Sprintf("trace-%d", i), SpanID: fmt.Sprintf("span-%d", i), Name: "GET cart", Kind: "SPAN_KIND_SERVER", StartUnixNanos: n, EndUnixNanos: n + 100000000, DurationMS: 100, Attributes: route, StatusCode: "STATUS_CODE_ERROR", IngestedAt: n})
 			logs = append(logs, telemetry.Log{Namespace: "shop", ServiceName: "checkout", TimeUnixNanos: n, Severity: "ERROR", Body: "timeout", TraceID: fmt.Sprintf("trace-%d", i), IngestedAt: n})
 		}
 		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "fragment-seed", Spans: spans, Logs: logs}); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := duck.RefreshReadCaches(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if err := querytest.RefreshSpanRollup(duck.DB); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := duck.DB.Exec(`INSERT INTO service_rollup VALUES ('shop',?,'checkout',30,30,100,100,.1,30,0)`, at); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','payment',30,100,.1,'call')`, at); err != nil {
+		if _, err := duck.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) VALUES ('shop',?,'checkout','payment',30,100,.1,'call')`, at); err != nil {
 			t.Fatal(err)
 		}
 	}
-	executor := panel.NewExecutor(duck, 30)
+	executor := query.NewExecutor(duck, 30)
 	executor.SetRollupReader(observability.New(duck, duck, 30))
 	if seed {
 		server := NewWithIntelligence(observability.New(duck, duck, 30), dashboard.New(sqlite.DB, executor), executor, nil, "test")
@@ -95,9 +104,9 @@ func ownerRequest() *mcp.CallToolRequest {
 
 func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 	s := newPanelServer(t)
-	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{
-		{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}},
-		{ID: "typo", Title: "Typo", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"p95(duraton_ms)"}}},
+	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{
+		{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}},
+		{ID: "typo", Title: "Typo", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"p95(duraton_ms)"}}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -105,23 +114,23 @@ func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 	if out.Panels[1].Status != "invalid" || !strings.Contains(out.Panels[1].Problems[0].Message+out.Panels[1].Problems[0].Hint, "duration_ms") {
 		t.Fatalf("typo preview = %+v", out.Panels[1])
 	}
-	if out.Panels[0].Status != "not_run" {
-		t.Fatalf("a valid panel is not run while another is invalid: %+v", out.Panels[0])
+	if out.Panels[0].Status != "ok" {
+		t.Fatalf("valid panel did not run alongside invalid sibling: %+v", out.Panels[0])
 	}
-	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS != nil || out.Panels[1].ElapsedMS != nil {
-		t.Fatalf("invalid/not_run timing = %+v", out)
+	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS == nil || out.Panels[1].ElapsedMS != nil {
+		t.Fatalf("valid/invalid timing = %+v", out)
 	}
-	_, out, err = s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}}})
-	if err != nil || out.Panels[0].Status != "empty" || out.Panels[0].Diagnosis == "" {
+	result, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}}})
+	if err != nil || out.Panels[0].Status != "ok" || out.Panels[0].Diagnosis == "" || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "requests counted nothing: No spans") {
 		t.Fatalf("empty store preview = %+v %v", out.Panels, err)
 	}
 }
 
 func TestCreateAndEditDashboardTools(t *testing.T) {
 	s := panelServerFixture(t, true)
-	spec := panel.Dashboard{Name: "Checkout", Panels: []panel.Panel{
+	spec := query.Dashboard{Name: "Checkout", Panels: []query.Panel{
 		{ID: "notes", Title: "Notes", Viz: "text", Content: "Money path."},
-		{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}},
+		{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}},
 	}}
 	result, out, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
 	if err != nil {
@@ -202,5 +211,30 @@ func TestRankingGuide(t *testing.T) {
 func TestConfidenceGuide(t *testing.T) {
 	if !strings.Contains(specGuide, "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency)") {
 		t.Fatal("missing confidence semantics")
+	}
+}
+
+type busySchema struct{ panelExecutor }
+
+func (busySchema) Schema(context.Context, query.SchemaRequest) (*query.Schema, error) {
+	return nil, query.ErrSchemaBusy
+}
+
+// Busy discovery is retryable, like HTTP's 503, not a generic read failure.
+func TestTelemetrySchemaReportsBusy(t *testing.T) {
+	s := newPanelServer(t)
+	s.panels = busySchema{s.panels}
+	_, _, err := s.telemetrySchema(t.Context(), nil, SchemaInput{})
+	var failure toolerror.Result
+	if err == nil || json.Unmarshal([]byte(err.Error()), &failure) != nil || failure.Error == nil || failure.Error.Code != "schema_busy" || !strings.Contains(failure.Error.Message, "Try again") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPreviewRetainsPanelProblemsWhenVariablesFailLater(t *testing.T) {
+	s := newPanelServer(t)
+	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Variables: []query.Variable{{Name: "service", Kind: "query", From: "spans", Field: "service", Where: []string{"http_route = '/cart'"}}}, Panels: []query.Panel{{ID: "broken", Title: "Broken", Viz: "unknown"}}})
+	if err != nil || len(out.Panels) != 1 || out.Panels[0].Status != "invalid" || len(out.Panels[0].Problems) != 1 || out.Panels[0].Problems[0].Path != "panels[0].viz" || len(out.Problems) != 1 || out.Problems[0].Path != "variables[0].where[0]" {
+		t.Fatalf("preview: %+v %v", out, err)
 	}
 }

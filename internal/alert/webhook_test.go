@@ -203,3 +203,16 @@ func TestFireWebhook_TemplateRendered(t *testing.T) {
 		t.Errorf("body missing service: %q", receivedBody)
 	}
 }
+
+func TestCheckHeaders(t *testing.T) {
+	for _, ok := range []string{"", `{}`, `{"Authorization":"Bearer x"}`} {
+		if err := CheckHeaders(ok); err != nil {
+			t.Errorf("CheckHeaders(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{`{"X-Test": 5}`, `[]`, `"x"`, `{`, `{"":"x"}`, `{"Bad Name":"x"}`, `{"X-Test":"a\r\nInjected: y"}`, `{"X-Test":"a\u0000b"}`} {
+		if err := CheckHeaders(bad); err == nil {
+			t.Errorf("CheckHeaders(%q) = nil, want error", bad)
+		}
+	}
+}

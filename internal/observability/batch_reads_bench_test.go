@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
 // TestCompletedReadBenchmark measures actual dashboard methods over identical
-// immutable format-4 files. Run with the readbench tag on an otherwise idle
+// immutable format-5 files. Run with the readbench tag on an otherwise idle
 // machine; the normal test gate does not run this resource-intensive fixture.
 func TestCompletedReadBenchmark(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", DuckDBThreads: 4, DuckDBMaxConns: 4, RollupInterval: 100 * time.Millisecond}
@@ -43,7 +43,7 @@ func TestCompletedReadBenchmark(t *testing.T) {
 			if i%101 == 0 {
 				status = "STATUS_CODE_ERROR"
 			}
-			b.Spans = append(b.Spans, telemetry.Span{Namespace: "prod", ServiceName: service, TraceID: trace, SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + int64(i%1000+1)*1000000, DurationMS: float64(i%1000 + 1), StatusCode: status, HTTPMethod: "GET", HTTPRoute: fmt.Sprint("/route", i%8), IngestedAt: at.UnixNano(), Attributes: map[string]any{"http.route": fmt.Sprint("/route", i%8)}, Resource: map[string]any{"service.name": service}})
+			b.Spans = append(b.Spans, telemetry.Span{Namespace: "prod", ServiceName: service, TraceID: trace, SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + int64(i%1000+1)*1000000, DurationMS: float64(i%1000 + 1), StatusCode: status, IngestedAt: at.UnixNano(), Attributes: map[string]any{"http.request.method": "GET", "http.route": fmt.Sprint("/route", i%8)}, Resource: map[string]any{"service.name": service}})
 			b.Logs = append(b.Logs, telemetry.Log{Namespace: "prod", ServiceName: service, TraceID: trace, TimeUnixNanos: n, Severity: []string{"INFO", "WARN", "ERROR"}[i%3], Body: "request complete", IngestedAt: at.UnixNano()})
 		}
 		if err := repo.Commit(t.Context(), b); err != nil {
@@ -58,13 +58,12 @@ func TestCompletedReadBenchmark(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	d, err := query.NewDuck(t.Context(), cfg, repo)
+	d, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer d.Close()
 	svc := New(d, d, 30)
-	raw := New(SQLDB(d.DB), d, 30)
 	if _, err := d.DB.Exec(`CHECKPOINT`); err != nil {
 		t.Fatal(err)
 	}
@@ -110,14 +109,21 @@ func TestCompletedReadBenchmark(t *testing.T) {
 	broad := Scope{Start: at.Add(-24 * time.Hour), End: at.Add(time.Second), Namespace: "prod"}
 	narrow := Scope{Start: at.Add(-20 * time.Minute), End: at.Add(time.Second), Namespace: "prod"}
 	for _, scope := range []Scope{broad, narrow} {
-		for name, method := range map[string]func(*Service) error{
-			"trace": func(s *Service) error { _, err := s.Trace(t.Context(), scope, "", "", 100); return err },
+		for name, method := range map[string]func(bool) error{
+			"trace": func(raw bool) error {
+				if raw {
+					_, err := rawTraceID(t, d, scope, "")
+					return err
+				}
+				_, err := svc.Trace(t.Context(), scope, "", "", 100)
+				return err
+			},
 		} {
 			for _, implementation := range []struct {
-				name    string
-				service *Service
-			}{{"raw", raw}, {"completed", svc}} {
-				if err := method(implementation.service); err != nil {
+				name string
+				raw  bool
+			}{{"raw", true}, {"completed", false}} {
+				if err := method(implementation.raw); err != nil {
 					t.Fatal(err)
 				}
 				runtime.GC()
@@ -125,7 +131,7 @@ func TestCompletedReadBenchmark(t *testing.T) {
 				timings := []float64{}
 				for range 10 {
 					start := time.Now()
-					if err := method(implementation.service); err != nil {
+					if err := method(implementation.raw); err != nil {
 						t.Fatal(err)
 					}
 					timings = append(timings, float64(time.Since(start))/float64(time.Millisecond))

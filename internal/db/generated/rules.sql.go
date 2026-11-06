@@ -30,7 +30,7 @@ type CreateRuleParams struct {
 	ForSeconds      int64          `json:"for_seconds"`
 	CooldownS       int64          `json:"cooldown_s"`
 	RepeatIntervalS int64          `json:"repeat_interval_s"`
-	WebhookUrl      sql.NullString `json:"webhook_url"`
+	WebhookURL      sql.NullString `json:"webhook_url"`
 	WebhookHeaders  sql.NullString `json:"webhook_headers"`
 	WebhookTemplate sql.NullString `json:"webhook_template"`
 	NotifyOnResolve int64          `json:"notify_on_resolve"`
@@ -48,7 +48,7 @@ func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) (AlertRu
 		arg.ForSeconds,
 		arg.CooldownS,
 		arg.RepeatIntervalS,
-		arg.WebhookUrl,
+		arg.WebhookURL,
 		arg.WebhookHeaders,
 		arg.WebhookTemplate,
 		arg.NotifyOnResolve,
@@ -65,7 +65,7 @@ func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) (AlertRu
 		&i.ForSeconds,
 		&i.CooldownS,
 		&i.RepeatIntervalS,
-		&i.WebhookUrl,
+		&i.WebhookURL,
 		&i.WebhookHeaders,
 		&i.WebhookTemplate,
 		&i.NotifyOnResolve,
@@ -102,7 +102,7 @@ func (q *Queries) GetRule(ctx context.Context, id string) (AlertRule, error) {
 		&i.ForSeconds,
 		&i.CooldownS,
 		&i.RepeatIntervalS,
-		&i.WebhookUrl,
+		&i.WebhookURL,
 		&i.WebhookHeaders,
 		&i.WebhookTemplate,
 		&i.NotifyOnResolve,
@@ -136,7 +136,7 @@ func (q *Queries) ListEnabledRules(ctx context.Context) ([]AlertRule, error) {
 			&i.ForSeconds,
 			&i.CooldownS,
 			&i.RepeatIntervalS,
-			&i.WebhookUrl,
+			&i.WebhookURL,
 			&i.WebhookHeaders,
 			&i.WebhookTemplate,
 			&i.NotifyOnResolve,
@@ -180,7 +180,7 @@ func (q *Queries) ListRules(ctx context.Context) ([]AlertRule, error) {
 			&i.ForSeconds,
 			&i.CooldownS,
 			&i.RepeatIntervalS,
-			&i.WebhookUrl,
+			&i.WebhookURL,
 			&i.WebhookHeaders,
 			&i.WebhookTemplate,
 			&i.NotifyOnResolve,
@@ -200,7 +200,7 @@ func (q *Queries) ListRules(ctx context.Context) ([]AlertRule, error) {
 	return items, nil
 }
 
-const updateRule = `-- name: UpdateRule :one
+const replaceRule = `-- name: ReplaceRule :one
 UPDATE alert_rules SET
     name = ?, description = ?, enabled = ?, service = ?, namespace = ?,
     expression = ?, for_seconds = ?, cooldown_s = ?, repeat_interval_s = ?,
@@ -210,7 +210,7 @@ WHERE id = ?
 RETURNING id, name, description, enabled, service, namespace, expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at
 `
 
-type UpdateRuleParams struct {
+type ReplaceRuleParams struct {
 	Name            string         `json:"name"`
 	Description     sql.NullString `json:"description"`
 	Enabled         int64          `json:"enabled"`
@@ -220,15 +220,15 @@ type UpdateRuleParams struct {
 	ForSeconds      int64          `json:"for_seconds"`
 	CooldownS       int64          `json:"cooldown_s"`
 	RepeatIntervalS int64          `json:"repeat_interval_s"`
-	WebhookUrl      sql.NullString `json:"webhook_url"`
+	WebhookURL      sql.NullString `json:"webhook_url"`
 	WebhookHeaders  sql.NullString `json:"webhook_headers"`
 	WebhookTemplate sql.NullString `json:"webhook_template"`
 	NotifyOnResolve int64          `json:"notify_on_resolve"`
 	ID              string         `json:"id"`
 }
 
-func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) (AlertRule, error) {
-	row := q.db.QueryRowContext(ctx, updateRule,
+func (q *Queries) ReplaceRule(ctx context.Context, arg ReplaceRuleParams) (AlertRule, error) {
+	row := q.db.QueryRowContext(ctx, replaceRule,
 		arg.Name,
 		arg.Description,
 		arg.Enabled,
@@ -238,7 +238,7 @@ func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) (AlertRu
 		arg.ForSeconds,
 		arg.CooldownS,
 		arg.RepeatIntervalS,
-		arg.WebhookUrl,
+		arg.WebhookURL,
 		arg.WebhookHeaders,
 		arg.WebhookTemplate,
 		arg.NotifyOnResolve,
@@ -256,7 +256,7 @@ func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) (AlertRu
 		&i.ForSeconds,
 		&i.CooldownS,
 		&i.RepeatIntervalS,
-		&i.WebhookUrl,
+		&i.WebhookURL,
 		&i.WebhookHeaders,
 		&i.WebhookTemplate,
 		&i.NotifyOnResolve,

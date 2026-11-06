@@ -5,10 +5,14 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	spb "google.golang.org/genproto/googleapis/rpc/status"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/encoding/protojson"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
@@ -128,7 +132,7 @@ func TestHTTPIngestAuthentication(t *testing.T) {
 	})
 	t.Run("wrong token", func(t *testing.T) {
 		f := newHTTPIngestFixture(t, true)
-		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), "fo_wrong", http.StatusUnauthorized)
+		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), "foi_"+strings.Repeat("A", 43), http.StatusUnauthorized)
 	})
 	t.Run("legacy Fanout header", func(t *testing.T) {
 		f := newHTTPIngestFixture(t, true)
@@ -409,4 +413,39 @@ func testMetricsRequest() *collectormetrics.ExportMetricsServiceRequest {
 			}}}},
 		}}}},
 	}}}
+}
+
+// OTLP/HTTP failures carry a google.rpc.Status, encoded as the request was:
+// protobuf, or JSON for a JSON request.
+func TestHTTPIngestErrorsAreStatusMessages(t *testing.T) {
+	f := newHTTPIngestFixture(t, true)
+	send := func(contentType string, body []byte, token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/traces", bytes.NewReader(body))
+		req.Header.Set("Content-Type", contentType)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, tc := range []struct {
+		name string
+		rec  *httptest.ResponseRecorder
+		http int
+		code codes.Code
+	}{
+		{"malformed protobuf", send(otlpProtobufContentType, []byte{0xff}, f.token), http.StatusBadRequest, codes.InvalidArgument},
+		{"unauthorized", send(otlpProtobufContentType, nil, ""), http.StatusUnauthorized, codes.Unauthenticated},
+	} {
+		got := &spb.Status{}
+		if tc.rec.Code != tc.http || tc.rec.Header().Get("Content-Type") != otlpProtobufContentType || proto.Unmarshal(tc.rec.Body.Bytes(), got) != nil || codes.Code(got.Code) != tc.code || got.Message == "" {
+			t.Errorf("%s: %d %q %v", tc.name, tc.rec.Code, tc.rec.Header().Get("Content-Type"), got)
+		}
+	}
+	rec := send("application/json", []byte("{}"), f.token)
+	got := &spb.Status{}
+	if rec.Code != http.StatusUnsupportedMediaType || rec.Header().Get("Content-Type") != "application/json" || protojson.Unmarshal(rec.Body.Bytes(), got) != nil || codes.Code(got.Code) != codes.InvalidArgument || got.Message == "" {
+		t.Errorf("json: %d %q %s", rec.Code, rec.Header().Get("Content-Type"), rec.Body)
+	}
 }

@@ -65,37 +65,56 @@ async function render(editing = true, dashboardSpec = spec, canManage = false) {
 }
 
 describe("dashboard layout editing", () => {
-  it("captures the SQL edit base version even when the dashboard refreshes while the dialog is open", async () => {
-    fetchMock.mockImplementation(async (input) => String(input) === "/api/telemetry/schema"
-      ? Response.json({ signals: {}, sql_relations: {} })
-      : Response.json({ code: "dashboard_version_conflict", message: "Conflict" }, { status: 409 }));
-    const sqlSpec: DashboardSpec = { ...spec, panels: [{ id: "sql", title: "SQL", viz: "stat", sql: "SELECT count(*) FROM spans WHERE $__window(start_time)" }] };
+  it("captures the edit base version even when the dashboard refreshes while the dialog is open", async () => {
+    const frame = { columns: [{ name: "total", type: "number", role: "measure" }], values: [[4]], rows: 1 };
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/telemetry/schema" ? Response.json({ signals: {}, sql_relations: {} })
+      : String(input) === "/api/queries/run" ? Response.json({ results: [{ id: "explore", status: "ok", elapsed_ms: 1, frame }] })
+      : init?.method === "PATCH" || init?.method === "PUT" ? Response.json({ code: "dashboard_version_conflict", message: "Conflict" }, { status: 409 })
+      : Response.json(record));
+    const sqlSpec: DashboardSpec = { ...spec, panels: [{ id: "sql", title: "SQL", viz: "stat", sql: "SELECT count(*) AS total FROM spans WHERE $__window(start_time)" }] };
     const { host, rerender } = await render(false, sqlSpec, true);
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="SQL menu"]')!.click());
-    await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === "Edit SQL")!.click());
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === "Edit panel")!.click());
     const textbox = await vi.waitFor(() => { const el = document.querySelector<HTMLElement>('[data-sql-editor] [role="textbox"]'); expect(el).not.toBeNull(); return el!; });
     const view = EditorView.findFromDOM(textbox)!;
-    await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "SELECT count(*) + 1 FROM spans WHERE $__window(start_time)" } }));
+    await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "SELECT count(*) + 1 AS total FROM spans WHERE $__window(start_time)" } }));
     await rerender(false, 9);
-    await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Save SQL")!.click());
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Load latest"));
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Run")!.click());
+    await vi.waitFor(() => expect([...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Save panel")!.disabled).toBe(false));
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Save panel")!.click());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Someone saved this dashboard since you opened it"));
+    // Outside layout editing nothing can have moved, so only the panel changes.
     const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
-    expect(JSON.parse(String(patch[1]?.body)).base_version).toBe(2);
+    expect(JSON.parse(String(patch[1]?.body))).toEqual({ base_version: 2, message: "Edited SQL", operations: [{ op: "update_panel", id: "sql", set: { sql: "SELECT count(*) + 1 AS total FROM spans WHERE $__window(start_time)" } }] });
   });
-  it.each([true, false])("gates Edit SQL by the dashboard manage permission (%s), independently of layout mode", async canManage => {
+  it.each([true, false])("gates Edit panel on SQL panels by the dashboard manage permission (%s), independently of layout mode", async canManage => {
     const sqlSpec: DashboardSpec = { ...spec, panels: [{ id: "sql", title: "SQL", viz: "stat", sql: "SELECT count(*) FROM spans WHERE $__window(start_time)" }] };
     const { host, rerender } = await render(false, sqlSpec, canManage);
     for (const editing of [false, true]) {
       await rerender(editing);
       await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="SQL menu"]')!.click());
-      expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === "Edit SQL")).toBe(canManage);
+      expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === "Edit panel")).toBe(canManage);
       await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     }
   });
-  it("does not offer Edit SQL for structured panels even to dashboard editors", async () => {
-    const { host } = await render(false, { ...spec, panels: [{ id: "structured", title: "Structured", viz: "stat", query: { from: "spans", measures: ["count()"] } }] }, true);
+  it.each([true, false])("offers Edit panel for structured panels only to dashboard editors (%s)", async canManage => {
+    const { host } = await render(false, { ...spec, panels: [{ id: "structured", title: "Structured", viz: "stat", query: { from: "spans", measures: ["count()"] } }] }, canManage);
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Structured menu"]')!.click());
-    expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === "Edit SQL")).toBe(false);
+    expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === "Edit panel")).toBe(canManage);
+  });
+  it("returns focus to Add panel when the editor closes", async () => {
+    fetchMock.mockImplementation(async () => Response.json({ signals: {}, sql_relations: {} }));
+    const { host } = await render(true, spec, true);
+    const add = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Add panel")!;
+    add.focus();
+    await act(async () => add.click());
+    const cancel = await vi.waitFor(() => { const el = [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Cancel"); expect(el).toBeTruthy(); return el!; });
+    await act(async () => cancel.click());
+    await vi.waitFor(() => expect(document.activeElement).toBe(add));
+  });
+  it.each([true, false])("offers Add panel while editing the layout only to dashboard editors (%s)", async canManage => {
+    const { host } = await render(true, spec, canManage);
+    expect([...host.querySelectorAll("button")].some(button => button.textContent === "Add panel")).toBe(canManage);
   });
   it("defaults service maps without a saved grid to large rows, preserving explicit sizes",async()=>{
     await render(false,{...spec,panels:[{id:"map",title:"Map",viz:"service_map"}]});

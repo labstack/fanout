@@ -1,6 +1,6 @@
 import { ALL, type Variable, type VarValue } from "./types";
 
-/** internal/panel/variables.go chooseValue precedence, with stale URL choices
+/** internal/query/variables.go chooseValue precedence, with stale URL choices
  * filtered against options once available. Text values are free-form. */
 export function currentValue(variable: Variable, vars: Record<string, VarValue>, options?: { value: string }[] | null): VarValue {
   if (variable.kind === "constant") return variable.value ?? "";

@@ -1,11 +1,4 @@
 // Package intelligence derives anomalies and log patterns from telemetry.
-//
-// Public log-pattern SQL goes through internal/query's validator, which
-// rejects "--" outright. A SQL comment in one of these statements therefore
-// fails the query at runtime, on a background goroutine, as a logged error
-// nobody is watching -- that is how latency detection stopped reporting for
-// half an hour. Rationale goes in Go comments; TestNoSQLCommentsInQueryStrings
-// enforces it.
 package intelligence
 
 import (
@@ -20,15 +13,24 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/annotations"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/queryrows"
 )
+
+// Engine is the read and annotation surface the detector uses; *engine.Duck
+// implements it.
+type Engine interface {
+	QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error)
+	DefaultNamespace() string
+	CompletedServiceRollupMinute(ctx context.Context) (time.Time, error)
+	RecordAnomalies(ctx context.Context, findings []annotations.Anomaly, at time.Time) error
+}
 
 // Detector runs intelligence detection on observability data
 type Detector struct {
-	duck                *query.Duck
+	duck                Engine
 	config              DetectorConfig
 	mu                  sync.RWMutex
-	snapshot            *IntelligenceSnapshot
+	snapshot            *Snapshot
 	evaluationMu        sync.Mutex
 	evaluation          *anomalyEvaluation
 	annotationMu        sync.Mutex
@@ -47,7 +49,7 @@ type annotationBatch struct {
 }
 
 // NewDetector creates a new intelligence detector
-func NewDetector(duck *query.Duck, config DetectorConfig) *Detector {
+func NewDetector(duck Engine, config DetectorConfig) *Detector {
 	return &Detector{
 		duck:              duck,
 		config:            config,
@@ -111,7 +113,7 @@ func (d *Detector) runCheck(ctx context.Context) {
 	}
 }
 
-func (d *Detector) publishSnapshot(snapshot IntelligenceSnapshot) {
+func (d *Detector) publishSnapshot(snapshot Snapshot) {
 	d.mu.Lock()
 	d.snapshot = &snapshot
 	d.mu.Unlock()
@@ -205,19 +207,19 @@ func (d *Detector) persistAnnotations(ctx context.Context, record func(context.C
 }
 
 // LatestSnapshot returns the most recent intelligence snapshot, or nil if none.
-func (d *Detector) LatestSnapshot() *IntelligenceSnapshot {
+func (d *Detector) LatestSnapshot() *Snapshot {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.snapshot
 }
 
 // GenerateSnapshot generates a complete intelligence snapshot
-func (d *Detector) GenerateSnapshot(ctx context.Context) (IntelligenceSnapshot, error) {
+func (d *Detector) GenerateSnapshot(ctx context.Context) (Snapshot, error) {
 	d.evaluationMu.Lock()
 	defer d.evaluationMu.Unlock()
 	completed, err := d.duck.CompletedServiceRollupMinute(ctx)
 	if err != nil {
-		return IntelligenceSnapshot{}, fmt.Errorf("read detector service watermark: %w", err)
+		return Snapshot{}, fmt.Errorf("read detector service watermark: %w", err)
 	}
 	now := time.Now()
 	lookback := now.Add(-d.config.LookbackWindow)
@@ -227,7 +229,7 @@ func (d *Detector) GenerateSnapshot(ctx context.Context) (IntelligenceSnapshot, 
 	if d.evaluation == nil || !completed.Equal(d.evaluation.through) {
 		anomalies, err := d.detectAnomalies(ctx, completed.Add(-d.config.LookbackWindow), completed)
 		if err != nil {
-			return IntelligenceSnapshot{}, err
+			return Snapshot{}, err
 		}
 		d.evaluation = &anomalyEvaluation{through: completed, findings: anomalies}
 	}
@@ -239,9 +241,9 @@ func (d *Detector) GenerateSnapshot(ctx context.Context) (IntelligenceSnapshot, 
 		// A later watermark may replace this evaluation before patterns recover.
 		// Keep its original intervals until a successful annotation publication.
 		d.annotationMu.Lock()
-		d.unpublishedFindings = mergeAnnotationFindings(d.unpublishedFindings, detectorAnnotations(IntelligenceSnapshot{Anomalies: anomalies}, d.duck.DefaultNamespace()))
+		d.unpublishedFindings = mergeAnnotationFindings(d.unpublishedFindings, detectorAnnotations(Snapshot{Anomalies: anomalies}, d.duck.DefaultNamespace()))
 		d.annotationMu.Unlock()
-		return IntelligenceSnapshot{}, err
+		return Snapshot{}, err
 	}
 
 	// Calculate health score
@@ -250,7 +252,7 @@ func (d *Detector) GenerateSnapshot(ctx context.Context) (IntelligenceSnapshot, 
 	// Generate insights from anomalies
 	insights := d.generateInsights(anomalies, patterns)
 
-	return IntelligenceSnapshot{
+	return Snapshot{
 		evaluatedThrough: completed,
 		GeneratedAt:      now,
 		Timeframe:        fmt.Sprintf("last_%dm", int(d.config.LookbackWindow.Minutes())),
@@ -650,9 +652,9 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 
 	sql := fmt.Sprintf(`
 		SELECT
-			body_template AS template,
+			coalesce(body_template, '') AS template,
 			severity,
-			service as service_name,
+			coalesce(service, '') AS service_name,
 			COUNT(*) AS occurrence_count,
 			epoch_ns(MIN(time)::TIMESTAMP_NS) AS first_seen_nano,
 			epoch_ns(MAX(time)::TIMESTAMP_NS) AS last_seen_nano
@@ -666,30 +668,29 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 		LIMIT 50
 	`, startNano, endNano, scope)
 
-	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
-	if resp.Error != "" {
-		return nil, fmt.Errorf("pattern detection: %s", resp.Error)
+	// A fixed internal statement: the typed read path with the detector's
+	// window, so the snapshot binds only the log files that can overlap it.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end, Namespace: namespace})
+	rows, err := d.duck.QueryContext(ctx, sql)
+	if err != nil {
+		return nil, fmt.Errorf("pattern detection: %w", err)
 	}
-
+	defer rows.Close()
 	var patterns []Pattern
-	for _, row := range resp.Results {
-		template, _ := row["template"].(string)
-		severity, _ := row["severity"].(string)
-		serviceName, _ := row["service_name"].(string)
-		count := toInt(row["occurrence_count"])
-		firstSeenNano := toInt64(row["first_seen_nano"])
-		lastSeenNano := toInt64(row["last_seen_nano"])
-
-		patterns = append(patterns, Pattern{
-			Template:    template,
-			Count:       count,
-			FirstSeen:   time.Unix(0, firstSeenNano),
-			LastSeen:    time.Unix(0, lastSeenNano),
-			Severity:    severity,
-			ServiceName: serviceName,
-		})
+	for rows.Next() {
+		var p Pattern
+		var first, last int64
+		if err := rows.Scan(&p.Template, &p.Severity, &p.ServiceName, &p.Count, &first, &last); err != nil {
+			return nil, fmt.Errorf("pattern detection: %w", err)
+		}
+		p.FirstSeen, p.LastSeen = time.Unix(0, first), time.Unix(0, last)
+		patterns = append(patterns, p)
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("pattern detection: %w", err)
+	}
 	return patterns, nil
 }
 
@@ -793,26 +794,7 @@ func detectorSQLLiteral(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }
 
-// toInt64 converts interface{} to int64, handling both int64 and float64
-func toInt64(v interface{}) int64 {
-	switch n := v.(type) {
-	case int64:
-		return n
-	case float64:
-		return int64(n)
-	case int:
-		return int64(n)
-	default:
-		return 0
-	}
-}
-
-// toInt converts interface{} to int, handling both int64 and float64
-func toInt(v interface{}) int {
-	return int(toInt64(v))
-}
-
-func detectorAnnotations(snapshot IntelligenceSnapshot, namespace string) []annotations.Anomaly {
+func detectorAnnotations(snapshot Snapshot, namespace string) []annotations.Anomaly {
 	findings := make([]annotations.Anomaly, 0, len(snapshot.Anomalies))
 	for _, a := range snapshot.Anomalies {
 		severity := "warn"

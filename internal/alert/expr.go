@@ -1,9 +1,12 @@
 package alert
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"runtime/debug"
+	"strings"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
@@ -14,7 +17,7 @@ import (
 // the package (and callers) refer only to alert.Program.
 type Program = cel.Program
 
-// alertCELEnv is the CEL environment shared by every compile. Each AlertEnv field
+// alertCELEnv is the CEL environment shared by every compile. Each Env field
 // is declared as a typed variable so the type checker rejects unknown names and
 // non-boolean expressions at compile time. CrossTypeNumericComparisons lets a
 // double variable be compared against an integer literal (e.g. `p95 > 500`)
@@ -50,10 +53,10 @@ func CompileExpression(expression string) (Program, error) {
 	}
 	ast, iss := alertCELEnv.Compile(expression)
 	if iss != nil && iss.Err() != nil {
-		return nil, fmt.Errorf("compile expression: %w", iss.Err())
+		return nil, errors.New(issueMessage(iss.Errors()[0]))
 	}
 	if ast.OutputType().Kind() != types.BoolKind {
-		return nil, fmt.Errorf("expression must evaluate to bool, got %s", ast.OutputType())
+		return nil, fmt.Errorf("expression must be a condition that is true or false, not a %s", ast.OutputType())
 	}
 	prog, err := alertCELEnv.Program(ast)
 	if err != nil {
@@ -62,12 +65,36 @@ func CompileExpression(expression string) (Program, error) {
 	return prog, nil
 }
 
-// celActivation binds the CEL variables to an AlertEnv's values. The keys must
+var (
+	undeclared = regexp.MustCompile(`^undeclared reference to '([^']*)'.*$`)
+	overload   = regexp.MustCompile(`^found no matching overload for '_?([^']*?)_?' applied to '\((.*)\)'.*$`)
+	expecting  = regexp.MustCompile(` expecting .*$`)
+)
+
+// issueMessage turns a CEL issue into one short sentence with its position,
+// without the parser's token lists.
+func issueMessage(e *cel.Error) string {
+	message := expecting.ReplaceAllString(e.Message, "")
+	message = strings.ReplaceAll(message, "mismatched input '<EOF>'", "the expression ends too early")
+	message = undeclared.ReplaceAllString(message, "Unknown variable $1")
+	message = overload.ReplaceAllString(message, "Operator $1 does not apply to $2")
+	message, detail, found := strings.Cut(message, ": ")
+	position := fmt.Sprintf(" at column %d", e.Location.Column()+1)
+	if e.Location.Line() > 1 {
+		position = fmt.Sprintf(" at line %d, column %d", e.Location.Line(), e.Location.Column()+1)
+	}
+	if found {
+		return message + position + ": " + detail
+	}
+	return message + position
+}
+
+// celActivation binds the CEL variables to an Env's values. The keys must
 // stay in sync with the cel.Variable declarations in mustAlertCELEnv above;
-// TestAlertEnvVariablesDeclaredAndBound enforces that against the AlertEnv `expr`
+// TestEnvVariablesDeclaredAndBound enforces that against the Env `expr`
 // field tags, so a drift fails the build instead of silently breaking a rule at
 // eval time.
-func celActivation(env AlertEnv) map[string]any {
+func celActivation(env Env) map[string]any {
 	return map[string]any{
 		"error_rate":       env.ErrorRate,
 		"p50":              env.P50,
@@ -84,7 +111,7 @@ func celActivation(env AlertEnv) map[string]any {
 }
 
 // EvalExpression runs a compiled program with the given environment.
-func EvalExpression(prog Program, env AlertEnv) (bool, error) {
+func EvalExpression(prog Program, env Env) (bool, error) {
 	out, _, err := prog.Eval(celActivation(env))
 	if err != nil {
 		return false, fmt.Errorf("eval expression: %w", err)
@@ -98,7 +125,7 @@ func EvalExpression(prog Program, env AlertEnv) (bool, error) {
 
 // SafeEval wraps EvalExpression with panic recovery, logging unexpected panics
 // via slog. Returns false on panic.
-func SafeEval(prog Program, env AlertEnv) (result bool, err error) {
+func SafeEval(prog Program, env Env) (result bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("alert: expression eval panic", "panic", r, "stack", string(debug.Stack()))

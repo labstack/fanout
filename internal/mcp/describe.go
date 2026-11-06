@@ -63,7 +63,7 @@ type ToolInput struct {
 
 type describeIntelligence struct{}
 
-func (describeIntelligence) LatestSnapshot() *intelligence.IntelligenceSnapshot { return nil }
+func (describeIntelligence) LatestSnapshot() *intelligence.Snapshot { return nil }
 
 // DescribeTools reports every tool this server exposes, as the server itself
 // reports them over MCP.

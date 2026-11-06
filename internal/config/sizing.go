@@ -33,13 +33,44 @@ const (
 	// leaving its own default in place.
 	minDetectableMemory = 512 << 20
 
-	// maxAutoDuckDBConns bounds the pool. Past the point where connections
-	// exceed available parallelism they add contention rather than concurrency.
+	// maxAutoDuckDBConns bounds the pool, including the two connections outside
+	// read admission for annotations and readiness checks.
 	maxAutoDuckDBConns = 16
 
 	// minDuckDBConns keeps one long scan from serializing all other reads.
 	minDuckDBConns = 2
 )
+
+// The query result cache's bounds. Entries are panel, exemplar and trace
+// detail results; bytes are estimated from their contents.
+const (
+	QueryCacheMaxEntries = 1024
+	QueryCacheMaxBytes   = 64 << 20
+)
+
+// QueryAdmission derives the executor's read admission from the pool:
+// slots reads hold connections at once. reserved slots serve interactive
+// reads only; queue bounds dashboard batch tickets (interactive waits are 2*slots).
+// A one-slot pool has no reservation so panels can still execute. A pool of four or more keeps two connections
+// for annotations and readiness checks, which do not queue behind them.
+func QueryAdmission(pool int) (slots, reserved, queue int) {
+	slots = max(1, pool)
+	if pool >= 4 {
+		slots = pool - 2
+	}
+	reserved = min(slots-1, max(1, slots/6))
+	// Measured refresh work: 15 panels at 150 ms is 2.25 slot-seconds.
+	// Five refreshes per guaranteed panel slot fit the 12-second horizon.
+	// Interactive reads may borrow the rest, so count only the two slots
+	// retained for pending panels under contention.
+	// Subtract running refreshes from the lifetime population. Individual
+	// panel slots let an odd remaining slot serve another refresh.
+	shared := slots - reserved
+	batchSlots := min(2, shared)
+	running := max(1, shared/batchSlots)
+	queue = max(1, 5*batchSlots-running)
+	return slots, reserved, queue
+}
 
 // sizingSource records which values the machine chose, so the startup log can
 // distinguish a resolved value from one the operator pinned. Without that
@@ -48,6 +79,7 @@ const (
 type sizingSource struct {
 	MemoryAuto                bool
 	MaxConnsAuto              bool
+	ThreadsAuto               bool
 	DetectedRAM               uint64
 	DetectedHostRAM           uint64
 	DetectedCgroupLimit       uint64
@@ -64,6 +96,7 @@ type RuntimeSizing struct {
 	DuckDBMaxConns            int    `json:"duckdb_max_conns"`
 	DuckDBMaxConnsAuto        bool   `json:"duckdb_max_conns_auto"`
 	DuckDBThreads             int    `json:"duckdb_threads"`
+	DuckDBThreadsAuto         bool   `json:"duckdb_threads_auto"`
 	DetectedMemoryBytes       uint64 `json:"detected_memory_bytes"`
 	DetectedHostMemoryBytes   uint64 `json:"detected_host_memory_bytes"`
 	DetectedCgroupLimitBytes  uint64 `json:"detected_cgroup_limit_bytes"`
@@ -90,6 +123,14 @@ func (c *Config) resolveSizing() sizingSource {
 		src.MaxConnsAuto = true
 		c.DuckDBMaxConns = resolveDuckDBMaxConns(runtime.GOMAXPROCS(0))
 	}
+	if c.DuckDBThreads == 0 {
+		// DuckDB sizes its worker pool from the machine's hardware threads, not
+		// from the CPUs this process may run on. Pinned by taskset or a cpuset,
+		// that ran twice as many workers as CPUs; GOMAXPROCS already honors the
+		// affinity mask and the cgroup quota.
+		src.ThreadsAuto = true
+		c.DuckDBThreads = runtime.GOMAXPROCS(0)
+	}
 	c.resolvedSizing = src
 	return src
 }
@@ -103,6 +144,7 @@ func (c Config) RuntimeSizing() RuntimeSizing {
 		DuckDBMaxConns:            c.DuckDBMaxConns,
 		DuckDBMaxConnsAuto:        c.resolvedSizing.MaxConnsAuto,
 		DuckDBThreads:             c.DuckDBThreads,
+		DuckDBThreadsAuto:         c.resolvedSizing.ThreadsAuto,
 		DetectedMemoryBytes:       c.resolvedSizing.DetectedRAM,
 		DetectedHostMemoryBytes:   c.resolvedSizing.DetectedHostRAM,
 		DetectedCgroupLimitBytes:  c.resolvedSizing.DetectedCgroupLimit,
@@ -121,17 +163,27 @@ func (c Config) logResolvedSizing(src sizingSource) {
 		// logging an empty string that reads like "nothing to see here".
 		memory = "duckdb-default(80% of detected RAM)"
 	}
+	slots, reserved, queue := QueryAdmission(c.DuckDBMaxConns)
 	slog.Info("runtime sizing resolved",
 		"duckdb_memory", memory,
 		"duckdb_memory_auto", src.MemoryAuto,
 		"duckdb_max_conns", c.DuckDBMaxConns,
 		"duckdb_max_conns_auto", src.MaxConnsAuto,
+		"duckdb_threads", c.DuckDBThreads,
+		"duckdb_threads_auto", src.ThreadsAuto,
 		"detected_memory_bytes", src.DetectedRAM,
 		"detected_host_memory_bytes", src.DetectedHostRAM,
 		"detected_cgroup_limit_bytes", src.DetectedCgroupLimit,
 		"memory_source", src.MemorySource,
 		"memory_detection_incomplete", src.MemoryDetectionIncomplete,
 		"gomaxprocs", runtime.GOMAXPROCS(0),
+		"query_slots", slots,
+		"query_interactive_slots", reserved,
+		"query_reserved_connections", c.DuckDBMaxConns-slots,
+		"query_queue_bound", queue,
+		"query_cache_ttl", c.QueryCacheTTL.String(),
+		"query_cache_max_entries", QueryCacheMaxEntries,
+		"query_cache_max_bytes", QueryCacheMaxBytes,
 	)
 	if src.MemoryAuto && src.MemoryDetectionIncomplete {
 		slog.Warn("memory limit detection was incomplete; automatic DuckDB sizing may exceed a container limit — configure FANOUT_DUCKDB_MEMORY explicitly",
@@ -237,9 +289,12 @@ func parseByteSize(value string) (uint64, bool) {
 	return uint64(amount * scale), true
 }
 
-// resolveDuckDBMaxConns sizes the connection pool from available parallelism.
+// resolveDuckDBMaxConns leaves one interactive slot per CPU, two panel progress
+// slots, and two connections for reads outside admission. DuckDB's worker count
+// stays at the CPU budget; a connection need not consume a worker while waiting
+// on I/O. The short panel work must not reduce interactive concurrency.
 func resolveDuckDBMaxConns(cores int) int {
-	conns := cores
+	conns := cores + 4
 	if conns < minDuckDBConns {
 		conns = minDuckDBConns
 	}

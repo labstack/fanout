@@ -1,4 +1,5 @@
-import { Anchor, Badge, Text } from "@mantine/core";
+import { ActionIcon, Anchor, Badge, Group, Text } from "@mantine/core";
+import { MinusCircle } from "@phosphor-icons/react";
 import { useCallback, useMemo, type CSSProperties } from "react";
 import { makeDrill } from "../drill-state";
 import { drillHref } from "../search";
@@ -42,6 +43,14 @@ export function RowPanel(props: AnalysisProps) {
         }
       }}>{String(value).slice(0,16)}</Anchor>;
     }
+    const exclude = props.controls?.exclude;
+    if (exclude && props.panel.viz === "traces" && (name === "service" || name === "operation") && value) {
+      const text = String(value);
+      return <Group gap={2} wrap="nowrap" className="dashboard-dimension-nowrap">
+        <Text fz={12} style={{ ...serviceStyle, minWidth: 0 }} title={text}>{text}</Text>
+        <ActionIcon size="sm" variant="subtle" color="gray" aria-label={`Exclude ${name} ${text}`} title={`Exclude ${name} ${text}`} style={{ flex: "none" }} onClick={event => { event.stopPropagation(); exclude(name, text); }}><MinusCircle size={14} /></ActionIcon>
+      </Group>;
+    }
     if (name === "service" && value) return props.onSelect
       ? <Anchor component="button" type="button" className="dashboard-dimension-nowrap" style={serviceStyle} title={String(value)} onClick={() => props.onSelect?.(String(value))}>{String(value)}</Anchor>
       : <Text fz={12} className="dashboard-dimension-nowrap" style={serviceStyle} title={String(value)}>{String(value)}</Text>;
@@ -75,9 +84,9 @@ export function RowPanel(props: AnalysisProps) {
       </svg>;
     }
     return undefined;
-  }, [props.panel, props.result, props.onSelect, props.onPoint, props.dark, props.traceLinks, model]);
+  }, [props.panel, props.result, props.onSelect, props.onPoint, props.dark, props.traceLinks, props.controls, model]);
   return <div role="region" aria-label={`${props.title ?? props.panel.title}: ${model.rows.length} rows`}>
-    <TableViz foldConstants={props.foldConstants} traceLinks={props.traceLinks} panel={props.panel} result={props.result} height={props.height} renderCell={cell} onPoint={props.onPoint} />
+    <TableViz foldConstants={props.foldConstants} traceLinks={props.traceLinks} controls={props.controls} panel={props.panel} result={props.result} height={props.height} renderCell={cell} onPoint={props.onPoint} />
     {props.panel.viz === "log_patterns" && <Text data-pattern-summary c="dimmed" fz={12} style={{marginTop:8,flexShrink:0}}>
       {model.rows.length} {model.rows.length === 1 ? "pattern" : "patterns"} · {patternEvents.toLocaleString()} {patternEvents === 1 ? "event" : "events"} in the window{props.result.frame?.truncated ? " (shown)" : ""}
     </Text>}

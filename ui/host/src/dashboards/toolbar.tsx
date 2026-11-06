@@ -13,33 +13,38 @@ function timeLabel(time: DashboardTime): string {
   return rangeLabel[time.range ?? "1h"] ?? time.range ?? "Last hour";
 }
 
+/** The relative and absolute time picker shared by dashboards and Explore. */
+export function RangeMenu({ time, onRange, onAbsolute }: { time: DashboardTime; onRange(range: string): void; onAbsolute(from: string, to: string): void }) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [opened, setOpened] = useState(false);
+  return <Menu position="bottom-end" withinPortal opened={opened} onChange={setOpened}>
+    <Menu.Target>
+      <Button variant="default" size="sm" leftSection={<Clock size={15} />} rightSection={<CaretDown size={12} weight="bold" />}>{timeLabel(time)}</Button>
+    </Menu.Target>
+    <Menu.Dropdown miw={260}>
+      <Menu.Label>Relative</Menu.Label>
+      {ranges.map((range) => <Menu.Item key={range} onClick={() => onRange(range)} fw={time.range === range ? 600 : undefined}>{rangeLabel[range]}</Menu.Item>)}
+      <Menu.Divider />
+      <Menu.Label>Absolute (your time zone)</Menu.Label>
+      <Group gap={6} px="xs" pb="xs" wrap="nowrap">
+        <TextInput type="datetime-local" size="xs" aria-label="From" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
+        <TextInput type="datetime-local" size="xs" aria-label="To" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
+      </Group>
+      <Group px="xs" pb="xs" justify="flex-end">
+        <Button size="compact-sm" disabled={!from || !to || from >= to} onClick={() => { onAbsolute(new Date(from).toISOString(), new Date(to).toISOString()); setOpened(false); }}>Apply range</Button>
+      </Group>
+    </Menu.Dropdown>
+  </Menu>;
+}
+
 export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, onRange, onAbsolute, onZoomOut, onRefresh, onRefreshNow, onCompare, onEdit, onHistory, onShortcuts, selecting = false }: {
   time: DashboardTime; refresh: string; compare: boolean; editing: boolean; fetching: boolean; updatedAt: number | null;
   onRange(range: string): void; onAbsolute(from: string, to: string): void; onZoomOut(): void; onRefresh(refresh: string): void; onRefreshNow(): void; onCompare(on: boolean): void; onEdit(): void; onHistory(): void;
   onShortcuts?(): void; selecting?: boolean;
 }) {
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [opened, setOpened] = useState(false);
   return <Group gap="xs" wrap="wrap" role="group" aria-label="Dashboard controls">
-    <Menu position="bottom-end" withinPortal opened={opened} onChange={setOpened}>
-      <Menu.Target>
-        <Button variant="default" size="sm" leftSection={<Clock size={15} />} rightSection={<CaretDown size={12} weight="bold" />}>{timeLabel(time)}</Button>
-      </Menu.Target>
-      <Menu.Dropdown miw={260}>
-        <Menu.Label>Relative</Menu.Label>
-        {ranges.map((range) => <Menu.Item key={range} onClick={() => onRange(range)} fw={time.range === range ? 600 : undefined}>{rangeLabel[range]}</Menu.Item>)}
-        <Menu.Divider />
-        <Menu.Label>Absolute (your time zone)</Menu.Label>
-        <Group gap={6} px="xs" pb="xs" wrap="nowrap">
-          <TextInput type="datetime-local" size="xs" aria-label="From" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
-          <TextInput type="datetime-local" size="xs" aria-label="To" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
-        </Group>
-        <Group px="xs" pb="xs" justify="flex-end">
-          <Button size="compact-sm" disabled={!from || !to || from >= to} onClick={() => { onAbsolute(new Date(from).toISOString(), new Date(to).toISOString()); setOpened(false); }}>Apply range</Button>
-        </Group>
-      </Menu.Dropdown>
-    </Menu>
+    <RangeMenu time={time} onRange={onRange} onAbsolute={onAbsolute} />
     <Tooltip label="Zoom out"><Button variant="default" size="sm" px={10} aria-label="Zoom out" onClick={onZoomOut}><MagnifyingGlassMinus size={15} /></Button></Tooltip>
     <Group data-refresh-controls gap={4} wrap="nowrap">
       <Tooltip label={updatedAt ? `Updated ${exactTimestamp(updatedAt)}` : "Refresh now"}><Button variant="default" size="sm" px={10} aria-label="Refresh now" loading={fetching} onClick={onRefreshNow}><ArrowClockwise size={15} /></Button></Tooltip>

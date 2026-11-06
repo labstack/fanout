@@ -48,7 +48,7 @@ func testBatch() Batch {
 			StartUnixNanos: 100, EndUnixNanos: 200, DurationMS: 0.0001, StatusCode: "OK", IngestedAt: 300,
 		}},
 		Logs:    []telemetry.Log{{TimeUnixNanos: 110, Severity: "INFO", Body: "ready", ServiceName: "api", TraceID: "trace-1", IngestedAt: 300}},
-		Metrics: []telemetry.Metric{{TimeUnixNanos: 120, Name: "requests", Type: "sum", Monotonic: true, Temporality: "cumulative", ServiceName: "api", Value: 1, IngestedAt: 300}},
+		Metrics: []telemetry.Metric{{TimeUnixNanos: 120, Name: "requests", Type: "counter", Temporality: "cumulative", ServiceName: "api", Value: 1, IngestedAt: 300}},
 	}
 }
 
@@ -193,18 +193,22 @@ func TestRepositoryPrunesOnlyExpiredBatches(t *testing.T) {
 			repository.compactionMu.Unlock()
 			return errors.New("retention published without holding compaction lock")
 		}
-		retired, err := filepath.Glob(filepath.Join(repository.Parquet.BatchesDir(), "*.retired"))
-		if err != nil {
-			return err
+		// Readers that captured the old catalog may still open the expired
+		// batch, so publication only removes it from the catalog.
+		if _, err := os.Stat(repository.Parquet.BatchPath("old")); err != nil {
+			return fmt.Errorf("expired batch deleted during publication: %w", err)
 		}
-		if len(retired) != 1 {
-			return fmt.Errorf("retired directories during publication = %d, want 1", len(retired))
+		if len(repository.Parquet.BatchMetadata()) != 1 {
+			return errors.New("expired batch remains in the catalog after publication")
 		}
 		return nil
 	}}
 	removed, err := repository.PruneParquet(context.Background(), publisher, 500, 64)
 	if err != nil || removed != 1 {
 		t.Fatalf("prune = %d, %v", removed, err)
+	}
+	if n, err := repository.CollectRetiredParquet(); err != nil || n != 1 {
+		t.Fatalf("collected %d retired batches: %v", n, err)
 	}
 	if _, err := os.Stat(repository.Parquet.BatchPath("old")); !os.IsNotExist(err) {
 		t.Fatalf("expired batch remains: %v", err)
@@ -445,12 +449,15 @@ func TestRepositoryCompactsParquetWithoutChangingRows(t *testing.T) {
 	db := openTestDuckDB(t)
 	defer db.Close()
 	compactor := &testParquetCompactor{afterSwap: func() error {
-		retired, err := filepath.Glob(filepath.Join(repository.Parquet.BatchesDir(), "*.retired-*"))
-		if err != nil {
-			return err
+		// Inputs stay in place for readers of the old catalog; the catalog
+		// holds only the output.
+		for i := range minCompactionInputs {
+			if _, err := os.Stat(repository.Parquet.BatchPath(fmt.Sprintf("batch-%d", i))); err != nil {
+				return fmt.Errorf("compaction input deleted during publication: %w", err)
+			}
 		}
-		if len(retired) != minCompactionInputs {
-			return fmt.Errorf("retired compaction inputs during publication = %d, want %d", len(retired), minCompactionInputs)
+		if n := len(repository.Parquet.BatchMetadata()); n != 1 {
+			return fmt.Errorf("catalog holds %d batches after publication, want the output only", n)
 		}
 		return nil
 	}}
@@ -462,6 +469,9 @@ func TestRepositoryCompactsParquetWithoutChangingRows(t *testing.T) {
 	}
 	if compacted != minCompactionInputs {
 		t.Fatalf("compacted inputs = %d", compacted)
+	}
+	if n, err := repository.CollectRetiredParquet(); err != nil || n != minCompactionInputs {
+		t.Fatalf("collected %d retired inputs: %v", n, err)
 	}
 	metadata := repository.Parquet.BatchMetadata()
 	if len(metadata) != 1 || metadata[0].Generation != 1 || metadata[0].Spans != minCompactionInputs || metadata[0].Logs != minCompactionInputs || metadata[0].Metrics != minCompactionInputs {
@@ -621,7 +631,8 @@ func TestRepositoryRecoversInterruptedCompactionSwap(t *testing.T) {
 	if err := os.MkdirAll(stage, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, signal := range parquetSignals {
+	for _, s := range telemetry.Signals {
+		signal := s.Name
 		paths := make([]string, minCompactionInputs)
 		for i := range paths {
 			paths[i] = filepath.Join(repository.Parquet.BatchPath(fmt.Sprintf("recover-%d", i)), signal+".parquet")
@@ -881,7 +892,7 @@ func TestRepositoryOpenRejectsUnsafeCompactionMarker(t *testing.T) {
 // removes that risk while it resolves, so the anchor is checked here rather
 // than trusted.
 func TestUnresolvedCompactionRunbookExists(t *testing.T) {
-	const guide = "../../../site/src/content/docs/guides/troubleshoot.mdx"
+	const guide = "../../../site/src/content/docs/docs/guides/troubleshooting.mdx"
 	data, err := os.ReadFile(guide)
 	if err != nil {
 		t.Fatalf("read the runbook the startup log links to: %v", err)

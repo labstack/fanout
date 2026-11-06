@@ -151,6 +151,9 @@ it('reports a stale lock category without printing paths or reasons',async()=>{
  expect(lines.at(-1)).toContain('ledger_lock');expect(lines.join('')).not.toContain(path);expect(lines.join('')).not.toContain('private reason');expect(existsSync(path+'.lock')).toBe(true);
 });
 it('blocks unknown HTTP usage until settlement and preserves the cap across CLI invocations',async()=>{
+ // This exercises settlement across invocations, not checkout hashing.
+ const sourceHash=spyOn(cli,'candidateSourceHash').mockReturnValue('0'.repeat(64));
+ try {
  for(const failure of ['unauthorized','rate_limited']){
   const root=resolve('.cache/dashboard-eval/http-settlement-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});
   const file=(n:string,v:any)=>{const p=join(root,n);writeFileSync(p,JSON.stringify(v));return p;};const path=file('ledger.json',ledger());const cookies=join(root,'cookies.txt');writeFileSync(cookies,'');
@@ -167,6 +170,7 @@ it('blocks unknown HTTP usage until settlement and preserves the cap across CLI 
    expect(await cli.main(args('at-cap','.85'),()=>{})).toBe(2);expect(mock.stats.posts).toBe(2);
   }finally{mock.server.stop(true);}
  }
+ }finally{sourceHash.mockRestore();}
 });
 
 it('compares added stat defaults against the fields authored before the server save',()=>{

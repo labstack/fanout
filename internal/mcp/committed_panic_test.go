@@ -10,13 +10,13 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type panicValidator struct{ armed atomic.Bool }
 
-func (v *panicValidator) Validate(ctx context.Context, d *panel.Dashboard) error {
+func (v *panicValidator) Validate(ctx context.Context, d *query.Dashboard) error {
 	if v.armed.Load() {
 		panic("private panic detail")
 	}
@@ -39,14 +39,14 @@ func TestMCPPanicDistinguishesCommittedSave(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if _, err := s.dashboards.Replace(t.Context(), "owner", record.ID, record.Spec, 1, agentAuthor("owner"), "Saved again"); err != nil {
+					if _, err := s.dashboards.Replace(t.Context(), "owner", record.ID, changedText(record.Spec), 1, agentAuthor("owner"), "Saved again"); err != nil {
 						t.Fatal(err)
 					}
 					args = map[string]any{"id": record.ID, "version": 1}
 				}
 				panicValidation.armed.Store(true)
 				if commit {
-					s.panels = receiptExecutor{run: func(context.Context, panel.RunRequest) ([]panel.Result, error) { panic("private panic detail") }}
+					s.panels = receiptExecutor{run: func(context.Context, query.RunRequest) ([]query.Result, error) { panic("private panic detail") }}
 				}
 				var logs bytes.Buffer
 				old := slog.Default()

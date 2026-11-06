@@ -33,16 +33,16 @@
             1790856000000
           ],
           [
-            1
+            0.9958502021602336
           ]
         ],
         "rows": 1,
         "totals": [
           null,
-          1
+          0.9958502021602336
         ]
       },
-      "sql": "WITH base AS (SELECT * FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ((service = 'checkout')) AND ((namespace = 'shop'))) SELECT epoch_ms(time_bucket(INTERVAL '300 seconds', \"start_time\"::TIMESTAMP_NS))::BIGINT AS \"_t\", quantile_cont(\"duration_ms\", 0.95)::DOUBLE AS \"p95\" FROM base GROUP BY time_bucket(INTERVAL '300 seconds', \"start_time\"::TIMESTAMP_NS) ORDER BY \"_t\" LIMIT 18000",
+      "sql": "WITH base AS (SELECT * FROM span_rollup WHERE \"bucket\" \u003e= ?::TIMESTAMP_NS AND \"bucket\" \u003c ?::TIMESTAMP_NS AND ((service = 'checkout')) AND ((namespace = 'shop'))), __panel_hist_aggregate AS (SELECT epoch_ms(time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS))::BIGINT AS \"_t\",NULL::DOUBLE AS \"p95\",grouping(time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS)) AS __hist_group,time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS) AS __hist_key_0,count(*) AS __hist_rows FROM base GROUP BY GROUPING SETS ((time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS)),())), __panel_hist_bins AS (SELECT grouping(time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS)) AS __hist_group,time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS) AS __hist_key_0,e.key AS __hist_k,sum(e.value)::DOUBLE AS __hist_n FROM base,unnest(map_entries(hist)) entries(e) GROUP BY GROUPING SETS ((time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS),e.key),(e.key))), __panel_hist_cdf AS (SELECT *,sum(__hist_n) OVER (PARTITION BY __hist_group,__hist_key_0 ORDER BY __hist_k) AS __hist_cum,sum(__hist_n) OVER (PARTITION BY __hist_group,__hist_key_0) AS __hist_total FROM __panel_hist_bins), __panel_hist_quantiles AS (SELECT __hist_group,__hist_key_0,min(CASE WHEN __hist_cum \u003e= 0.95*__hist_total THEN CASE WHEN __hist_k=-2147483648 THEN 0.0 ELSE pow(2.0,(__hist_k-1)/8.0)+(pow(2.0,__hist_k/8.0)-pow(2.0,(__hist_k-1)/8.0))*greatest(0.0,least(1.0,(0.95*__hist_total-(__hist_cum-__hist_n))/__hist_n)) END END) AS \"p95\" FROM __panel_hist_cdf GROUP BY __hist_group,__hist_key_0), __panel_hist AS (SELECT a.\"_t\" AS \"_t\",q.\"p95\" AS \"p95\" FROM __panel_hist_aggregate a LEFT JOIN __panel_hist_quantiles q ON a.__hist_group IS NOT DISTINCT FROM q.__hist_group AND a.__hist_key_0 IS NOT DISTINCT FROM q.__hist_key_0) SELECT \"_t\", \"p95\" FROM __panel_hist ORDER BY \"_t\" NULLS FIRST LIMIT 18000",
       "interval": "5m",
       "elapsed_ms": 0,
       "from_ms": 1790856000000,
@@ -76,8 +76,8 @@
         ],
         "rows": 1
       },
-      "sql": "WITH base AS (SELECT * FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS) SELECT epoch_ms(time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS))::BIGINT AS \"_t\", count(*)::DOUBLE AS \"count\" FROM base GROUP BY time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS) ORDER BY \"_t\" LIMIT 14000",
-      "interval": "30s",
+      "sql": "WITH base AS (SELECT * FROM span_rollup WHERE \"bucket\" \u003e= ?::TIMESTAMP_NS AND \"bucket\" \u003c ?::TIMESTAMP_NS) SELECT epoch_ms(time_bucket(INTERVAL '60 seconds', \"bucket\"::TIMESTAMP_NS))::BIGINT AS \"_t\", coalesce(sum(spans),0)::DOUBLE AS \"count\" FROM base GROUP BY time_bucket(INTERVAL '60 seconds', \"bucket\"::TIMESTAMP_NS) ORDER BY \"_t\" LIMIT 14000",
+      "interval": "1m",
       "elapsed_ms": 0,
       "from_ms": 1790856000000,
       "to_ms": 1790859600000,
@@ -370,16 +370,16 @@
             1790856000000
           ],
           [
-            1
+            0.9958502021602336
           ]
         ],
         "rows": 1,
         "totals": [
           null,
-          1
+          0.9958502021602336
         ]
       },
-      "sql": "WITH base AS (SELECT * FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ((service = 'checkout')) AND ((namespace = 'shop'))) SELECT epoch_ms(time_bucket(INTERVAL '300 seconds', \"start_time\"::TIMESTAMP_NS))::BIGINT AS \"_t\", quantile_cont(\"duration_ms\", 0.95)::DOUBLE AS \"p95\" FROM base GROUP BY time_bucket(INTERVAL '300 seconds', \"start_time\"::TIMESTAMP_NS) ORDER BY \"_t\" LIMIT 18000",
+      "sql": "WITH base AS (SELECT * FROM span_rollup WHERE \"bucket\" \u003e= ?::TIMESTAMP_NS AND \"bucket\" \u003c ?::TIMESTAMP_NS AND ((service = 'checkout')) AND ((namespace = 'shop'))), __panel_hist_aggregate AS (SELECT epoch_ms(time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS))::BIGINT AS \"_t\",NULL::DOUBLE AS \"p95\",grouping(time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS)) AS __hist_group,time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS) AS __hist_key_0,count(*) AS __hist_rows FROM base GROUP BY GROUPING SETS ((time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS)),())), __panel_hist_bins AS (SELECT grouping(time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS)) AS __hist_group,time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS) AS __hist_key_0,e.key AS __hist_k,sum(e.value)::DOUBLE AS __hist_n FROM base,unnest(map_entries(hist)) entries(e) GROUP BY GROUPING SETS ((time_bucket(INTERVAL '300 seconds', \"bucket\"::TIMESTAMP_NS),e.key),(e.key))), __panel_hist_cdf AS (SELECT *,sum(__hist_n) OVER (PARTITION BY __hist_group,__hist_key_0 ORDER BY __hist_k) AS __hist_cum,sum(__hist_n) OVER (PARTITION BY __hist_group,__hist_key_0) AS __hist_total FROM __panel_hist_bins), __panel_hist_quantiles AS (SELECT __hist_group,__hist_key_0,min(CASE WHEN __hist_cum \u003e= 0.95*__hist_total THEN CASE WHEN __hist_k=-2147483648 THEN 0.0 ELSE pow(2.0,(__hist_k-1)/8.0)+(pow(2.0,__hist_k/8.0)-pow(2.0,(__hist_k-1)/8.0))*greatest(0.0,least(1.0,(0.95*__hist_total-(__hist_cum-__hist_n))/__hist_n)) END END) AS \"p95\" FROM __panel_hist_cdf GROUP BY __hist_group,__hist_key_0), __panel_hist AS (SELECT a.\"_t\" AS \"_t\",q.\"p95\" AS \"p95\" FROM __panel_hist_aggregate a LEFT JOIN __panel_hist_quantiles q ON a.__hist_group IS NOT DISTINCT FROM q.__hist_group AND a.__hist_key_0 IS NOT DISTINCT FROM q.__hist_key_0) SELECT \"_t\", \"p95\" FROM __panel_hist ORDER BY \"_t\" NULLS FIRST LIMIT 18000",
       "interval": "5m",
       "elapsed_ms": 0,
       "from_ms": 1790856000000,

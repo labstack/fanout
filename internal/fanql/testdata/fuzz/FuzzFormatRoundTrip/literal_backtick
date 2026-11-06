@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"query\":{\"from\":\"logs\",\"where\":[\"coalesce(body, '`') = ''\"],\"measures\":[\"count( )\"]}}")

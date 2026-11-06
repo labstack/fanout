@@ -23,10 +23,11 @@ const (
 	// coalesces concurrent exports without imposing a 20ms floor on every
 	// durable acknowledgement when the row target is not reached.
 	groupAdmissionWindow    = 10 * time.Millisecond
-	pressureAdmissionWindow = 250 * time.Millisecond
+	pressureAdmissionWindow = time.Second
 	pressureAdmissionIdle   = 20 * time.Millisecond
 	maxAdmissionRequests    = 512
 	maxGroupBatchRows       = 50_000
+	pressureGroupBatchRows  = 200_000
 	maxCommitWorkers        = 4
 	submissionQueueDepth    = 256
 	writerShutdownGrace     = 30 * time.Second
@@ -37,11 +38,11 @@ type batchCommitter interface {
 }
 
 type compactionPressure interface {
-	WaitForCompaction(context.Context) (time.Duration, error)
 	CompactionDebt() int
 }
 
 type Writer struct {
+	admission      *ingestAdmission
 	inFlightBudget int
 	inFlightBytes  atomic.Int64
 	repository     batchCommitter
@@ -53,22 +54,64 @@ type Writer struct {
 	done           chan struct{}
 	stopping       chan struct{}
 	submissionMu   sync.RWMutex
-	submissions    chan submission
+	submissions    chan *submission
 }
 
+// Submission states. Exactly one transition out of queued decides who releases
+// the reservation: the commit that claims the request, or whoever abandons it.
+const (
+	queued int32 = iota
+	claimed
+	abandoned
+)
+
 type submission struct {
+	// ctx is the sender's request. Once it is done before a commit claims the
+	// submission, the sender has stopped waiting and will resend, so the
+	// submission is abandoned unwritten.
+	ctx   context.Context
 	batch Batch
-	// bytes is batchBytes(batch), measured once at submission: the estimate
-	// walks every attribute map, and admission, grouping and release all
-	// need the same figure.
+	// rows and bytes are measured once at submission: the byte estimate walks
+	// every attribute map, and admission, grouping and release all need the
+	// same figures. Grouping reads only these, never batch, which an
+	// abandoned submission drops.
+	rows  int
 	bytes int
+	state atomic.Int32
 	ack   chan error
 }
 
+func newSubmission(ctx context.Context, batch Batch) *submission {
+	return &submission{ctx: ctx, batch: batch, rows: batchRows(batch), bytes: batchBytes(batch), ack: make(chan error, 1)}
+}
+
+// commitJob is one atomic batch: its requests are merged only when a worker
+// claims them, after skipping those whose senders have given up.
 type commitJob struct {
-	batches []Batch
-	acks    []chan error
-	bytes   int
+	requests []*submission
+}
+
+// abandon drops a submission no commit has claimed. It releases the
+// reservation and the rows at once, so the sender's retry is not shed for
+// bytes held by the copy it replaces, and reports whether it won.
+func (w *Writer) abandon(request *submission) bool {
+	if !request.state.CompareAndSwap(queued, abandoned) {
+		return false
+	}
+	request.batch = Batch{}
+	w.release(request.bytes)
+	metrics.RecordIngestAbandoned()
+	return true
+}
+
+// fail answers every request no one else has settled with err.
+func (w *Writer) fail(requests []*submission, err error) {
+	for _, request := range requests {
+		if request.state.CompareAndSwap(queued, claimed) {
+			w.release(request.bytes)
+			request.ack <- err
+		}
+	}
 }
 
 // ErrIngestOverBudget is returned when accepting a request would take the
@@ -110,10 +153,14 @@ func (w *Writer) release(bytes int) {
 }
 
 func NewWriter(repository *Repository, batchSize int) *Writer {
-	return &Writer{
+	w := &Writer{
 		repository: repository, batchSize: batchSize, groupWindow: groupAdmissionWindow,
-		done: make(chan struct{}), stopping: make(chan struct{}), submissions: make(chan submission, submissionQueueDepth),
+		done: make(chan struct{}), stopping: make(chan struct{}), submissions: make(chan *submission, submissionQueueDepth),
 	}
+	if repository != nil {
+		w.SetAdmission(repository.CompactionDebt, nil)
+	}
+	return w
 }
 
 // SetInFlightBudget caps the decoded telemetry the writer will hold across
@@ -123,22 +170,29 @@ func (w *Writer) SetInFlightBudget(bytes int) { w.inFlightBudget = bytes }
 func (w *Writer) Wait() { <-w.done }
 
 // Submit returns after every row in the request belongs to a durably published
-// atomic Parquet batch directory. Delivery is at least once: callers that retry
-// an ambiguous request may create another batch because OTLP has no idempotency
-// key that survives across requests.
+// atomic Parquet batch directory. A request whose ctx is done before its commit
+// starts is dropped unwritten, so the sender's retry is the only copy. Once the
+// commit has started it completes, so a sender that gives up during it and
+// retries stores the rows twice: delivery is at least once in that window,
+// because OTLP has no idempotency key that survives across requests.
 func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 	if batchRows(batch) == 0 {
 		return nil
 	}
 	// The caller owns the reservation until enqueue succeeds. The queue and
-	// then the commit job retain it even if the caller stops waiting for its ack.
-	bytes := batchBytes(batch)
-	if err := w.reserve(bytes); err != nil {
+	// then the commit job retain it until a commit claims the request or the
+	// caller abandons it.
+	if !consumeAdmission(ctx, w, batchRows(batch)) {
+		if err := w.Admit(ctx, batchRows(batch)); err != nil {
+			return err
+		}
+	}
+	request := newSubmission(ctx, batch)
+	if err := w.reserve(request.bytes); err != nil {
 		return err
 	}
-	request := submission{batch: batch, bytes: bytes, ack: make(chan error, 1)}
 	if err := w.enqueueSubmission(ctx, request); err != nil {
-		w.release(bytes)
+		w.release(request.bytes)
 		return err
 	}
 	select {
@@ -147,11 +201,12 @@ func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 	case <-w.done:
 		return errors.New("telemetry writer stopped before durable acknowledgement")
 	case <-ctx.Done():
+		w.abandon(request)
 		return ctx.Err()
 	}
 }
 
-func (w *Writer) enqueueSubmission(ctx context.Context, request submission) error {
+func (w *Writer) enqueueSubmission(ctx context.Context, request *submission) error {
 	w.submissionMu.RLock()
 	defer w.submissionMu.RUnlock()
 	// Once shutdown starts, never enqueue into an already drained queue.
@@ -181,8 +236,7 @@ func (w *Writer) Run(ctx context.Context) error {
 		for {
 			select {
 			case request := <-w.submissions:
-				w.release(request.bytes)
-				request.ack <- errors.New("telemetry writer stopped before durable acknowledgement")
+				w.fail([]*submission{request}, errors.New("telemetry writer stopped before durable acknowledgement"))
 			default:
 				metrics.UpdateQueueDepth("batch", 0)
 				close(w.done)
@@ -191,6 +245,20 @@ func (w *Writer) Run(ctx context.Context) error {
 		}
 	}()
 	w.compaction, _ = w.repository.(compactionPressure)
+	if w.admission != nil {
+		ticker := time.NewTicker(admissionInterval)
+		defer ticker.Stop()
+		go func() {
+			for {
+				select {
+				case <-ticker.C:
+					w.admission.update()
+				case <-w.done:
+					return
+				}
+			}
+		}()
+	}
 	jobs := make(chan commitJob, commitQueueDepth)
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
@@ -226,15 +294,7 @@ func (w *Writer) Run(ctx context.Context) error {
 	}
 
 	for {
-		if w.compaction != nil {
-			waited, err := w.compaction.WaitForCompaction(ctx)
-			if waited > 0 {
-				metrics.IngestBackpressureSeconds.Add(waited.Seconds())
-			}
-			if err != nil {
-				return finish(true)
-			}
-		}
+
 		select {
 		case request := <-w.submissions:
 			metrics.UpdateQueueDepth("batch", len(w.submissions))
@@ -247,20 +307,27 @@ func (w *Writer) Run(ctx context.Context) error {
 	}
 }
 
-func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out chan<- commitJob) (err error) {
-	requests := make([]submission, 1, maxAdmissionRequests)
-	requests[0] = request
+func (w *Writer) enqueueSubmissions(ctx context.Context, request *submission, out chan<- commitJob) (err error) {
+	requests := make([]*submission, 0, maxAdmissionRequests)
 	defer func() {
 		if err != nil {
-			for _, pending := range requests {
-				w.release(pending.bytes)
-				pending.ack <- err
-			}
+			w.fail(requests, err)
 		}
 	}()
-	rows := batchRows(request.batch)
-	bytes := request.bytes
-	limit := w.batchLimit()
+	// Abandoned submissions already released everything; they take no place
+	// in a group.
+	rows, bytes := 0, 0
+	admit := func(next *submission) {
+		if next.ctx.Err() != nil && w.abandon(next) || next.state.Load() == abandoned {
+			return
+		}
+		requests = append(requests, next)
+		rows += next.rows
+		bytes += next.bytes
+	}
+	admit(request)
+	pressure := w.compaction != nil && w.compaction.CompactionDebt() >= admissionBandStart
+	limit := w.batchLimit(pressure)
 	if rows < limit && bytes < maxGroupBatchBytes {
 		window := w.groupWindow
 		if window <= 0 {
@@ -271,31 +338,39 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out
 		// their short window as soon as compaction relieves the pressure.
 		var idle <-chan time.Time
 		var idleTimer *time.Timer
-		if w.compaction != nil && w.compaction.CompactionDebt() >= telemetry.CompactionDebtLimit/2 {
+		defer func() {
+			if idleTimer != nil {
+				idleTimer.Stop()
+			}
+		}()
+		armIdle := func() {
+			// Retry gaps must not produce tiny files. Once a normal-size batch is
+			// available, release idle closed-loop senders so they can send again.
+			if pressure && rows >= maxGroupBatchRows {
+				if idleTimer == nil {
+					idleTimer = time.NewTimer(pressureAdmissionIdle)
+					idle = idleTimer.C
+				} else {
+					idleTimer.Reset(pressureAdmissionIdle)
+				}
+			}
+		}
+		if pressure {
 			window = pressureAdmissionWindow
-			// Closed-loop exporters cannot send again until this group commits.
-			// Close an idle group promptly, while a paced stream can continue
-			// coalescing up to the pressure window and the existing bounds.
-			idleTimer = time.NewTimer(pressureAdmissionIdle)
-			defer idleTimer.Stop()
-			idle = idleTimer.C
+			armIdle()
 		}
 		timer := time.NewTimer(window)
 		defer timer.Stop()
-	admit:
+	admission:
 		for len(requests) < maxAdmissionRequests && rows < limit && bytes < maxGroupBatchBytes {
 			select {
 			case next := <-w.submissions:
-				requests = append(requests, next)
-				rows += batchRows(next.batch)
-				bytes += next.bytes
-				if idleTimer != nil {
-					idleTimer.Reset(pressureAdmissionIdle)
-				}
+				admit(next)
+				armIdle()
 			case <-idle:
-				break admit
+				break admission
 			case <-timer.C:
-				break admit
+				break admission
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -304,7 +379,7 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out
 	for len(requests) < maxAdmissionRequests {
 		select {
 		case next := <-w.submissions:
-			requests = append(requests, next)
+			admit(next)
 		default:
 			goto drained
 		}
@@ -313,27 +388,25 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out
 drained:
 	metrics.UpdateQueueDepth("batch", len(w.submissions))
 	for len(requests) > 0 {
-		firstRows := batchRows(requests[0].batch)
+		firstRows := requests[0].rows
 		// A full batch, a lone request, or a request that cannot share the
 		// next batch needs no row copy through the group-commit buffer. One
 		// oversized request remains one atomic directory; the limit is a
 		// group-commit target, not a durability boundary.
-		if firstRows >= limit || len(requests) == 1 || firstRows+batchRows(requests[1].batch) > limit {
+		if firstRows >= limit || len(requests) == 1 || firstRows+requests[1].rows > limit {
 			direct := requests[0]
 			requests = requests[1:]
-			direct.batch.ID = uuid.NewString()
-			if err := w.enqueueJob(ctx, out, commitJob{batches: []Batch{direct.batch}, acks: []chan error{direct.ack}, bytes: direct.bytes}); err != nil {
+			if err := w.enqueueJob(ctx, out, commitJob{requests: []*submission{direct}}); err != nil {
 				return err
 			}
 			continue
 		}
 
-		batch := Batch{ID: uuid.NewString()}
-		group := make([]submission, 0, len(requests))
+		group := make([]*submission, 0, len(requests))
 		rows, groupBytes := 0, 0
 		for len(requests) > 0 {
 			next := requests[0]
-			nextRows := batchRows(next.batch)
+			nextRows := next.rows
 			if len(group) > 0 && rows+nextRows > limit {
 				break
 			}
@@ -344,18 +417,11 @@ drained:
 			group = append(group, next)
 			rows += nextRows
 			groupBytes += next.bytes
-			batch.Spans = append(batch.Spans, next.batch.Spans...)
-			batch.Logs = append(batch.Logs, next.batch.Logs...)
-			batch.Metrics = append(batch.Metrics, next.batch.Metrics...)
 			if rows >= limit {
 				break
 			}
 		}
-		acks := make([]chan error, len(group))
-		for i := range group {
-			acks[i] = group[i].ack
-		}
-		if err := w.enqueueJob(ctx, out, commitJob{batches: []Batch{batch}, acks: acks, bytes: groupBytes}); err != nil {
+		if err := w.enqueueJob(ctx, out, commitJob{requests: group}); err != nil {
 			return err
 		}
 	}
@@ -367,7 +433,7 @@ func (w *Writer) enqueueJob(ctx context.Context, out chan<- commitJob, job commi
 	case out <- job:
 		return nil
 	case <-ctx.Done():
-		w.finishJob(job, ctx.Err())
+		w.fail(job.requests, ctx.Err())
 		return ctx.Err()
 	}
 }
@@ -375,67 +441,115 @@ func (w *Writer) enqueueJob(ctx context.Context, out chan<- commitJob, job commi
 func (w *Writer) commitWorker(ctx context.Context, jobs <-chan commitJob) {
 	for job := range jobs {
 		if err := ctx.Err(); err != nil {
-			w.finishJob(job, err)
+			w.fail(job.requests, err)
 			continue
 		}
-		if err := w.commitJob(ctx, job); err != nil {
-			w.finishJob(job, err)
+		job = w.claim(job)
+		if len(job.requests) == 0 {
+			continue
+		}
+		batch := job.batch()
+		if err := w.commitBatch(ctx, batch); err != nil {
+			w.finish(job, err)
 			slog.Error("telemetry batch commit exhausted retries", "error", err)
 			continue
 		}
-		for _, batch := range job.batches {
-			metrics.RecordIngest("spans", len(batch.Spans))
-			metrics.RecordIngest("logs", len(batch.Logs))
-			metrics.RecordIngest("metrics", len(batch.Metrics))
-		}
-		w.finishJob(job, nil)
+		metrics.RecordIngest("spans", len(batch.Spans))
+		metrics.RecordIngest("logs", len(batch.Logs))
+		metrics.RecordIngest("metrics", len(batch.Metrics))
+		w.finish(job, nil)
 	}
 }
 
-func (w *Writer) finishJob(job commitJob, err error) {
-	w.release(job.bytes)
-	for _, ack := range job.acks {
-		ack <- err
+// claim takes the requests whose senders are still waiting as this commit
+// starts, abandoning the rest. Their senders resend, so committing them as
+// well would store their rows twice. The rest of a group still commits.
+func (w *Writer) claim(job commitJob) commitJob {
+	live := job.requests[:0]
+	for _, request := range job.requests {
+		if request.ctx.Err() != nil {
+			w.abandon(request)
+			continue
+		}
+		if request.state.CompareAndSwap(queued, claimed) {
+			live = append(live, request)
+		}
+	}
+	job.requests = live
+	return job
+}
+
+// batch merges the job's requests into one atomic batch with a fresh ID,
+// copying each row once. A lone request commits without copying its rows.
+func (job commitJob) batch() Batch {
+	if len(job.requests) == 1 {
+		batch := job.requests[0].batch
+		batch.ID = uuid.NewString()
+		return batch
+	}
+	var spans, logs, metrics int
+	for _, request := range job.requests {
+		spans += len(request.batch.Spans)
+		logs += len(request.batch.Logs)
+		metrics += len(request.batch.Metrics)
+	}
+	batch := Batch{ID: uuid.NewString(), Spans: make([]telemetry.Span, 0, spans),
+		Logs: make([]telemetry.Log, 0, logs), Metrics: make([]telemetry.Metric, 0, metrics)}
+	for _, request := range job.requests {
+		batch.Spans = append(batch.Spans, request.batch.Spans...)
+		batch.Logs = append(batch.Logs, request.batch.Logs...)
+		batch.Metrics = append(batch.Metrics, request.batch.Metrics...)
+	}
+	return batch
+}
+
+// finish settles claimed requests.
+func (w *Writer) finish(job commitJob, err error) {
+	for _, request := range job.requests {
+		w.release(request.bytes)
+		request.ack <- err
 	}
 }
 
-func (w *Writer) commitJob(ctx context.Context, job commitJob) error {
-	for _, batch := range job.batches {
-		started := time.Now()
-		var lastErr error
-		for attempt := 0; attempt < commitRetryLimit; attempt++ {
-			if err := w.repository.Commit(ctx, batch); err == nil {
-				lastErr = nil
-				break
-			} else {
-				lastErr = err
-			}
-			metrics.FlushErrors.WithLabelValues("batch").Inc()
-			slog.Warn("telemetry batch commit failed; retrying", "batch_id", batch.ID, "attempt", attempt+1, "error", lastErr)
-			if attempt+1 == commitRetryLimit {
-				break
-			}
-			delay := defaultCommitRetryDelay(attempt)
-			if w.retryDelay != nil {
-				delay = w.retryDelay(attempt)
-			}
-			timer := time.NewTimer(delay)
-			select {
-			case <-ctx.Done():
-				if !timer.Stop() {
-					<-timer.C
-				}
-				return ctx.Err()
-			case <-timer.C:
-			}
+// commitBatch retries the same batch under the same ID. Requests abandoned
+// between attempts stay in it: a failed attempt can already have published the
+// directory (the rename succeeded and the directory fsync failed), which the
+// retry adopts by ID, so a smaller retry would not unwrite their rows.
+func (w *Writer) commitBatch(ctx context.Context, batch Batch) error {
+	started := time.Now()
+	var lastErr error
+	for attempt := 0; attempt < commitRetryLimit; attempt++ {
+		if err := w.repository.Commit(ctx, batch); err == nil {
+			lastErr = nil
+			break
+		} else {
+			lastErr = err
 		}
-		if lastErr != nil {
-			metrics.FlushErrors.WithLabelValues("failed").Inc()
-			recordDroppedRows(batch)
-			return fmt.Errorf("commit telemetry batch %s after %d attempts: %w", batch.ID, commitRetryLimit, lastErr)
+		metrics.FlushErrors.WithLabelValues("batch").Inc()
+		slog.Warn("telemetry batch commit failed; retrying", "batch_id", batch.ID, "attempt", attempt+1, "error", lastErr)
+		if attempt+1 == commitRetryLimit {
+			break
 		}
-		recordFlushes(batch, time.Since(started).Seconds())
+		delay := defaultCommitRetryDelay(attempt)
+		if w.retryDelay != nil {
+			delay = w.retryDelay(attempt)
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
+	if lastErr != nil {
+		metrics.FlushErrors.WithLabelValues("failed").Inc()
+		recordDroppedRows(batch)
+		return fmt.Errorf("commit telemetry batch %s after %d attempts: %w", batch.ID, commitRetryLimit, lastErr)
+	}
+	recordFlushes(batch, time.Since(started).Seconds())
 	return nil
 }
 
@@ -466,7 +580,7 @@ func batchBytes(batch Batch) int {
 	}
 	for i := range batch.Spans {
 		span := &batch.Spans[i]
-		total += resourceBytes(span.Resource) + telemetry.ValueBytes(span.Attributes) + len(span.EventsJSON) + len(span.LinksJSON) +
+		total += resourceBytes(span.Resource) + telemetry.ValueBytes(span.Attributes) + span.ListBytes() +
 			len(span.Name) + len(span.StatusMsg) + len(span.TraceID) + len(span.SpanID)
 	}
 	for i := range batch.Logs {
@@ -475,8 +589,8 @@ func batchBytes(batch Batch) int {
 	}
 	for i := range batch.Metrics {
 		metric := &batch.Metrics[i]
-		total += resourceBytes(metric.Resource) + telemetry.ValueBytes(metric.Attributes) + len(metric.ExemplarsJSON) +
-			len(metric.HistBoundsJSON) + len(metric.HistCountsJSON) + len(metric.Name) + len(metric.Description)
+		total += resourceBytes(metric.Resource) + telemetry.ValueBytes(metric.Attributes) + metric.ListBytes() +
+			len(metric.Name) + len(metric.Description)
 	}
 	return total
 }
@@ -497,7 +611,10 @@ func batchRows(batch Batch) int {
 	return len(batch.Spans) + len(batch.Logs) + len(batch.Metrics)
 }
 
-func (w *Writer) batchLimit() int {
+func (w *Writer) batchLimit(pressure bool) int {
+	if pressure {
+		return pressureGroupBatchRows
+	}
 	limit := min(w.batchSize, maxGroupBatchRows)
 	if limit <= 0 {
 		return maxGroupBatchRows

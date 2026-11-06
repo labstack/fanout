@@ -1,6 +1,7 @@
 import { test, expect, type Response } from "../../fixtures/test";
 import { cardSelector, chooseView, readyCard } from "../../support/accessibility-support";
 import { chartLabel } from "../../support/setup-support";
+import { panelResults } from "../../support/query-results";
 import type { DashboardTime, Panel, PanelResult } from "../../../../panels/types";
 import { frameRows } from "../../../../panels/rows";
 import { statusFor } from "../../../../panels/thresholds";
@@ -30,11 +31,13 @@ test("default system overview shows all six self-observation scenarios within tw
   // Only collect requests for the pinned document. The first document's
   // relative-range responses can lose their bodies during navigation. Attach
   // before navigating so the pinned document's initial results are included.
-  const responses: Response[] = [];
+  // Results stream one per line, so a refresh can abort a response after its
+  // headers arrived; read each body as it completes and skip aborted ones.
+  const bodies: Promise<PanelResult[]>[] = [];
   const collectResponse = (response: Response) => {
-    if (new URL(response.url()).pathname !== "/api/panels/query" || !response.ok()) return;
+    if (new URL(response.url()).pathname !== "/api/queries/run" || !response.ok()) return;
     const time = (response.request().postDataJSON() as { time?: DashboardTime }).time;
-    if (time?.from === pinned.searchParams.get("from") && time?.to === pinned.searchParams.get("to")) responses.push(response);
+    if (time?.from === pinned.searchParams.get("from") && time?.to === pinned.searchParams.get("to")) bodies.push(panelResults(response).catch(() => []));
   };
   page.on("response", collectResponse);
   await page.goto(pinned.pathname + pinned.search);
@@ -43,16 +46,15 @@ test("default system overview shows all six self-observation scenarios within tw
   // existing visibility-based query and verifies that its renderer is populated.
   for (const panel of panels) await readyCard(page, panel);
   for (let refresh = 0; refresh < 2; refresh++) {
-    const response = page.waitForResponse(response => new URL(response.url()).pathname === "/api/panels/query" && response.ok());
+    const response = page.waitForResponse(response => new URL(response.url()).pathname === "/api/queries/run" && response.ok());
     await page.getByRole("button", { name: "Refresh now", exact: true }).click();
     await response;
     for (const panel of panels) await readyCard(page, panel);
   }
   page.off("response", collectResponse);
   const results = new Map<string, PanelResult>();
-  for (const response of responses) {
-    const body = await response.json() as { results: PanelResult[] };
-    for (const result of body.results) results.set(result.id, result);
+  for (const body of await Promise.all(bodies)) {
+    for (const result of body) results.set(result.id, result);
   }
 
   const hosts = page.locator(cardSelector("hosts"));

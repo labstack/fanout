@@ -1,0 +1,72 @@
+---
+title: CLI
+description: Commands and flags accepted by the Fanout binary.
+summary: Server startup, version output, login links, health probes and offline repair.
+read_when:
+  - You need to run or script a Fanout command.
+status: preview
+---
+
+## Commands and flags
+
+| Invocation | Behavior |
+|---|---|
+| `fanout` | Validate environment settings and start the server. |
+| `fanout version` | Print the build version to stdout and exit. |
+| `fanout --version`, `fanout -v` | Print the build version to stdout and exit. |
+| `fanout -h`, `fanout --help` | Print usage to stderr and exit successfully. |
+| `fanout login-link <email>` | Mint a login URL for an existing active local user. |
+| `fanout healthcheck [url]` | Probe an explicit URL, or derive `/healthz` from listener settings. |
+| `fanout repair verify` | Validate every authoritative telemetry batch without changing it. |
+| `fanout repair quarantine --batch <id>` | Move one confirmed corrupt batch aside. `--batch` is required. |
+
+These are the complete subcommands and flags. Configuration comes from the
+environment, not CLI configuration flags. See [configuration](/docs/reference/configuration).
+Version output uses the release version embedded at build time, or `dev` when
+no version was embedded.
+
+## Login links
+
+Run with the server's environment and data directory:
+
+```sh
+fanout login-link admin@example.com
+# For Docker:
+docker exec fanout fanout login-link admin@example.com
+```
+
+The command requires local auth mode, an existing control database and an
+active user. It prints one URL to stderr. The URL expires in 15 minutes and
+works once. It can run while the server is online. See
+[account recovery](/docs/concepts/authentication#recover-local-sign-in).
+
+## Health probes
+
+With no URL, `healthcheck` reads only `FANOUT_ADDR` and
+`FANOUT_TLS_CERT_FILE`. Unspecified bind hosts become `127.0.0.1`.
+A certificate selects HTTPS. Derived probes bypass environment proxies;
+HTTPS IP probes trust the configured certificate and verify its first DNS or
+IP SAN. Hostname probes use normal verification.
+
+An explicit URL uses normal proxy and certificate verification. Each probe has
+a three-second timeout and succeeds only on HTTP 200. No auth secret is needed.
+
+## Offline repair
+
+Stop Fanout and back up telemetry before running repair. Both commands load and
+validate the normal environment configuration. Verification reports each
+confirmed unreadable batch on stdout. An unsupported format or operational
+failure stops verification and does not authorize quarantine.
+
+Quarantine renames one corrupt batch beside the authoritative set. It refuses
+a healthy batch or a batch protected by a compaction marker. Its rows become
+unavailable to queries. Preserve the reported destination for recovery, verify
+again, then restart. See [batch recovery](/docs/guides/troubleshooting#an-unreadable-telemetry-batch-blocks-startup).
+
+## Exit status
+
+| Status | Meaning |
+|---|---|
+| `0` | Command completed successfully, including help and version. |
+| `1` | Configuration or runtime failure, failed login-link creation, failed health probe, or repair failure. Verification finding corrupt batches also exits 1. |
+| `2` | Invalid arguments or failure to derive the healthcheck address. |

@@ -8,7 +8,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type DashboardHandler struct{ dashboards *dashboard.Service }
@@ -30,11 +30,11 @@ func RegisterDashboardRoutes(e *echo.Echo, dashboards *dashboard.Service) {
 const dashboardBodyLimit = 512 << 10
 
 type createDashboardBody struct {
-	Spec panel.Dashboard `json:"spec"`
+	Spec query.Dashboard `json:"spec"`
 }
 
 type replaceDashboardBody struct {
-	Spec        panel.Dashboard `json:"spec"`
+	Spec        query.Dashboard `json:"spec"`
 	BaseVersion int             `json:"base_version,omitempty"`
 	Message     string          `json:"message,omitempty"`
 }
@@ -125,7 +125,7 @@ func (h *DashboardHandler) delete(c *echo.Context) error {
 		return err
 	}
 	if c.Request().Header.Get("Fanout-Confirm-Delete") != c.Param("id") {
-		return echo.NewHTTPError(http.StatusPreconditionRequired, "dashboard deletion requires confirmation")
+		return newAPIError(http.StatusPreconditionRequired, "confirmation_required", "Deleting a dashboard requires the Fanout-Confirm-Delete header set to its ID.")
 	}
 	if err := h.dashboards.Delete(c.Request().Context(), owner, c.Param("id")); err != nil {
 		return dashboardError(c, err)

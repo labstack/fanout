@@ -49,8 +49,35 @@ const (
 var (
 	ReadCachePendingBatches = promauto.NewGauge(prometheus.GaugeOpts{Name: "fanout_read_cache_pending_batches", Help: "Nonempty active immutable batches across spans, logs and metrics not covered at the start of the last read-cache pass"})
 
+	// QueryCacheRequests counts panel, exemplar and trace-detail lookups in the
+	// query result cache: hit (fresh), stale (served while one refresh runs),
+	// miss (ran the queries) and coalesced (joined an identical run in flight).
+	QueryCacheRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "fanout_query_cache_requests_total",
+		Help: "Query result cache lookups by result: hit, stale, miss or coalesced",
+	}, []string{"result"})
+
+	QueryCacheBytes = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "fanout_query_cache_bytes",
+		Help: "Estimated bytes of results held in the query result cache",
+	})
+
 	IngestBackpressureSeconds = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_ingest_backpressure_seconds_total", Help: "Total seconds the ingest writer waited for compaction debt to retire",
+		Name: "fanout_ingest_backpressure_seconds_total", Help: "Total seconds an ingest admission rate cap was active",
+	})
+
+	CompactionPassSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name: "fanout_compaction_pass_seconds", Help: "Duration of a compaction pass including publication", Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300},
+	})
+	CompactionRetiredBatches = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_compaction_retired_batches_total", Help: "Input batches retired from the live catalog by compaction publications",
+	})
+
+	IngestThrottled = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "fanout_ingest_throttled_total", Help: "Whole exports refused by admission reason: debt, reads or budget",
+	}, []string{"reason"})
+	IngestAdmissionRate = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "fanout_ingest_admission_rows_per_second", Help: "Current ingest admission rows per second; zero means uncapped",
 	})
 
 	// Ingest metrics
@@ -77,6 +104,15 @@ var (
 	IngestShedTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "fanout_ingest_shed_total",
 		Help: "Telemetry requests refused because ingest was over its in-flight byte budget",
+	})
+
+	// IngestAbandonedTotal counts requests dropped before their commit
+	// started because the request had already ended: the sender timed out or
+	// cancelled, or the server cut the request off while shutting down. The
+	// sender resends, so storing the abandoned copy too would duplicate rows.
+	IngestAbandonedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_ingest_abandoned_total",
+		Help: "Telemetry requests dropped before commit because the request ended (sender timeout or cancel, or server shutdown)",
 	})
 
 	FlushDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
@@ -106,18 +142,6 @@ var (
 		Help:    "Time spent inside the Telemetry catalog write critical section",
 		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
 	}, []string{"operation"})
-
-	// Query metrics
-	QueryTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_query_total",
-		Help: "Total queries executed",
-	}, []string{"endpoint", "status"})
-
-	QueryDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "fanout_query_duration_seconds",
-		Help:    "Query duration in seconds",
-		Buckets: []float64{.01, .05, .1, .25, .5, 1, 2.5, 5, 10, 30},
-	}, []string{"endpoint"})
 
 	// Rollup metrics
 	RollupTotal = promauto.NewCounter(prometheus.CounterOpts{
@@ -209,47 +233,17 @@ var (
 		Help: "Number of telemetry Parquet files per signal",
 	}, []string{"signal"})
 
-	ParquetPublishWaiters = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "fanout_parquet_publish_waiters",
-		Help: "Current Parquet publications waiting for active readers",
-	})
-
-	ParquetPublishWait = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "fanout_parquet_publish_wait_seconds",
-		Help:    "Time spent waiting to publish a new Parquet file set",
-		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
-	})
-
-	ParquetPublishTimeouts = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_parquet_publish_timeouts_total",
-		Help: "Parquet publications abandoned after reader wait timeout",
-	})
-
-	// The publisher's side of Parquet publication was measured and the
-	// reader's side was not, which left the one question a stalled query asks
-	// — "how long did I wait to enter the snapshot?" — unanswerable. These
-	// three complete the pair.
-	// An uncontended admission costs single-digit microseconds, so the ladder
-	// starts below that: a histogram whose healthy traffic all lands in the
-	// first bucket can tell you a stall happened but not what normal was.
-	snapshotBuckets = []float64{.000001, .000005, .00002, .0001, .0005, .001, .005, .025, .1, .5, 1, 2.5, 5, 10, 30, 60}
-
+	// A swap is a rename and an fsync, so the ladder starts in microseconds.
 	ParquetPublishHold = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "fanout_parquet_publish_hold_seconds",
-		Help:    "Time readers were excluded while a new Parquet file set was swapped in",
-		Buckets: snapshotBuckets,
+		Help:    "Time one Parquet publication took to swap a new file set into the catalog; readers never wait for it",
+		Buckets: []float64{.000001, .000005, .00002, .0001, .0005, .001, .005, .025, .1, .5, 1, 2.5, 5, 10, 30, 60},
 	})
 
-	parquetReadWait = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "fanout_parquet_read_wait_seconds",
-		Help:    "Time a reader spent waiting to enter the Parquet snapshot",
-		Buckets: snapshotBuckets,
-	}, []string{"reader"})
-
-	parquetReadRefusals = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_parquet_read_refusals_total",
-		Help: "Readers that gave up waiting to enter the Parquet snapshot",
-	}, []string{"reader"})
+	ParquetRetiringBatches = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "fanout_parquet_retiring_batches",
+		Help: "Batches compaction or retention replaced whose files wait for earlier readers to finish",
+	})
 
 	// The wait to enter the snapshot and the wait for a connection are both
 	// measured; how long the statement itself takes was not, so a slow request
@@ -260,6 +254,13 @@ var (
 		Name:    "fanout_duckdb_statement_seconds",
 		Help:    "Time a read statement spent executing in DuckDB, excluding any wait to start it",
 		Buckets: []float64{.0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30},
+	})
+
+	// DuckDB checks for interrupts only between chunks, so a costly
+	// expression can run a statement long past its deadline.
+	DuckDBStatementOverruns = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_duckdb_statement_overruns_total",
+		Help: "Read statements seen running more than 25 seconds past their deadline",
 	})
 
 	// An explicit CHECKPOINT blocks new transactions for its duration, and the
@@ -306,7 +307,10 @@ func RecordIngest(signal string, count int) {
 }
 
 // RecordIngestShed counts one refused telemetry request.
-func RecordIngestShed() { IngestShedTotal.Inc() }
+func RecordIngestShed() { IngestShedTotal.Inc(); IngestThrottled.WithLabelValues("budget").Inc() }
+
+// RecordIngestAbandoned counts one telemetry request dropped before commit.
+func RecordIngestAbandoned() { IngestAbandonedTotal.Inc() }
 
 // RecordFlush records a flush event.
 func RecordFlush(signal string, durationSec float64) {
@@ -447,31 +451,12 @@ var (
 	}, func() float64 { return poolStats().WaitDuration.Seconds() })
 )
 
-// RecordParquetRead records one attempt to enter the Parquet snapshot.
-//
-// Both series are behind this function for the same reason RecordWriteGate
-// exists: the label is a fixed reader class, and a vector left exported is a
-// vector something eventually calls with a service name in it.
-func RecordParquetRead(reader string, waitSec float64, admitted bool) {
-	if admitted {
-		parquetReadWait.WithLabelValues(reader).Observe(waitSec)
-		return
-	}
-	parquetReadRefusals.WithLabelValues(reader).Inc()
-}
-
 // RecordWriteGate records one complete Telemetry catalog write critical section.
-// Callers constrain operation to the fixed writegate.WriteOperation set so this
+// Callers constrain operation to the fixed writegate.Operation set so this
 // metric cannot grow with tenant or telemetry cardinality.
 func RecordWriteGate(operation string, waitSec, holdSec float64) {
 	WriteGateWait.WithLabelValues(operation).Observe(waitSec)
 	WriteGateHold.WithLabelValues(operation).Observe(holdSec)
-}
-
-// RecordQuery records a query event
-func RecordQuery(endpoint, status string, durationSec float64) {
-	QueryTotal.WithLabelValues(endpoint, status).Inc()
-	QueryDuration.WithLabelValues(endpoint).Observe(durationSec)
 }
 
 // RecordRollup records a complete rollup cycle. A partial failure still records

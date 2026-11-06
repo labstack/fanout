@@ -10,12 +10,13 @@ import FailureReport from "../failure-report";
 describe("setup safety and readiness", () => {
   it("redacts credentials before printing the last fifty diagnostic lines", () => {
     const lines = Array.from({ length: 60 }, (_, i) => `line ${i}`);
-    lines.push('Bearer fo_ingest.abc-123 setup_token=secret%20token&next=/ cookie: fanout_session=session-secret; other=second-secret');
+    const tokens = ["foi_", "foa_", "for_", "foc_"].map((prefix) => prefix + "A".repeat(43));
+    lines.push(`${tokens.join(" ")} setup_token=secret%20token&next=/ cookie: fanout_session=session-secret; other=second-secret`);
     lines.push('Set-Cookie: fanout_session=response-secret; Path=/; HttpOnly');
     const tail = diagnosticTail(lines.join("\n"));
     expect(tail.split("\n")).toHaveLength(50);
     expect(tail).toContain("line 59");
-    for (const secret of ["fo_ingest", "secret%20token", "session-secret", "second-secret", "response-secret"]) expect(tail).not.toContain(secret);
+    for (const secret of [...tokens, "secret%20token", "session-secret", "second-secret", "response-secret"]) expect(tail).not.toContain(secret);
     expect(tail).toContain("[REDACTED]");
     expect(diagnosticTail('{"cookie":"session=json-secret"}')).not.toContain("json-secret");
   });

@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,6 +24,31 @@ func TestCurrentVersionRestoreIsRejectedWithoutSaving(t *testing.T) {
 	}
 	if _, err := s.Restore(t.Context(), "other", first.ID, first.Version, agent); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
+	}
+}
+
+// Restoring a version whose spec the dashboard already has added a duplicate
+// version each time.
+func TestIdenticalRestoreIsRejectedWithoutSaving(t *testing.T) {
+	s := newTestService(t)
+	first, err := s.Create(t.Context(), "owner", textSpec("Same"), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := textSpec("Same")
+	changed.Panels[0].Content = "second"
+	if _, err := s.Replace(t.Context(), "owner", first.ID, changed, first.Version, agent, "Updated note"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Restore(t.Context(), "owner", first.ID, 1, agent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Restore(t.Context(), "owner", first.ID, 1, agent); !errors.Is(err, ErrAlreadyCurrent) {
+		t.Fatalf("identical restore = %v, want ErrAlreadyCurrent", err)
+	}
+	versions, err := s.Versions(t.Context(), "owner", first.ID)
+	if err != nil || len(versions) != 3 {
+		t.Fatalf("versions=%+v err=%v", versions, err)
 	}
 }
 
@@ -110,7 +136,9 @@ func TestPrunedHistoryReportsUnavailableChangesAndRestoreAppendsUserVersion(t *t
 		t.Fatal(err)
 	}
 	for i := 0; i < keepVersions; i++ {
-		if _, err := s.Replace(t.Context(), "owner", first.ID, textSpec("History"), 0, agent, "Edit"); err != nil {
+		edited := textSpec("History")
+		edited.Panels[0].Content = fmt.Sprint("edit ", i)
+		if _, err := s.Replace(t.Context(), "owner", first.ID, edited, 0, agent, "Edit"); err != nil {
 			t.Fatal(err)
 		}
 	}

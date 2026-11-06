@@ -119,7 +119,8 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
     else if (!shift && (key === "Home" || key === "End")) choose(key === "Home" ? peers[0] : peers.at(-1));
   };
   const cancel = () => { setPending(null); plot.current?.focus(); };
-  const hint = rangeAvailable ? "←→ points · ↑↓ series · Enter drill · Shift+←→ range" : "←→ points · ↑↓ series · Enter drill";
+  // Enter is offered only where a point opens something.
+  const hint = ["←→ points · ↑↓ series", onClick && "Enter drill", rangeAvailable && "Shift+←→ range"].filter(Boolean).join(" · ");
   useLayoutEffect(() => {
     chrome?.setHint(focused ? hint : undefined);
     return () => chrome?.setHint(undefined);
