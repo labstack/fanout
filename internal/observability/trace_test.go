@@ -9,7 +9,6 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	_ "github.com/duckdb/duckdb-go/v2"
-	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -45,7 +44,7 @@ func TestTracePagedSpansStillDescribeTheWholeTrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs("wide-trace", start, end, "prod", "prod", 1).
+		WithArgs("wide-trace", start, end, true, "prod", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
 
 	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "wide-trace", "", 1)
@@ -98,7 +97,7 @@ func TestTraceWholeTraceIsNotReportedAsTruncated(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs("small-trace", start, end, "prod", "prod", 10).
+		WithArgs("small-trace", start, end, true, "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
 
 	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "small-trace", "", 10)
@@ -118,25 +117,39 @@ func TestTraceWholeTraceIsNotReportedAsTruncated(t *testing.T) {
 }
 
 func TestRecentTraceKeepsSelectedNamespace(t *testing.T) {
-	svc, mock, repo := newMockService(t)
-	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	end := start.Add(time.Hour)
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "namespaces", Spans: []telemetry.Span{
-		{Namespace: "a", TraceID: "shared", SpanID: "a", ServiceName: "checkout", StartUnixNanos: start.UnixNano(), DurationMS: 1},
-		{Namespace: "b", TraceID: "shared", SpanID: "b", ServiceName: "other", StartUnixNanos: start.UnixNano(), DurationMS: 9, StatusCode: "STATUS_CODE_ERROR"},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	mock.ExpectQuery(regexp.QuoteMeta(queryrows.CompletedTraceQuery)).WithArgs(start, end, "", "", "checkout", "checkout", 1).WillReturnRows(sqlmock.NewRows([]string{"namespace", "trace_id", "has_error"}).AddRow("a", "shared", 0))
-	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).WithArgs("shared", start, end, "a", "a", 10).WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
-	got, err := svc.Trace(t.Context(), Scope{Start: start, End: end}, "", "checkout", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Data.SpanCount != 1 || got.Data.HasError || len(got.Data.Spans) != 1 || got.Data.Spans[0].SpanID != "a" {
-		t.Fatalf("namespace merged: %+v", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
+	for _, namespace := range []string{"a", ""} {
+		t.Run(namespace, func(t *testing.T) {
+			duck, repo, svc := newCompletedReadTest(t)
+			start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+			end := start.Add(time.Hour)
+			svc.now = func() time.Time { return end }
+			// Bypass ingest normalization to retain a genuinely empty namespace.
+			if err := repo.Parquet.CommitBatch(t.Context(), &telemetry.BatchMetadata{ID: "namespaces"}, []telemetry.Span{
+				{Namespace: namespace, TraceID: "shared", SpanID: "a", ServiceName: "checkout", StartUnixNanos: start.UnixNano(), EndUnixNanos: start.Add(time.Millisecond).UnixNano(), DurationMS: 1},
+				{Namespace: "b", TraceID: "shared", SpanID: "b", ServiceName: "other", StartUnixNanos: start.UnixNano(), EndUnixNanos: start.Add(9 * time.Millisecond).UnixNano(), DurationMS: 9, StatusCode: "STATUS_CODE_ERROR"},
+			}, []telemetry.Log{
+				{Namespace: namespace, TraceID: "shared", SpanID: "a", ServiceName: "checkout", TimeUnixNanos: start.UnixNano(), Body: "selected"},
+				{Namespace: "b", TraceID: "shared", SpanID: "b", ServiceName: "other", TimeUnixNanos: start.UnixNano(), Body: "unrelated"},
+			}, nil); err != nil {
+				t.Fatal(err)
+			}
+			for _, cached := range []bool{false, true} {
+				if cached {
+					if _, err := duck.RefreshReadCaches(t.Context()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				got, err := svc.Trace(t.Context(), Scope{Start: start, End: end}, "", "checkout", 10)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.Data.SpanCount != 1 || got.Data.HasError || len(got.Data.Spans) != 1 || got.Data.Spans[0].SpanID != "a" || len(got.Data.Logs) != 1 || got.Data.Logs[0].Body != "selected" {
+					t.Fatalf("cached=%v namespace merged: %+v", cached, got)
+				}
+				if got.Provenance != svc.provenanceFor(Scope{Start: start, End: end}) {
+					t.Fatalf("requested provenance changed: %+v", got.Provenance)
+				}
+			}
+		})
 	}
 }

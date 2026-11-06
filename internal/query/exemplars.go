@@ -289,7 +289,7 @@ AND s.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<?::TIMESTAMP_
 GROUP BY s.namespace,s.trace_id)
 SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(root.service,''),coalesce(root.operation,''),coalesce(root.duration_ms,0),
 CASE WHEN has_error THEN 'STATUS_CODE_ERROR' ELSE coalesce(root.status,'') END,root.start_time::TIMESTAMP_NS,false
-FROM roots ORDER BY root.duration_ms DESC,trace_id,namespace LIMIT 21`, strings.Join(candidates, ","))
+FROM roots ORDER BY has_error DESC,coalesce(root.duration_ms,0) DESC,trace_id,namespace LIMIT 21`, strings.Join(candidates, ","))
 
 	rootArgs = append(rootArgs, start, end)
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end})
@@ -391,7 +391,6 @@ func (e *Executor) indexedExemplars(ctx context.Context, w queryrows.Window, pan
 		return out, exemplarError(ctx, err)
 	}
 	var ids []telemetry.TraceIdentity
-	var scopedErrors []int
 	for rows.Next() {
 		var id telemetry.TraceIdentity
 		var hasError int
@@ -400,7 +399,6 @@ func (e *Executor) indexedExemplars(ctx context.Context, w queryrows.Window, pan
 			return out, exemplarError(ctx, err)
 		}
 		ids = append(ids, id)
-		scopedErrors = append(scopedErrors, hasError)
 	}
 	err = rows.Err()
 	rows.Close()
@@ -431,16 +429,25 @@ func (e *Executor) indexedExemplars(ctx context.Context, w queryrows.Window, pan
 			continue
 		}
 		root := totals[i].Root
-		// Error priority and display both describe the selected service/window,
-		// independently of the root's service and the rest of the trace.
 		status := root.StatusCode
-		if status == "STATUS_CODE_ERROR" {
-			status = "STATUS_CODE_OK"
-		}
-		if scopedErrors[i] != 0 {
+		if totals[i].HasError {
 			status = "STATUS_CODE_ERROR"
 		}
 		out.Traces = append(out.Traces, Exemplar{TraceID: id.TraceID, Namespace: id.Namespace, Service: root.ServiceName, Operation: root.Name, DurationMS: root.DurationMS, Status: status, Start: time.Unix(0, root.StartUnixNanos).UTC()})
 	}
+	// Candidate ranking is scoped; the final order describes the displayed roots.
+	sort.Slice(out.Traces, func(i, j int) bool {
+		a, b := out.Traces[i], out.Traces[j]
+		if (a.Status == "STATUS_CODE_ERROR") != (b.Status == "STATUS_CODE_ERROR") {
+			return a.Status == "STATUS_CODE_ERROR"
+		}
+		if a.DurationMS != b.DurationMS {
+			return a.DurationMS > b.DurationMS
+		}
+		if a.TraceID != b.TraceID {
+			return a.TraceID < b.TraceID
+		}
+		return a.Namespace < b.Namespace
+	})
 	return out, nil
 }

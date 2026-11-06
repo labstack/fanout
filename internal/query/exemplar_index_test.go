@@ -22,7 +22,7 @@ func TestIndexedExemplarsRankTracesAndTruncate(t *testing.T) {
 		}
 		spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: fmt.Sprintf("trace-%02d", i), SpanID: "root", Name: "root", StartUnixNanos: n, EndUnixNanos: n + int64(i+1)*1000000, DurationMS: float64(i + 1), StatusCode: status})
 	}
-	// Rank a long scoped trace ahead of a trace with one slower span.
+	// Select a long scoped trace, but order its displayed short root last.
 	late := fixtureStart.Add(45 * time.Minute).UnixNano()
 	spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: "trace-01", SpanID: "late", ParentSpanID: "root", StartUnixNanos: late, EndUnixNanos: late + 1000000, DurationMS: 1})
 	// A much longer trace in another namespace and a different service must not win.
@@ -69,7 +69,7 @@ func TestIndexedExemplarsRankTracesAndTruncate(t *testing.T) {
 	if queries != 1 || rootPasses != 1 {
 		t.Fatalf("candidate statements=%d root passes=%d", queries, rootPasses)
 	}
-	if len(got.Traces) != 20 || !got.Truncated || got.Traces[0].TraceID != "trace-00" || got.Traces[1].TraceID != "trace-01" || got.Traces[2].TraceID != "trace-20" {
+	if len(got.Traces) != 20 || !got.Truncated || got.Traces[0].TraceID != "trace-00" || got.Traces[1].TraceID != "trace-20" || got.Traces[19].TraceID != "trace-01" {
 		t.Fatalf("ranking/cap: %+v", got)
 	}
 	for _, trace := range got.Traces {
@@ -209,7 +209,7 @@ func TestIndexedExemplarsKeepNamespacesSeparate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got.Traces) != 2 || got.Traces[0].Namespace != "b" || got.Traces[1].Namespace != "a" || got.Traces[0].Operation != "root b" || got.Traces[1].Operation != "root a" || got.Traces[1].Status != "STATUS_CODE_OK" || got.Traces[0].Status != "STATUS_CODE_OK" {
+		if len(got.Traces) != 2 || got.Traces[0].Namespace != "b" || got.Traces[1].Namespace != "a" || got.Traces[0].Operation != "root b" || got.Traces[1].Operation != "root a" || got.Traces[1].Status != "STATUS_CODE_ERROR" || got.Traces[0].Status != "STATUS_CODE_ERROR" {
 			t.Fatalf("cached=%v: %+v", cached, got)
 		}
 	}
@@ -285,5 +285,59 @@ func TestExemplarIndexSelectionEligibility(t *testing.T) {
 	req.Dimensions = map[string]string{"service": "Other (3)"}
 	if _, err := e.exemplars(t.Context(), req, fixtureStart.Add(time.Hour)); err == nil {
 		t.Fatal("accepted Other group")
+	}
+}
+
+func TestExemplarPathsAgreeOnDisplayedStatusAndOrder(t *testing.T) {
+	duck, repo := newTestEngine(t)
+	n := fixtureStart.Add(time.Minute).UnixNano()
+	span := func(ns, id, service, parent string, duration float64, status string) telemetry.Span {
+		return telemetry.Span{Namespace: ns, TraceID: id, SpanID: service, ParentSpanID: parent, ServiceName: service, StartUnixNanos: n, EndUnixNanos: n + int64(duration*1e6), DurationMS: duration, StatusCode: status}
+	}
+	commit(t, repo, []telemetry.Span{
+		span("a", "child-error", "checkout", "", 10, "STATUS_CODE_OK"),
+		span("a", "child-error", "other", "checkout", 1, "STATUS_CODE_ERROR"),
+		span("a", "root-error", "other", "", 5, "STATUS_CODE_ERROR"),
+		span("a", "root-error", "checkout", "other", 1, "STATUS_CODE_OK"),
+		span("a", "slow", "other", "", 30, "STATUS_CODE_OK"),
+		span("a", "slow", "checkout", "other", 1, "STATUS_CODE_OK"),
+		span("a", "tie", "checkout", "", 20, "STATUS_CODE_OK"),
+		span("b", "tie", "checkout", "", 20, "STATUS_CODE_OK"),
+		// This error starts exactly at the panel end and must not affect status.
+		{Namespace: "a", TraceID: "slow", SpanID: "outside", ParentSpanID: "other", ServiceName: "other", StartUnixNanos: fixtureStart.Add(time.Hour).UnixNano(), DurationMS: 1, StatusCode: "STATUS_CODE_ERROR"},
+	}, nil)
+	e := NewExecutor(duck, 30)
+	defer e.Close()
+	req := exemplarRequest(exemplarDashboard("spans"))
+	req.Dimensions = map[string]string{"service": "checkout"}
+	for _, cached := range []bool{false, true} {
+		if cached {
+			if _, err := duck.RefreshReadCaches(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		indexed, err := e.exemplars(t.Context(), req, fixtureStart.Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(indexed.Traces) != 5 {
+			t.Fatalf("indexed: %+v", indexed)
+		}
+		wantIDs := []string{"child-error", "root-error", "slow", "tie", "tie"}
+		for i, id := range wantIDs {
+			if indexed.Traces[i].TraceID != id || (indexed.Traces[i].Status == "STATUS_CODE_ERROR") != (i < 2) {
+				t.Fatalf("display order/status: %+v", indexed)
+			}
+		}
+		if indexed.Traces[3].Namespace != "a" || indexed.Traces[4].Namespace != "b" {
+			t.Fatalf("namespace tie: %+v", indexed)
+		}
+		// An equivalent duration predicate requires the raw selection path.
+		req.Dashboard.Panels[0].Query.Where = []string{"duration_ms >= 0"}
+		raw, err := e.exemplars(t.Context(), req, fixtureStart.Add(time.Hour))
+		req.Dashboard.Panels[0].Query.Where = nil
+		if err != nil || !reflect.DeepEqual(raw, indexed) {
+			t.Fatalf("cached=%v raw=%+v indexed=%+v err=%v", cached, raw, indexed, err)
+		}
 	}
 }

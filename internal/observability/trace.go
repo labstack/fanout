@@ -14,7 +14,7 @@ import (
 const traceLogsQuery = `
 SELECT time::TIMESTAMP_NS, severity, coalesce(service, ''), body, coalesce(trace_id, ''), coalesce(span_id, '')
 FROM logs
-WHERE trace_id = ? AND time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND (? = '' OR namespace = ?)
+WHERE trace_id = ? AND time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND (NOT ? OR namespace = ?)
 ORDER BY time ASC
 LIMIT ?`
 
@@ -29,6 +29,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 	}
 	traceID, service = strings.TrimSpace(traceID), strings.TrimSpace(service)
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End, Namespace: scope.Namespace, Service: service})
+	namespace, exactNamespace := scope.Namespace, false
 	if traceID == "" {
 		candidateCtx := queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End, Namespace: scope.Namespace, Service: service, Kind: queryrows.TraceCandidateRead})
 		rows, queryErr := s.db.QueryContext(candidateCtx, queryrows.CompletedTraceQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service, 1)
@@ -36,11 +37,12 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 			return Result[TraceDetail]{}, fmt.Errorf("query recent trace: %w", queryErr)
 		}
 		if rows.Next() {
-			if err := rows.Scan(&scope.Namespace, &traceID, new(int)); err != nil {
+			if err := rows.Scan(&namespace, &traceID, new(int)); err != nil {
 				rows.Close()
 				return Result[TraceDetail]{}, fmt.Errorf("scan recent trace: %w", err)
 			}
 		}
+		exactNamespace = true
 		if err := rows.Err(); err != nil {
 			rows.Close()
 			return Result[TraceDetail]{}, fmt.Errorf("iterate recent trace: %w", err)
@@ -51,7 +53,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 	data := TraceDetail{TraceID: traceID, Services: []string{}, Spans: []TraceSpan{}, Logs: []LogEntry{}}
 	if traceID != "" {
 		storedSpans, totals, readErr := s.repository.Trace(ctx, telemetry.TraceQuery{
-			TraceID: traceID, Namespace: scope.Namespace,
+			TraceID: traceID, Namespace: namespace, ExactNamespace: exactNamespace,
 			StartNanos: scope.Start.UnixNano(), EndNanos: scope.End.UnixNano(), Limit: limit,
 		})
 		if readErr != nil {
@@ -88,7 +90,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 		data.SpanCount, data.ServiceCount = totals.Spans, totals.Services
 		data.DurationMS, data.HasError = totals.DurationMS, totals.HasError
 		data.Truncated = data.SpanCount > len(data.Spans)
-		data.Logs, err = s.traceLogsFromParquet(ctx, scope, traceID, limit)
+		data.Logs, err = s.traceLogsFromParquet(ctx, scope, traceID, namespace, exactNamespace, limit)
 		if err != nil {
 			return Result[TraceDetail]{}, err
 		}
@@ -104,8 +106,8 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 	return Result[TraceDetail]{Summary: summary, Data: data, Provenance: s.provenanceFor(scope)}, nil
 }
 
-func (s *Service) traceLogsFromParquet(ctx context.Context, scope Scope, traceID string, limit int) ([]LogEntry, error) {
-	rows, err := s.db.QueryContext(ctx, traceLogsQuery, traceID, scope.Start, scope.End, scope.Namespace, scope.Namespace, limit)
+func (s *Service) traceLogsFromParquet(ctx context.Context, scope Scope, traceID, namespace string, exactNamespace bool, limit int) ([]LogEntry, error) {
+	rows, err := s.db.QueryContext(ctx, traceLogsQuery, traceID, scope.Start, scope.End, exactNamespace || namespace != "", namespace, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query trace parquet logs: %w", err)
 	}

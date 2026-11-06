@@ -97,11 +97,13 @@ type TimeRange struct {
 }
 
 type TraceQuery struct {
-	TraceID    string
-	Namespace  string
-	StartNanos int64
-	EndNanos   int64
-	Limit      int
+	TraceID   string
+	Namespace string
+	// ExactNamespace matches Namespace exactly, including an empty namespace.
+	ExactNamespace bool
+	StartNanos     int64
+	EndNanos       int64
+	Limit          int
 }
 
 type storedBatch struct {
@@ -605,7 +607,7 @@ func readIndexedTrace(ctx context.Context, batch *storedBatch, match traceRange,
 	reader := parquet.NewGenericReader[indexedSpanRow](file)
 	defer func() { err = errors.Join(err, reader.Close(), file.Close()) }()
 	return readIndexedRange(ctx, reader, match, query.EndNanos, func(row indexedSpanRow) {
-		if row.TraceID != query.TraceID || row.StartUnixNano < query.StartNanos || row.StartUnixNano >= query.EndNanos || (query.Namespace != "" && row.Namespace != query.Namespace) {
+		if row.TraceID != query.TraceID || row.StartUnixNano < query.StartNanos || row.StartUnixNano >= query.EndNanos || ((query.ExactNamespace || query.Namespace != "") && row.Namespace != query.Namespace) {
 			return
 		}
 		accumulateTraceRow(row, totals, services)
