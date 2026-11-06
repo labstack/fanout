@@ -64,3 +64,4 @@ cover.out
 /bench
 /fanout
 /fanout-docgen
+.wrangler/

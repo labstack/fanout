@@ -1,0 +1,64 @@
+---
+title: Insights and anomalies
+description: Understand detector snapshots and the values used by alert rules.
+summary: Service changes, repeated log patterns, health scores and alert variables.
+read_when:
+  - You need to interpret an insight or detector-based alert.
+status: preview
+---
+
+## Read a snapshot
+
+`GET /api/insights` returns the latest completed detector snapshot and requires
+`telemetry:read`. It returns 503 before a snapshot is ready. MCP clients use
+`get_insights`. Neither path requires an AI provider.
+
+The detector runs once at startup and every 60 seconds. Its lookback is
+15 minutes. These are built-in detector settings, not environment options.
+Snapshots contain anomalies, repeated log patterns, derived insights, a summary,
+`generated_at`, `timeframe` and `health_score`.
+
+## What detection measures
+
+The detector checks service error-rate changes, latency degradation and span
+volume changes across all namespaces. Service checks use completed rollup
+minutes, ending before the service watermark. The baseline is the preceding
+window of equal length. Latency uses the span-weighted mean of minute p95
+values. See [rollup timing](/docs/concepts/storage#rollups-follow-durable-publication).
+
+Scores compare current values with the baseline and apply signal-specific
+variance floors and change thresholds. The z-score thresholds are 2.0 for
+error rate and latency, and 2.5 for volume. Treat a finding as a reason to
+inspect its current value, baseline and service evidence.
+
+Log detection reads the current wall-clock lookback even when the rollup
+watermark has not advanced. It groups `WARN`, `ERROR` and `FATAL` logs by body
+template, severity and service. A pattern needs at least three occurrences;
+the snapshot keeps at most 50, ordered by count. Repeated `ERROR` patterns
+with at least 20 occurrences also produce warning insights.
+
+## Health score
+
+The score starts at 100 and has a floor of zero:
+
+| Finding | Deduction |
+|---|---|
+| Absolute anomaly z-score at least 3.0 | 15 |
+| Absolute anomaly z-score at least 2.5 but below 3.0 | 10 |
+| Absolute anomaly z-score at least 2.0 but below 2.5 | 5 |
+| Each `ERROR` pattern with at least 10 occurrences | 5 |
+| Each `WARN` pattern with at least 20 occurrences | 2 |
+
+This is a summary of detected findings, not an uptime percentage.
+
+## Alert variables
+
+Alert evaluation takes `health_score` from the latest detector snapshot and
+uses the same score for every service. For each service, `z_score` is the
+signed anomaly score with the largest absolute value across that service's
+anomalies. It is zero when that service has no anomaly in the snapshot.
+If no snapshot exists, both values default to zero.
+
+Use `z_score > 2.5 || z_score < -2.5` when either direction matters. Combine these values with
+service measurements in [alert rules](/docs/guides/alerts). Detector timing
+is separate from the alert evaluation interval.

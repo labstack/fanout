@@ -10,7 +10,7 @@ import { toPlainMarkdown } from "../lib/markdown";
 // The landing page and docs home share the "index" group, listed explicitly
 // so neither is dropped from a document headed "complete documentation".
 const ROOT = "index";
-const ORDER = [ROOT, "get-started", "guides", "reference", "concepts", "privacy"];
+const ORDER = [ROOT, "get-started", "guides", "reference", "concepts", "help", "privacy"];
 
 function groupOf(id: string): string {
   if (id === "docs") return ROOT;

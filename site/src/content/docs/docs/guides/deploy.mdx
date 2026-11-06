@@ -1,0 +1,101 @@
+---
+title: Run with Compose or systemd
+description: Run a persistent Fanout instance under a process supervisor.
+summary: A Compose service and a systemd unit with mounted secrets and persistent data.
+read_when:
+  - You need Fanout to restart after an exit or host reboot.
+status: preview
+---
+
+## Run with Compose
+
+Save this as `docker-compose.yml`. Provision an auth code secret of at least
+32 characters through your secret manager. Set `AUTH_SECRET_PATH` to its mounted
+source file, readable by UID/GID 65532.
+
+```yaml
+services:
+  fanout:
+    image: ghcr.io/labstack/fanout:2026.11.0-alpha
+    container_name: fanout
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7520:7520"
+    volumes:
+      - fanout-data:/var/lib/fanout/data
+    environment:
+      FANOUT_AUTH_CODE_SECRET_FILE: /run/secrets/auth_code
+    secrets:
+      - auth_code
+    healthcheck:
+      test: ["CMD", "fanout", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      start_period: 40s
+      retries: 3
+secrets:
+  auth_code:
+    file: ${AUTH_SECRET_PATH}
+volumes:
+  fanout-data:
+```
+
+Start with `docker compose up -d`. Read the setup URL with
+`docker compose logs fanout`, then complete [first boot](/docs/get-started/first-boot).
+The image listens on `:7520` and keeps data in `/var/lib/fanout/data`.
+The port mapping above exposes it only on the host's loopback interface.
+Use [TLS](/docs/guides/tls) and a restricted network route for remote clients.
+
+The ingest token is issued during administrator setup and stored in control
+state. There is no ingest-token environment setting or `_FILE` form. Give the
+issued token to your exporters through their secret delivery mechanism; see
+[send telemetry](/docs/get-started/send-telemetry).
+
+A named volume preserves data across container replacement. Do not remove it
+when upgrading. The healthcheck marks an unhealthy container; Docker does not
+restart it solely because that check fails.
+
+## Run with systemd
+
+Install the binary as `/usr/local/bin/fanout`. Create a dedicated system user
+and group named `fanout`, with no interactive login. Store the auth secret
+at `/etc/fanout/auth_code`, readable only by root. systemd passes it to the
+service as a credential.
+
+Save this as `/etc/systemd/system/fanout.service`:
+
+```ini
+[Unit]
+Description=Fanout
+After=network.target
+
+[Service]
+Type=simple
+User=fanout
+Group=fanout
+StateDirectory=fanout
+WorkingDirectory=/var/lib/fanout
+Environment=FANOUT_ADDR=127.0.0.1:7520
+Environment=FANOUT_DATA_DIR=/var/lib/fanout/data
+LoadCredential=fanout_auth_code:/etc/fanout/auth_code
+Environment=FANOUT_AUTH_CODE_SECRET_FILE=%d/fanout_auth_code
+ExecStart=/usr/local/bin/fanout
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`StateDirectory` creates `/var/lib/fanout` for the service user. Fanout creates
+its data subdirectory. Load and start the unit:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now fanout
+sudo journalctl -u fanout
+```
+
+Use the setup URL from the journal. Restrict journal access because that URL
+is an administrator credential. Check `http://127.0.0.1:7520/readyz` after startup.
+See [hardening](/docs/guides/hardening) before exposing the listener.

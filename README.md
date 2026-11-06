@@ -21,6 +21,7 @@ client, built-in agent, MCP tools, dashboards, and alerts are preview capabiliti
 [documentation](https://fanout.run) or run it below.
 
 - OTLP ingest over gRPC and HTTP, with local Parquet storage and DuckDB analytics.
+- Explore and FanQL for querying telemetry without an AI provider.
 - An investigation agent that answers questions about your telemetry in plain language.
 - An MCP server for external agents using the same typed query tools.
 - Dashboards across traces, logs, and metrics, and alerts on service error rate, latency,
@@ -59,7 +60,7 @@ export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32)
 fanout
 ```
 
-Set `FANOUT_VERSION` to a [release tag](https://github.com/labstack/fanout/releases), such as `v2026.10.23-alpha`, to pin a release, and `FANOUT_PREFIX` to choose the installation
+Set `FANOUT_VERSION` to a [release tag](https://github.com/labstack/fanout/releases), such as `v2026.11.0-alpha`, to pin a release, and `FANOUT_PREFIX` to choose the installation
 directory. Native installs bind `127.0.0.1:7520`; set `FANOUT_ADDR=:7520` for remote access, then
 follow the same first-boot setup.
 
@@ -211,7 +212,7 @@ generated assets, hooks, and project layout.
 ## Releases
 
 Versions are CalVer — `vYYYY.M.N[-alpha|-beta|-rc]`, numbered from 0 within each month across all
-maturity suffixes. Fanout is alpha (for example, `v2026.10.23-alpha`); GA has no suffix.
+maturity suffixes. Fanout is alpha (for example, `v2026.11.0-alpha`); GA has no suffix.
 Container tags omit the leading `v`, and every release moves `latest`. Tagged releases publish
 identical manifests to Docker Hub (`labstack/fanout`) and GHCR (`ghcr.io/labstack/fanout`); GHCR is
 canonical and also carries development images.
@@ -219,9 +220,9 @@ canonical and also carries development images.
 | Image tag | Points at |
 | --- | --- |
 | `labstack/fanout:latest` | the newest release, mirrored on Docker Hub |
-| `labstack/fanout:2026.10.23-alpha` | that exact release, mirrored on Docker Hub |
+| `labstack/fanout:2026.11.0-alpha` | that exact release, mirrored on Docker Hub |
 | `ghcr.io/labstack/fanout:latest` | the newest release |
-| `ghcr.io/labstack/fanout:2026.10.23-alpha` | that exact release |
+| `ghcr.io/labstack/fanout:2026.11.0-alpha` | that exact release |
 | `ghcr.io/labstack/fanout:main` | the tip of `main` |
 | `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
 

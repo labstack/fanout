@@ -12,21 +12,33 @@ The alert engine runs inside the binary and is on by default. It evaluates
 persisted rules every `FANOUT_ALERTS_EVALUATION_INTERVAL` (30s) against service
 rollups, and delivers by webhook.
 
-Manage rules through the HTTP API using an operator or administrator session.
-The browser client has no alert-rule editor.
+## Create and manage a rule
 
-| Endpoint | Does |
-|---|---|
-| `GET /api/alerting/alerts` | Current alert state |
-| `GET /api/alerting/summary` | Counts by state |
-| `GET /api/alerting/rules` | List rules |
-| `POST /api/alerting/rules` | Create and compile a rule |
-| `PUT /api/alerting/rules/:id` | Replace a rule; recompile it when enabled |
-| `POST /api/alerting/rules/:id/test` | Evaluate a saved expression against live data without changing alert state or delivering a webhook |
-| `DELETE /api/alerting/rules/:id` | Delete the rule and its alerts |
+Open **Alerts** in the sidebar, then choose **New rule**. Enter a name and
+expression, plus an optional description and webhook URL. Without a webhook
+URL, the rule records alerts but delivers nothing. Leave **Service** empty to
+evaluate every service, or select one service. Choose **Start from a template**
+for an example expression, then set the timers and save.
 
-Reading takes `telemetry:read`; creating and replacing takes `alerts:manage`,
-which starts at the `operator` role. See [roles](/docs/reference/roles).
+The new-rule form starts enabled, with **Hold for (s)** 60, **Cooldown (s)**
+300 and **Repeat every (s)** 3600. **Notify when resolved** starts off. The name,
+description, service, expression and webhook fields start empty.
+
+Use the **Enabled** toggle to pause or resume a rule. The rule's actions menu
+has **Edit**, **Test against current data** and **Delete**. Testing evaluates
+the saved expression without changing alert state or sending a webhook.
+Deleting removes the rule and its alert history.
+
+Choose **Open in Explore** to chart a watched measure from raw telemetry.
+Its values can differ from the rule's rollups. Explore shows error rate as a
+percent: `0.05` in a rule is `5` there.
+
+Read current states and delivery results under **History**.
+`FANOUT_ALERTS_HISTORY_DAYS` sets resolved-history retention in days (default 7).
+
+Viewers can read rules and history. Creating, editing, toggling, testing and
+deleting require an operator or administrator session; see
+[roles](/docs/reference/roles).
 
 ## What a rule contains
 
@@ -35,7 +47,8 @@ An expression, an optional service to scope it to, timing, and delivery:
 | Field | Means |
 |---|---|
 | `name` | Required rule name |
-| `enabled` | Set `true` to evaluate the rule; omitted means disabled |
+| `description` | Optional text explaining the rule |
+| `enabled` | Whether to evaluate the rule |
 | `expression` | The condition, in [CEL](https://cel.dev) |
 | `service` | Evaluate only for this service; omit for all |
 | `for_seconds` | How long the condition must hold before firing |
@@ -82,7 +95,8 @@ what stops a metric hovering at the threshold from delivering repeatedly.
 
 Each alert records its last delivery status and timestamp in `GET /api/alerting/alerts`.
 Setting `repeat_interval_s` to zero disables repeat delivery. Disabling a rule
-removes its pending and firing alerts.
+removes pending alerts and resolves firing alerts, sending a resolve webhook
+when `notify_on_resolve` is set.
 
 :::caution[The namespace field on a rule is not applied]
 A rule stores `namespace`, but evaluation combines service rollups across
@@ -97,3 +111,58 @@ publication; the evaluation interval and `for_seconds` add further delay.
 [How storage works](/docs/concepts/storage#rollups-follow-durable-publication)
 explains the publication horizon and watermark. A shorter evaluation interval
 does not increase the rollups' time resolution.
+
+## Webhook payload
+
+Leave `webhook_template` empty to send this body:
+
+```text
+{"rule":"{{.Rule.Name}}","service":"{{.Alert.Service}}","state":"{{.Alert.State}}","event":"{{.Event}}","value":{{.Alert.Value}}}
+```
+
+Templates use Go `text/template` and exported field names, with this context:
+
+| Value | Fields |
+|---|---|
+| `.Rule` | `ID`, `Name`, `Description`, `Enabled`, `Service`, `Namespace`, `Expression`, `ForSeconds`, `CooldownS`, `RepeatIntervalS`, `WebhookURL`, `WebhookHeaders`, `WebhookTemplate`, `NotifyOnResolve`, `CreatedAt`, `UpdatedAt` |
+| `.Alert` | `ID`, `RuleID`, `Service`, `State`, `Value`, `FiredAt`, `ResolvedAt`, `RepeatedAt`, `LastEvaluatedAt`, `LastDeliveryStatus`, `LastDeliveryAt`, `CreatedAt` |
+| `.Event` | `firing`, `reminder` or `resolved` |
+| `.Env` | `ErrorRate`, `P50`, `P95`, `Throughput`, `LogCount`, `ZScore`, `HealthScore`, `ErrorRateDelta`, `P95Delta`, `ThroughputDelta`, `Service` |
+| `.Time` | Delivery context time as a Go `time.Time` |
+
+`.Alert.Value` is the first variable the expression reads, at the last
+evaluation. Timestamp fields on `.Rule` and `.Alert` are strings.
+
+For a Slack incoming webhook, set its URL and use this template:
+
+```text
+{"text":{{printf "%q" (printf "%s: %s on %s (value %g)" .Event .Rule.Name .Alert.Service .Alert.Value)}}}
+```
+
+This uses the built-in `printf` function; no JSON template helper is registered.
+`text/template` does not automatically escape values for JSON. With this example,
+use names without control characters other than tabs and line breaks.
+
+Fanout sends a POST with `Content-Type: application/json` unless custom headers
+override it. Each attempt has a 10-second total timeout and a 5-second response
+header timeout. Delivery makes up to three attempts, waiting 2 then 4 seconds
+before retries; 4xx responses are not retried.
+
+## Use the HTTP API
+
+The browser uses these routes. Reads require `telemetry:read`; mutations and
+tests require `alerts:manage`.
+
+| Endpoint | Does |
+|---|---|
+| `GET /api/alerting/alerts` | Current alert state |
+| `GET /api/alerting/summary` | Counts by state |
+| `GET /api/alerting/rules` | List rules |
+| `POST /api/alerting/rules` | Create and compile a rule |
+| `PUT /api/alerting/rules/:id` | Replace a rule and check any nonempty expression |
+| `POST /api/alerting/rules/:id/test` | Evaluate a saved expression against live data without changing alert state or delivering a webhook |
+| `DELETE /api/alerting/rules/:id` | Delete the rule and its alerts |
+
+When creating through HTTP, omitted booleans are false, timers are zero and
+optional strings are empty. In particular, omitted `enabled` means disabled.
+These API defaults differ from the new-rule form above.
