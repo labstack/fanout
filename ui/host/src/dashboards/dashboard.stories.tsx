@@ -20,3 +20,8 @@ export const Ready: Story = { play: async context => {
 export const Loading: Story = { parameters: { scenario: { dashboard: "loading" } }, play: async ({ canvas }) => { await expect(await canvas.findByText("Loading your dashboard…")).toBeVisible(); } };
 export const Empty: Story = { parameters: { scenario: { dashboard: "empty" } }, play: async ({ canvas }) => { await expect(await canvas.findByRole("heading", { name: "Commerce health" })).toBeVisible(); } };
 export const Error: Story = { parameters: { scenario: { dashboard: "error" } }, play: async ({ canvas }) => { await expect(await canvas.findByRole("heading", { name: "This dashboard isn't here" })).toBeVisible(); } };
+
+export const InvalidPanel: Story = { parameters: { scenario: { dashboard: "invalid" } }, play: async ({ canvas }) => {
+  await expect(await canvas.findByText("Unknown field: request_total")).toBeVisible();
+  await expect(await canvas.findByRole("region", { name: "Service health: degraded; 4 services" })).toBeVisible();
+} };

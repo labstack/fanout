@@ -71,7 +71,7 @@ const frames: Record<string, Frame> = {
 
 export const results: PanelResult[] = panels.map(panel => ({ id: panel.id, status: "ok", frame: frames[panel.id], elapsed_ms: 24, interval: "5m", from_ms: storyNow - 3600000, to_ms: storyNow }));
 export const health: PanelFragment = { view: { kind: "preset", key: "a".repeat(64) }, dashboard: { version: 1, name: "System health", time: { range: "1h", refresh: "off" }, panels: [panels[2]] }, results: [results[2]] };
-export const healthContent: MCPAppContent = { resource_uri: "ui://fanout/panels.html", tool_name: "get_observability_overview", tool_input: { window: "1h" }, tool_result: health, is_error: false };
+export const healthContent: MCPAppContent = { resource_uri: "ui://fanout/panels.html", tool_name: "get_overview", tool_input: { window: "1h" }, tool_result: health, is_error: false };
 // Saved responses carry the server's packed coordinates, not only draft widths.
 const dashboardGrids = [
   { x: 0, y: 0, w: 4, h: 6 }, { x: 4, y: 0, w: 8, h: 6 },
@@ -99,3 +99,28 @@ export const savedMessages: Message[] = [
   { id: "saved-answer", role: "assistant", content: "Your **Commerce health** dashboard is saved. It tracks requests, p95 latency, and service health for checkout, cart, accounting, and payment." },
 ];
 export const savedReceipt = receiptForTurn(savedMessages, userMessage.id)!;
+
+// Per-panel validation leaves valid siblings executable (PR #425).
+export const invalidResult: PanelResult = {
+  id: "requests", status: "invalid", elapsed_ms: 0,
+  error: "Unknown field: request_total",
+  problems: [{ path: "panels[0].query.measures[0]", message: "Unknown field: request_total", hint: "Use count() to count spans." }],
+};
+export const mixedPreviewMessages: Message[] = [
+  { ...userMessage, content: dashboardQuestion },
+  call("mixed-preview", "preview_panels", { panels: dashboard.spec.panels }),
+  toolResult("mixed-preview", { elapsed_ms: 142, panels: saveReceipt.save_check.panels.map(panel => panel.id === invalidResult.id ? { ...invalidResult, rows: 0 } : panel) }),
+];
+export const invalidReceipt = receiptForTurn(mixedPreviewMessages, userMessage.id)!;
+export const correctedReceipt = receiptForTurn([...mixedPreviewMessages, ...savedMessages.slice(1)], userMessage.id)!;
+
+export const exploreQuery = "spans | count() by service";
+export const exploreTypo = "spans | countt() by service";
+// A visibly fictional token, never usable as an operator credential.
+export const ingestToken = "foi_catalog_example_not_a_real_token";
+
+export const savedInvalidReceipt = receiptForTurn([
+  ...mixedPreviewMessages,
+  call("save-invalid", "create_dashboard", { dashboard: dashboard.spec }),
+  toolResult("save-invalid", { dashboard, receipt: { ...saveReceipt, save_check: { ...saveReceipt.save_check, panels: saveReceipt.save_check.panels.map(panel => panel.id === invalidResult.id ? { ...invalidResult, rows: 0 } : panel) } } }),
+], userMessage.id)!;

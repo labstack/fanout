@@ -1,13 +1,15 @@
 import type { Message } from "@ag-ui/client";
 import type { Status, Viewer } from "../auth";
 import type { DashboardSummary } from "../dashboards/api";
-import { answer, answeredMessages, dashboard, dashboardSummary, health, healthContent, results, savedMessages, services } from "./fixtures";
+import { answer, answeredMessages, dashboard, dashboardSummary, health, healthContent, results, savedMessages, services, invalidResult, exploreQuery, exploreTypo, ingestToken } from "./fixtures";
 
 export type Scenario = {
   signedOut?: boolean;
+  chatDisabled?: boolean;
   setup?: boolean;
   empty?: boolean;
-  dashboard?: "loading" | "empty" | "error";
+  dashboard?: "loading" | "empty" | "error" | "invalid";
+  explore?: "invalid";
   chat?: "answered" | "saved" | "error";
   run?: "question" | "dashboard" | "running" | "error";
   pace?: "fast" | "recording";
@@ -67,7 +69,7 @@ export function makeService(scenario: Scenario = {}, staticFetch: typeof fetch =
         tool(item.id, item.function.name, JSON.parse(item.function.arguments), JSON.parse(String(result.content)));
       }
     } else {
-      events.push({ type: "TOOL_CALL_START", toolCallId: "overview", toolCallName: "get_observability_overview", parentMessageId: "assistant-overview" });
+      events.push({ type: "TOOL_CALL_START", toolCallId: "overview", toolCallName: "get_overview", parentMessageId: "assistant-overview" });
       if (scenario.run !== "running") events.push(
         { type: "TOOL_CALL_ARGS", toolCallId: "overview", delta: '{"window":"1h"}' },
         { type: "TOOL_CALL_END", toolCallId: "overview" },
@@ -114,7 +116,10 @@ export function makeService(scenario: Scenario = {}, staticFetch: typeof fetch =
     const path = url.pathname;
     requests.push(`${method} ${path}`);
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    if (path === "/api/auth/status" && method === "GET") return json({ ...runtime, setup_required: Boolean(scenario.setup) });
+    const panelResponse = (rows: typeof results) => new Headers(init?.headers).get("accept") === "application/x-ndjson"
+      ? new Response(rows.map(row => JSON.stringify(row)).join("\n") + "\n", { headers: { "content-type": "application/x-ndjson" } })
+      : json({ results: rows });
+    if (path === "/api/auth/status" && method === "GET") return json({ ...runtime, setup_required: Boolean(scenario.setup), agent_available: !scenario.chatDisabled });
     if (path === "/api/auth/me" && method === "GET") return scenario.signedOut || scenario.setup ? json({}, 401) : json(viewer);
     if (path === "/api/agent/threads" && method === "GET") {
       const query = (url.searchParams.get("q") ?? "").toLowerCase();
@@ -131,11 +136,35 @@ export function makeService(scenario: Scenario = {}, staticFetch: typeof fetch =
       if (scenario.dashboard === "error") return json({ code: "not_found", message: "Synthetic dashboard unavailable" }, 404);
       return json(scenario.dashboard === "empty" ? { ...dashboard, spec: { ...dashboard.spec, panels: [] } } : dashboard);
     }
-    if (path === "/api/panels/query" && method === "POST") return json({ results: results.filter(result => (!body.panels || body.panels.includes(result.id)) && body.dashboard.panels.some((panel: { id: string }) => panel.id === result.id)) });
-    if (path === "/api/annotations" && method === "POST") return json({ deploys: [], anomalies: [] });
+    if (path === "/api/fanql/parse" && method === "POST") {
+      if (body.text === exploreTypo) return json({ code: "invalid_fanql", message: "The query has problems", problems: [{ path: "text", message: "Unknown measure: countt", span: { start: 8, end: 14 }, fix_its: [{ label: "count", span: { start: 8, end: 14 }, text: "count" }] }] }, 400);
+      // Only recorded catalog inputs are accepted; this is no alternate parser.
+      if (body.source === "logs" || body.source === "spans") return json({ query: { from: body.source, limit: 1000 }, canonical: body.text, notices: [], viz: { compatible: [{ viz: body.viz, requires: [] }], edits: [] } });
+      if (body.text !== exploreQuery) return fail(`Unrecorded FanQL: ${body.text}`);
+      return json({ query: { from: "spans", measures: ["count()"], by: ["service"] }, canonical: exploreQuery, notices: [], viz: { compatible: [{ viz: "bar", requires: [] }, { viz: "table", requires: [] }], edits: [] } });
+    }
+    if (path === "/api/fanql/format" && method === "POST") {
+      if (JSON.stringify(body.query) !== JSON.stringify({ from: "spans", measures: ["count()"], by: ["service"] })) return fail("Unrecorded FanQL format");
+      return json({ text: exploreQuery, exactness: "exact", editable: true, requires: [], notices: [], where: [], measures: ["count()"] });
+    }
+    if (path === "/api/fanql/complete" && method === "POST") return json({ replace: { start: body.cursor, end: body.cursor }, items: [], schema: { window: "1h", sampled: true, warm: true, recent: true } });
+    if (path === "/api/queries/run" && method === "POST") {
+      const requested = body.dashboard.panels as { id: string; viz: string }[];
+      if (requested.length === 1 && ["explore", "search"].includes(requested[0].id)) {
+        const panel = requested[0];
+        if (scenario.explore === "invalid") return panelResponse([{ ...invalidResult, id: panel.id }]);
+        const fixture = results.find(result => result.id === (panel.viz === "logs" ? "logs" : panel.viz === "traces" ? "traces" : "traffic"))!;
+        return panelResponse([{ ...fixture, id: panel.id }]);
+      }
+      return panelResponse(results.filter(result => (!body.panels || body.panels.includes(result.id)) && requested.some(panel => panel.id === result.id)).map(result => scenario.dashboard === "invalid" && result.id === invalidResult.id ? invalidResult : result));
+    }
+    if (path === "/api/alerting/rules" && method === "GET") return json({ rules: scenario.empty ? [] : [{ id: "checkout-errors", name: "Checkout errors", service: "checkout", expression: "error_rate > 0.01", enabled: true, for_seconds: 60, cooldown_s: 300, repeat_interval_s: 3600, notify_on_resolve: true, created_at: dashboard.created_at, updated_at: dashboard.updated_at }] });
+    if (path === "/api/alerting/alerts" && method === "GET") return json({ alerts: scenario.empty ? [] : [{ id: "checkout-firing", rule_id: "checkout-errors", service: "checkout", state: "firing", value: 0.0124, fired_at: dashboard.created_at, last_evaluated_at: dashboard.updated_at, created_at: dashboard.created_at }] });
+    if (path === "/api/annotations/query" && method === "POST") return json({ deploys: [], anomalies: [] });
+    if (path === "/api/settings/ingest/token/rotate" && method === "POST") return json({ token_required: true, suggested_endpoint: "telemetry.example.test:443", tls_configured: true, header_name: "authorization", ingest_token: ingestToken });
     if (path === "/api/settings/ingest" && method === "GET") return json({ token_required: true, suggested_endpoint: "telemetry.example.test:443", tls_configured: true, header_name: "authorization" });
     if (path === "/api/auth/oauth/connections" && method === "GET") return json({ connections: [{ client_id: "local-agent", client_name: "Operations assistant", connected_at: dashboard.created_at }] });
-    if (path === "/api/telemetry/schema" && method === "GET") return json({ services: services.map(value => ({ value, count: 12000 })), signals: ["spans", "logs", "metrics"], tables: [] });
+    if (path === "/api/telemetry/schema" && method === "GET") return json({ services: services.map(value => ({ value, count: 12000 })), signals: { spans: { columns: [{ name: "service", type: "string" }, { name: "duration_ms", type: "number" }] }, logs: { columns: [{ name: "body", type: "string" }, { name: "severity", type: "string" }] }, metrics: { columns: [{ name: "name", type: "string" }] } }, sql_relations: {}, measures: ["count"], buckets: ["auto", "5m"] });
     if (path === "/api/mcp") {
       if (method === "GET") return new Response(null, { status: 405 });
       if (method === "DELETE") return new Response(null, { status: 204 });

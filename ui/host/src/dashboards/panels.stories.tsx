@@ -1,7 +1,7 @@
 import { Box } from "@mantine/core";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn } from "storybook/test";
-import { panels, results } from "../catalog/fixtures";
+import { panels, results, invalidResult } from "../catalog/fixtures";
 import { PanelCard } from "./panel-card";
 
 import { healthRules, loadingRules } from "../catalog/accessibility";
@@ -39,4 +39,11 @@ export const Error: Story = { args: { result: { id: "requests", status: "error",
 export const Data: Story = { play: async ({ canvas, userEvent }) => {
   await userEvent.click(canvas.getByRole("button", { name: /^Data$/ }));
   await expect(await canvas.findByRole("table")).toBeVisible();
+} };
+
+export const Invalid: Story = { args: { result: invalidResult }, play: async ({ canvas, userEvent, args }) => {
+  await expect(canvas.getByText("Unknown field: request_total")).toBeVisible();
+  await expect(canvas.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  await userEvent.click(canvas.getByRole("button", { name: /^Data$/ }));
+  await expect(args.onRetry).not.toHaveBeenCalled();
 } };

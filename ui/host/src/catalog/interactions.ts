@@ -34,7 +34,7 @@ export async function dashboardInRail({ canvas, step }: Context, question: strin
     const rail = within(await canvas.findByRole("navigation", { name: "Navigation" }));
     await expect(await rail.findByRole("link", { name: /^Commerce health/ })).toBeVisible();
     await expect(await rail.findByRole("link", { name: `Built from: ${question}` })).toBeVisible();
-    await expect(rail.queryByRole("button", { name: "New dashboard" })).not.toBeInTheDocument();
+    await expect(rail.getByRole("button", { name: "New dashboard" })).toBeVisible();
   });
 }
 

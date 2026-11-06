@@ -305,7 +305,12 @@ and 1024×768 using the toolbar.
   `vitest.config.ts` owns only the catalog.
 
 `Pages` uses the shipping route tree, shell, auth gate, query client, and screens
-with memory history. The dashboard index opens the default dashboard when one
+with memory history. Explore, Logs, Traces, and Alerts have full-page stories
+in the same light/dark matrix. Explore includes FanQL fix-its and per-panel
+validation diagnostics in both editors. Dashboard and receipt states show invalid
+panels alongside successful siblings and a corrected save. Settings includes
+chat-disabled and token-rotation states with a fictional `foi_` token.
+The dashboard index opens the default dashboard when one
 exists; an empty workspace shows its creation prompt. `Flows/Ask a question`
 and `Flows/Ask chat for a dashboard` contain independently reproducible stages
 and complete interactions through the real SSE client. Select the interactive
@@ -341,11 +346,14 @@ the shipping shell and dashboard/settings screens nest main landmarks; the
 panel loader labels a span without a role; and the light-theme degraded-health
 label measures 3.27:1 on white. The last two exceptions target only those elements;
 all other contrast and ARIA checks remain active. Settings also exempts only
-the existing hover-underlined Sending telemetry link from `link-in-text-block`
+the existing hover-underlined Sending telemetry and MCP connection links from `link-in-text-block`
 until its resting-state link treatment is fixed. The selected chat timestamp
 also has a targeted contrast exception (3.9:1 on its light selection background). These exceptions preserve the
 shipping UI within this catalog-only change and should be removed when the
-product markup and semantic ink are corrected.
+product markup and semantic ink are corrected. Alerts exempts only its blank
+actions-column header from `empty-table-header`; Logs exempts only expandable
+table rows from `aria-conditional-attr` because they use `aria-expanded` without
+a treegrid. Other table and ARIA checks stay active.
 
 ## FanQL performance checks
 

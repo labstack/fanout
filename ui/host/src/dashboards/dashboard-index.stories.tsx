@@ -12,3 +12,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const NoDashboards: Story = { parameters: { scenario: { empty: true } }, play: async ({ canvas }) => { await expect(await canvas.findByRole("heading", { name: "No dashboards yet" })).toBeVisible(); } };
 export const OpensDefault: Story = { play: async ({ canvas }) => { await expect(await canvas.findByRole("region", { name: "Service health: degraded; 4 services" })).toBeVisible(); } };
+
+export const RootRedirect: Story = { args: { path: "/" }, play: async ({ canvas }) => {
+  await expect(await canvas.findByRole("heading", { name: "Commerce health" })).toBeVisible();
+} };
