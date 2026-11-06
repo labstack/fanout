@@ -381,7 +381,6 @@ func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Muta
 				}
 				r := matches[0]
 				if r.Status == query.StatusInvalid {
-					complete = false
 					check.Panels[i] = savedPanelCheck{ID: r.ID, Status: r.Status, Problems: query.PresentProblems(r.Problems), Error: query.PresentMessage(r.Error)}
 					out.Warnings = append(out.Warnings, fmt.Sprintf("%s is invalid: %s", r.ID, check.Panels[i].Error))
 					continue

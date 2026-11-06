@@ -165,7 +165,7 @@ func TestSaveReceiptRetainsInvalidPanelDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	check := out.Receipt.SaveCheck
-	if check.Checked || check.Panels[0].Status != query.StatusInvalid || len(check.Panels[0].Problems) != 1 || check.Panels[0].Problems[0].Path != problems[0].Path || check.Panels[0].ElapsedMS != nil || !strings.Contains(check.Panels[0].Error, "http_route") {
+	if !check.Checked || check.Reason != "" || check.Panels[0].Status != query.StatusInvalid || len(check.Panels[0].Problems) != 1 || check.Panels[0].Problems[0].Path != problems[0].Path || check.Panels[0].ElapsedMS != nil || !strings.Contains(check.Panels[0].Error, "http_route") {
 		t.Fatalf("save check: %+v", check)
 	}
 	if len(out.Warnings) != 1 || !strings.Contains(out.Warnings[0], "http_route") {
