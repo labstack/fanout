@@ -1,12 +1,11 @@
 package auth
 
 import (
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/base64"
-	"fmt"
 	"sync"
 	"time"
+
+	"github.com/labstack/fanout/internal/secret"
 )
 
 const SetupTTL = time.Hour
@@ -47,7 +46,7 @@ func NewSetup() *Setup {
 }
 
 func (s *Setup) Rotate() (string, time.Time, error) {
-	token, err := generateSetupToken()
+	token, err := secret.NewSecret()
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -74,7 +73,7 @@ func (s *Setup) Verify(token string) SetupStatus {
 	if time.Now().UTC().After(expires) {
 		return SetupStatusExpired
 	}
-	if subtle.ConstantTimeCompare([]byte(token), []byte(current)) != 1 {
+	if !secret.ValidSecret(token, "") || subtle.ConstantTimeCompare([]byte(token), []byte(current)) != 1 {
 		return SetupStatusWrong
 	}
 	return SetupStatusOK
@@ -85,17 +84,4 @@ func (s *Setup) Clear() {
 	s.token = ""
 	s.expires = time.Time{}
 	s.mu.Unlock()
-}
-
-// setupTokenBytes is the entropy floor for a credential that creates an
-// administrator. The token is delivered inside the setup URL rather than typed,
-// so length costs nothing in usability.
-const setupTokenBytes = 16
-
-func generateSetupToken() (string, error) {
-	buf := make([]byte, setupTokenBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("generate setup token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
 }

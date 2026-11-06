@@ -672,7 +672,7 @@ func TestSetupLifecycleAndIngestToken(t *testing.T) {
 	if body["access_token"] != "" {
 		t.Fatal("legacy access token must not be returned")
 	}
-	if !strings.HasPrefix(body["ingest_token"], "fo_") {
+	if !strings.HasPrefix(body["ingest_token"], "foi_") {
 		t.Fatalf("ingest token = %q", body["ingest_token"])
 	}
 	if body["ingest_header_name"] != "Authorization" {

@@ -2,9 +2,11 @@ package settings
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/secret"
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -22,7 +24,7 @@ func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
 
 func TestSetIngest_RoundTripsTokenHash(t *testing.T) {
 	store := newTestStore(t)
-	want := Ingest{TokenHash: HashIngestToken("fo_test")}
+	want := Ingest{TokenHash: HashIngestToken("foi_test")}
 
 	if err := store.SetIngest(context.Background(), want); err != nil {
 		t.Fatalf("SetIngest: %v", err)
@@ -46,7 +48,7 @@ func TestSetIngestWithAuditSurvivesRequestCancellation(t *testing.T) {
 	store := NewStore(sqlite.DB)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	want := Ingest{TokenHash: HashIngestToken("fo_detached")}
+	want := Ingest{TokenHash: HashIngestToken("foi_detached")}
 	if err := store.SetIngestWithAudit(ctx, want, auth.NewAuditStore(sqlite.DB), auth.AuditEvent{
 		EventType: "ingest_key.rotated", Outcome: "success", TargetType: "ingest", TargetID: "default",
 	}); err != nil {
@@ -70,13 +72,13 @@ func TestGenerateAndCheckIngestToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateIngestToken: %v", err)
 	}
-	if token == "" || hash == "" {
+	if !secret.ValidSecret(token, "foi_") || len(hash) != 64 {
 		t.Fatal("token or hash is empty")
 	}
 	if !CheckIngestToken(token, hash) {
 		t.Fatal("CheckIngestToken returned false for the generated token")
 	}
-	if CheckIngestToken("fo_other", hash) {
+	if CheckIngestToken("foi_other", hash) {
 		t.Fatal("CheckIngestToken returned true for the wrong token")
 	}
 }
@@ -90,4 +92,11 @@ func newTestStore(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { sqlite.Close() })
 	return NewStore(sqlite.DB)
+}
+
+func TestIngestRejectsRetiredTokenEvenWithMatchingDigest(t *testing.T) {
+	token := "fo_" + strings.Repeat("a", 48)
+	if CheckIngestToken(token, HashIngestToken(token)) {
+		t.Fatal("retired ingest token accepted")
+	}
 }

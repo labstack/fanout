@@ -125,7 +125,7 @@ URLs are unchanged: `/chat`, `/chat/$threadId`, `/dashboards`, `/dashboards/$das
 - Code step replaces the `TextInput` with Mantine `PinInput`: `length={6}`, `type="number"`, `oneTimeCode`, autofocus, `aria-label="Verification code"`. When six digits are entered the form submits itself. A failed verify clears the input, shows the server message in the existing `Alert`, and refocuses.
 - Under the input: "Sent to <email> · Change email" (returns to the email step and clears the code), a "Resend code" `Button variant="subtle"` with a 30-second client cooldown that shows "Resend in 12s", and the hint "Codes expire in 5 minutes" (the server TTL in `internal/auth/code.go`). Server rate-limit responses from `/api/auth/start` are shown verbatim in the alert.
 - Headings on every auth surface: 28px at base, 32px from `sm`. Copy: "Sign in" (no self-signup), "Sign in or create an account" (self-signup) stays but at the smaller size, "Create the first admin", "Save your ingest token".
-- Setup success: the copy button copies the full header line (`Authorization: Bearer fo_…`) and the button label becomes "Copy header". A second, smaller "Copy token only" link copies the bare token.
+- Setup success: the copy button copies the full header line (`Authorization: Bearer foi_…`) and the button label becomes "Copy header". A second, smaller "Copy token only" link copies the bare token.
 
 ## 5. Defects fixed as part of the work
 

@@ -122,7 +122,7 @@ describe("connect telemetry", () => {
   });
 
   it("shows the new token once after rotating", async () => {
-    fetchMock.mockImplementation(async (_url, init) => json((init as RequestInit | undefined)?.method === "POST" ? { ...connection, ingest_token: "fo_newtoken" } : connection));
+    fetchMock.mockImplementation(async (_url, init) => json((init as RequestInit | undefined)?.method === "POST" ? { ...connection, ingest_token: `foi_${"A".repeat(43)}` } : connection));
     const root = await mount();
     await vi.waitFor(() => expect(document.body.textContent).toContain("Rotate token"));
     const open = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Rotate token");
@@ -130,7 +130,7 @@ describe("connect telemetry", () => {
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
     const confirm = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent?.trim() === "Rotate token");
     await act(async () => confirm?.click());
-    await vi.waitFor(() => expect(document.body.textContent).toContain("fo_newtoken"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain(`foi_${"A".repeat(43)}`));
     expect(document.body.textContent).toContain("Fanout shows this once");
     await act(async () => root.unmount());
   });
@@ -176,7 +176,7 @@ describe("connect telemetry", () => {
 
   it("stops offering to issue a token once one has been issued", async () => {
     fetchMock.mockImplementation(async (_url, init) => json((init as RequestInit | undefined)?.method === "POST"
-      ? { ...connection, token_required: true, ingest_token: "fo_firsttoken" }
+      ? { ...connection, token_required: true, ingest_token: `foi_${"B".repeat(43)}` }
       : { ...connection, token_required: false }));
     const root = await mount();
     await vi.waitFor(() => expect(document.body.textContent).toContain("rejecting telemetry"));
@@ -184,15 +184,15 @@ describe("connect telemetry", () => {
     await act(async () => open?.click());
     const confirm = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent?.trim() === "Issue token");
     await act(async () => confirm?.click());
-    await vi.waitFor(() => expect(document.body.textContent).toContain("fo_firsttoken"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain(`foi_${"B".repeat(43)}`));
     // The page has changed the fact it describes: leaving the old copy up
     // invites the admin to rotate away the token they were just handed.
     expect(document.body.textContent).not.toContain("rejecting telemetry");
     const done = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Done");
     await act(async () => done?.click());
-    expect(document.body.textContent).not.toContain("fo_firsttoken");
+    expect(document.body.textContent).not.toContain(`foi_${"B".repeat(43)}`);
     // "Shown once" has to be true of the cache as well as the screen.
-    expect(JSON.stringify(client.getMutationCache().getAll().map((mutation) => mutation.state.data))).not.toContain("fo_firsttoken");
+    expect(JSON.stringify(client.getMutationCache().getAll().map((mutation) => mutation.state.data))).not.toContain(`foi_${"B".repeat(43)}`);
     expect(document.body.textContent).toContain("Rotate when a token may have been exposed");
     await act(async () => root.unmount());
   });

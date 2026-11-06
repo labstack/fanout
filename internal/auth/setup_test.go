@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/base64"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -10,7 +11,7 @@ import (
 
 // The setup credential is delivered inside a URL, so it is URL-safe and
 // unpunctuated rather than grouped for typing.
-var tokenShape = regexp.MustCompile(`^[A-Za-z0-9_-]{22,}$`)
+var tokenShape = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 func TestSetupVerifyAcceptsFreshToken(t *testing.T) {
 	s := NewSetup()
@@ -113,7 +114,7 @@ func TestSetupConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-func TestSetupTokenCarriesAtLeast128BitsOfEntropy(t *testing.T) {
+func TestSetupTokenCarries256BitsOfEntropy(t *testing.T) {
 	s := NewSetup()
 	token, _, err := s.Rotate()
 	if err != nil {
@@ -123,7 +124,16 @@ func TestSetupTokenCarriesAtLeast128BitsOfEntropy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setup token %q is not raw base64url: %v", token, err)
 	}
-	if len(decoded) < 16 {
-		t.Fatalf("setup token carries %d bits, want at least 128: a credential that creates an administrator needs a conservative entropy floor", len(decoded)*8)
+	if len(decoded) != 32 {
+		t.Fatalf("setup token carries %d bits, want 256", len(decoded)*8)
+	}
+}
+
+func TestSetupRejectsMatchingMalformedToken(t *testing.T) {
+	for _, token := range []string{strings.Repeat("a", 22), strings.Repeat("!", 43)} {
+		setup := &Setup{token: token, expires: time.Now().Add(time.Minute)}
+		if status := setup.Verify(token); status != SetupStatusWrong {
+			t.Fatalf("malformed setup token returned %v", status)
+		}
 	}
 }

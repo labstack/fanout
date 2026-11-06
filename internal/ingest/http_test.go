@@ -131,7 +131,7 @@ func TestHTTPIngestAuthentication(t *testing.T) {
 	})
 	t.Run("wrong token", func(t *testing.T) {
 		f := newHTTPIngestFixture(t, true)
-		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), "fo_wrong", http.StatusUnauthorized)
+		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), "foi_wrong", http.StatusUnauthorized)
 	})
 	t.Run("legacy Fanout header", func(t *testing.T) {
 		f := newHTTPIngestFixture(t, true)

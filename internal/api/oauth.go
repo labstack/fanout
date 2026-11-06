@@ -25,6 +25,7 @@ import (
 	appauth "github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/brand"
 	appmcp "github.com/labstack/fanout/internal/mcp"
+	"github.com/labstack/fanout/internal/secret"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
@@ -554,6 +555,9 @@ func (h *MCPAuthorization) Token(c *echo.Context) error {
 		return oauthJSONError(c, http.StatusBadRequest, "invalid_request", "invalid token request")
 	}
 	grantType := c.Request().PostForm.Get("grant_type")
+	if grantType == "authorization_code" && !secret.ValidSecret(c.Request().PostForm.Get("code"), "foc_") || grantType == "refresh_token" && !secret.ValidSecret(c.Request().PostForm.Get("refresh_token"), "for_") {
+		return oauthJSONError(c, http.StatusBadRequest, "invalid_grant", "grant is invalid or expired")
+	}
 	clientID := c.Request().PostForm.Get("client_id")
 	if clientID == "" {
 		return oauthJSONError(c, http.StatusUnauthorized, "invalid_client", "client_id is required")

@@ -106,7 +106,7 @@ Work down this list in order:
    ingest token to check against, and ingest rejects everything. A collector
    started ahead of setup fails until you complete it.
 2. **Is it the right credential, in the right header?** The ingest token is
-   `fo_`-prefixed and goes in `Authorization: Bearer`. Browser sessions and MCP
+   `foi_`-prefixed and goes in `Authorization: Bearer`. Browser sessions and MCP
    tokens are not ingest credentials.
 3. **Is the listener reachable?** Both OTLP transports use `FANOUT_ADDR`
    (`127.0.0.1:7520` by default; the image sets `:7520`).

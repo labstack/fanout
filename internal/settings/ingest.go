@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/db/generated"
+	"github.com/labstack/fanout/internal/secret"
 )
 
 const ingestKey = "ingest"
@@ -64,11 +65,11 @@ func (s *Store) SetIngestWithAudit(ctx context.Context, ingest Ingest, audit *au
 }
 
 func GenerateIngestToken() (string, string, error) {
-	raw, err := randomHexToken(24)
+	raw, err := secret.NewSecret()
 	if err != nil {
 		return "", "", fmt.Errorf("generate ingest token: %w", err)
 	}
-	token := "fo_" + raw
+	token := "foi_" + raw
 	return token, HashIngestToken(token), nil
 }
 
@@ -77,5 +78,5 @@ func HashIngestToken(token string) string {
 }
 
 func CheckIngestToken(token, hash string) bool {
-	return checkToken(token, hash)
+	return secret.ValidSecret(token, "foi_") && checkToken(token, hash)
 }

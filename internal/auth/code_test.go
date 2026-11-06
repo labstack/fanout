@@ -8,6 +8,8 @@ import (
 	"time"
 
 	appstore "github.com/labstack/fanout/internal/store"
+
+	"github.com/labstack/fanout/internal/secret"
 )
 
 func newTestCodeStore(t *testing.T) *CodeStore {
@@ -30,13 +32,13 @@ func TestGenerateCode_SixDigits(t *testing.T) {
 	}
 }
 
-func TestGenerateLoginLinkTokenHas128BitsOfEntropy(t *testing.T) {
+func TestGenerateLoginLinkTokenHas256BitsOfEntropy(t *testing.T) {
 	token, err := GenerateLoginLinkToken()
 	if err != nil {
 		t.Fatalf("GenerateLoginLinkToken: %v", err)
 	}
-	if len(token) != 2*loginLinkTokenBytes {
-		t.Fatalf("token length = %d, want %d hex characters", len(token), 2*loginLinkTokenBytes)
+	if !secret.ValidSecret(token, "") {
+		t.Fatal("login token must encode 32 bytes as unpadded base64url")
 	}
 }
 

@@ -2,6 +2,8 @@ package ingest
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -59,7 +61,7 @@ func TestAuthorize_RejectsWrongToken(t *testing.T) {
 	}
 
 	authorizer := newIngestAuthorizer(store)
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer fo_wrong"))
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer foi_wrong"))
 
 	err = authorizer.authorize(ctx)
 	if status.Code(err) != codes.Unauthenticated {
@@ -131,4 +133,13 @@ func newRuntimeStore(t *testing.T) *settings.Store {
 	}
 	t.Cleanup(func() { sqlite.Close() })
 	return settings.NewStore(sqlite.DB)
+}
+
+func TestMalformedIngestSecretsSkipSettingsLookup(t *testing.T) {
+	a := newIngestAuthorizer(nil)
+	for _, token := range []string{"", "fo_" + strings.Repeat("a", 48), "foi_short", "foa_" + strings.Repeat("A", 43), "foi_" + strings.Repeat("!", 43)} {
+		if err := a.authorizeToken(context.Background(), token); !errors.Is(err, errInvalidIngestToken) {
+			t.Fatalf("malformed token: %v", err)
+		}
+	}
 }

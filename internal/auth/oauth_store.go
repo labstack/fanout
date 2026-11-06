@@ -2,10 +2,8 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +11,8 @@ import (
 	"time"
 
 	appid "github.com/labstack/fanout/internal/id"
+
+	"github.com/labstack/fanout/internal/secret"
 )
 
 const (
@@ -270,7 +270,8 @@ func (s *OAuthStore) CreateAuthorizationCode(ctx context.Context, code OAuthAuth
 		return "", ErrInvalidOAuthGrant
 	}
 	code.Scope = canonicalScope
-	raw, err := randomOAuthValue("foc_")
+	value, err := secret.NewSecret()
+	raw := "foc_" + value
 	if err != nil {
 		return "", err
 	}
@@ -290,6 +291,9 @@ func (s *OAuthStore) CreateAuthorizationCode(ctx context.Context, code OAuthAuth
 }
 
 func (s *OAuthStore) ConsumeAuthorizationCode(ctx context.Context, raw string) (OAuthAuthorizationCode, error) {
+	if !secret.ValidSecret(raw, "foc_") {
+		return OAuthAuthorizationCode{}, ErrInvalidOAuthGrant
+	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return OAuthAuthorizationCode{}, fmt.Errorf("oauth: open code transaction: %w", err)
@@ -353,6 +357,9 @@ func (s *OAuthStore) IssueTokenPair(ctx context.Context, clientID, userID, scope
 }
 
 func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, resource, requestedScope string) (OAuthTokenPair, error) {
+	if !secret.ValidSecret(raw, "for_") {
+		return OAuthTokenPair{}, ErrInvalidOAuthGrant
+	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return OAuthTokenPair{}, fmt.Errorf("oauth: open refresh transaction: %w", err)
@@ -466,6 +473,9 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 // database failure is returned as a wrapped infrastructure error so callers
 // can fail closed without treating an outage as a bad credential.
 func (s *OAuthStore) VerifyAccessToken(ctx context.Context, raw, resource string) (OAuthTokenRecord, error) {
+	if !secret.ValidSecret(raw, "foa_") {
+		return OAuthTokenRecord{}, ErrInvalidOAuthToken
+	}
 	record, err := readOAuthToken(ctx, s.db, raw)
 	if errors.Is(err, ErrInvalidOAuthGrant) {
 		return OAuthTokenRecord{}, ErrInvalidOAuthToken
@@ -544,11 +554,13 @@ type oauthDB interface {
 }
 
 func (s *OAuthStore) insertTokenPair(ctx context.Context, db oauthDB, familyID, clientID, userID, scope, resource string) (OAuthTokenPair, error) {
-	access, err := randomOAuthValue("foa_")
+	accessValue, err := secret.NewSecret()
+	access := "foa_" + accessValue
 	if err != nil {
 		return OAuthTokenPair{}, err
 	}
-	refresh, err := randomOAuthValue("for_")
+	refreshValue, err := secret.NewSecret()
+	refresh := "for_" + refreshValue
 	if err != nil {
 		return OAuthTokenPair{}, err
 	}
@@ -593,14 +605,6 @@ func readOAuthToken(ctx context.Context, db oauthDB, raw string) (OAuthTokenReco
 	}
 	record.ExpiresAt = time.Unix(expires, 0).UTC()
 	return record, nil
-}
-
-func randomOAuthValue(prefix string) (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("oauth: generate random value: %w", err)
-	}
-	return prefix + base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func oauthHash(value string) string {

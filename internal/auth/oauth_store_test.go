@@ -555,9 +555,9 @@ func TestOAuthStoreCleanupKeepsLiveFamiliesAndActiveClients(t *testing.T) {
 }
 
 func TestOAuthTokenPairStringRedactsSecrets(t *testing.T) {
-	pair := OAuthTokenPair{AccessToken: "foa_secret", RefreshToken: "for_secret", ExpiresIn: 900, Scope: MCPScopeTelemetryRead}
+	pair := OAuthTokenPair{AccessToken: "foa_" + strings.Repeat("A", 43), RefreshToken: "for_" + strings.Repeat("B", 43), ExpiresIn: 900, Scope: MCPScopeTelemetryRead}
 	got := fmt.Sprintf("%v", pair)
-	if strings.Contains(got, "foa_secret") || strings.Contains(got, "for_secret") {
+	if strings.Contains(got, pair.AccessToken) || strings.Contains(got, pair.RefreshToken) {
 		t.Fatalf("String() leaked token material: %s", got)
 	}
 	if !strings.Contains(got, "REDACTED") {

@@ -2,7 +2,7 @@ import type { EventEmitter } from "node:events";
 
 export function diagnosticTail(output: string): string {
   return output
-    .replace(/fo_[A-Za-z0-9_.%~+\/=-]+/g, "[REDACTED]")
+    .replace(/fo[iacr]_[A-Za-z0-9_.%~+\/=-]+/g, "[REDACTED]")
     .replace(/setup_token=[^\s&"'<>]+/gi, "setup_token=[REDACTED]")
     .replace(/((?:set-cookie|cookie)["']?\s*[:=]\s*)[^\r\n]+/gi, "$1[REDACTED]")
     .trimEnd().split(/\r?\n/).slice(-50).join("\n");
