@@ -90,6 +90,7 @@ export default defineConfig({
             { label: "Terminate TLS", slug: "docs/guides/tls" },
             { label: "Set up alerts", slug: "docs/guides/alerts" },
             { label: "Connect an agent over MCP", slug: "docs/guides/mcp" },
+            { label: "Query with Explore", slug: "docs/guides/explore" },
             { label: "Build and refine dashboards", slug: "docs/guides/dashboards" },
             { label: "Back up and restore", slug: "docs/guides/backup-and-restore" },
             { label: "Tune retention", slug: "docs/guides/retention" },
