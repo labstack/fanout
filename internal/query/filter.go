@@ -12,6 +12,7 @@ import (
 
 // Filter is one checked filter expression.
 type Filter struct {
+	ScopeEquality   *SQLExpr `json:"-"` // Original checked tree, before parameter casts.
 	RoutePopulation bool     `json:"-"` // Checked nonempty http.route population, safe for bounded endpoint summaries.
 	Columns         []string `json:"-"` // Checked column dependencies, including attribute roots.
 	// Expr is DuckDB's canonical rendering of the checked expression; it is
@@ -73,6 +74,7 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 	f := Filter{Columns: []string{}, Source: strings.TrimSpace(expr), InParams: map[string]bool{}}
 	uses := map[string]int{}
 	typed := SQLExpression(node["where_clause"])
+	f.ScopeEquality = typed
 	if err := walkFilterExpr(typed, sig, vars, &f, uses); err != nil {
 		return Filter{}, err
 	}

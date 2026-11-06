@@ -97,11 +97,13 @@ type TimeRange struct {
 }
 
 type TraceQuery struct {
-	TraceID    string
-	Namespace  string
-	StartNanos int64
-	EndNanos   int64
-	Limit      int
+	TraceID   string
+	Namespace string
+	// ExactNamespace matches Namespace exactly, including an empty namespace.
+	ExactNamespace bool
+	StartNanos     int64
+	EndNanos       int64
+	Limit          int
 }
 
 type storedBatch struct {
@@ -506,6 +508,9 @@ func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID strin
 // bounded by Limit. Deriving them here removes a second pass over every batch
 // file -- the thing that made trace_detail pay for its own correctness.
 type TraceTotals struct {
+	// Root prefers a parentless span, then start time and span ID, across all
+	// matching indexed ranges, independently of the detail page limit.
+	Root         *IndexedSpan
 	Spans        int
 	Services     int
 	DurationMS   float64
@@ -595,15 +600,50 @@ func (r indexedSpanRow) span() IndexedSpan {
 }
 
 func readIndexedTrace(ctx context.Context, batch *storedBatch, match traceRange, query TraceQuery, selected *indexedSpanHeap, totals *TraceTotals, services map[string]struct{}) (err error) {
-	if match.row > uint64(math.MaxInt64) {
-		return errors.New("trace index row exceeds Parquet reader limit")
-	}
 	file, err := os.Open(filepath.Join(batch.dir, "spans.parquet"))
 	if err != nil {
 		return err
 	}
 	reader := parquet.NewGenericReader[indexedSpanRow](file)
 	defer func() { err = errors.Join(err, reader.Close(), file.Close()) }()
+	return readIndexedRange(ctx, reader, match, query.EndNanos, func(row indexedSpanRow) {
+		if row.TraceID != query.TraceID || row.StartUnixNano < query.StartNanos || row.StartUnixNano >= query.EndNanos || ((query.ExactNamespace || query.Namespace != "") && row.Namespace != query.Namespace) {
+			return
+		}
+		accumulateTraceRow(row, totals, services)
+		selected.Add(row.span(), query.Limit)
+	})
+}
+
+func accumulateTraceRow(row indexedSpanRow, totals *TraceTotals, services map[string]struct{}) {
+	// Counted before the heap, so the totals describe the trace while
+	// the heap keeps describing the page.
+	totals.Spans++
+	if row.Service != "" {
+		services[row.Service] = struct{}{}
+	}
+	if row.Status == "STATUS_CODE_ERROR" {
+		totals.HasError = true
+	}
+	if totals.MinStartNano == 0 || row.StartUnixNano < totals.MinStartNano {
+		totals.MinStartNano = row.StartUnixNano
+	}
+	if end := row.StartUnixNano + int64(row.DurationMS*float64(time.Millisecond)); end > totals.MaxEndNano {
+		totals.MaxEndNano = end
+	}
+	span := row.span()
+	if totals.Root == nil {
+		totals.Root = new(IndexedSpan)
+	}
+	if totals.Spans == 1 || indexedRootEarlier(span, *totals.Root) {
+		*totals.Root = span
+	}
+}
+
+func readIndexedRange(ctx context.Context, reader *parquet.GenericReader[indexedSpanRow], match traceRange, end int64, visit func(indexedSpanRow)) error {
+	if match.row > uint64(math.MaxInt64) {
+		return errors.New("trace index row exceeds Parquet reader limit")
+	}
 	if err := reader.SeekToRow(int64(match.row)); err != nil {
 		return err
 	}
@@ -613,41 +653,113 @@ func readIndexedTrace(ctx context.Context, batch *storedBatch, match traceRange,
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		want := min(uint64(len(buffer)), remaining)
-		n, readErr := reader.Read(buffer[:int(want)])
-		if readErr != nil && !errors.Is(readErr, io.EOF) {
-			return readErr
+		n, err := reader.Read(buffer[:int(min(uint64(len(buffer)), remaining))])
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
 		}
 		if n == 0 {
 			return io.ErrUnexpectedEOF
 		}
-		for i := range n {
-			row := buffer[i]
-			if row.StartUnixNano >= query.EndNanos {
+		for _, row := range buffer[:n] {
+			// Rows within one hash range are ordered by event time.
+			if row.StartUnixNano >= end {
 				return nil
 			}
-			if row.TraceID != query.TraceID || row.StartUnixNano < query.StartNanos ||
-				(query.Namespace != "" && row.Namespace != query.Namespace) {
-				continue
-			}
-			// Counted before the heap, so the totals describe the trace while
-			// the heap keeps describing the page.
-			totals.Spans++
-			if row.Service != "" {
-				services[row.Service] = struct{}{}
-			}
-			if row.Status == "STATUS_CODE_ERROR" {
-				totals.HasError = true
-			}
-			if totals.MinStartNano == 0 || row.StartUnixNano < totals.MinStartNano {
-				totals.MinStartNano = row.StartUnixNano
-			}
-			if end := row.StartUnixNano + int64(row.DurationMS*float64(time.Millisecond)); end > totals.MaxEndNano {
-				totals.MaxEndNano = end
-			}
-			selected.Add(row.span(), query.Limit)
+			visit(row)
 		}
 		remaining -= uint64(n)
+	}
+	return nil
+}
+
+// TraceIdentity keeps equal trace IDs in different namespaces separate.
+type TraceIdentity struct{ Namespace, TraceID string }
+
+// TraceSummaries reads bounded identities in one batch pass, opening each index
+// and matching span file once. Hash collisions are resolved by exact identity.
+func (p *ParquetStore) TraceSummaries(ctx context.Context, ids []TraceIdentity, start, end int64) ([]TraceTotals, error) {
+	if len(ids) > 20 {
+		return nil, errors.New("trace summaries limit exceeds 20")
+	}
+	if start >= end {
+		return nil, errors.New("trace query time range must be positive")
+	}
+	totals := make([]TraceTotals, len(ids))
+	positions := make(map[TraceIdentity]int, len(ids))
+	services := make([]map[string]struct{}, len(ids))
+	hashes := make([]uint64, 0, len(ids))
+	for i, id := range ids {
+		positions[id] = i
+		services[i] = map[string]struct{}{}
+		hashes = append(hashes, xxh3.HashString(id.TraceID))
+	}
+	slices.Sort(hashes)
+	hashes = slices.Compact(hashes)
+	p.mu.RLock()
+	batches := make([]*storedBatch, 0, len(p.batches))
+	for _, batch := range p.batches {
+		batches = append(batches, batch)
+	}
+	p.mu.RUnlock()
+	for _, batch := range batches {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if bounds := batch.metadata.SpanTime; bounds.Known && (bounds.MaxNanos < start || bounds.MinNanos >= end) {
+			continue
+		}
+		if err := readBatchTraceSummaries(ctx, batch, hashes, end, func(row indexedSpanRow) {
+			if row.StartUnixNano < start || row.StartUnixNano >= end {
+				return
+			}
+			if i, ok := positions[TraceIdentity{row.Namespace, row.TraceID}]; ok {
+				accumulateTraceRow(row, &totals[i], services[i])
+			}
+		}); err != nil {
+			return nil, err
+		}
+	}
+	for i := range totals {
+		totals[i].Services = len(services[i])
+		if totals[i].Spans > 0 && totals[i].MaxEndNano > totals[i].MinStartNano {
+			totals[i].DurationMS = float64(totals[i].MaxEndNano-totals[i].MinStartNano) / float64(time.Millisecond)
+		}
+	}
+	return totals, nil
+}
+
+func readBatchTraceSummaries(ctx context.Context, batch *storedBatch, hashes []uint64, end int64, visit func(indexedSpanRow)) (err error) {
+	if len(hashes) == 0 || batch.traces.entries == 0 {
+		return nil
+	}
+	index, err := os.Open(batch.traces.path)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, index.Close()) }()
+	var matches []traceRange
+	for _, hash := range hashes {
+		match, found, err := batch.traces.lookup(index, hash)
+		if err != nil {
+			return err
+		}
+		if found {
+			matches = append(matches, match)
+		}
+	}
+	if len(matches) == 0 {
+		return nil
+	}
+	file, err := os.Open(filepath.Join(batch.dir, "spans.parquet"))
+	if err != nil {
+		return err
+	}
+	reader := parquet.NewGenericReader[indexedSpanRow](file)
+	defer func() { err = errors.Join(err, reader.Close(), file.Close()) }()
+	for _, match := range matches {
+		if err := readIndexedRange(ctx, reader, match, end, visit); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -678,6 +790,19 @@ func (h *indexedSpanHeap) Add(span IndexedSpan, limit int) {
 		(*h)[0] = span
 		heap.Fix(h, 0)
 	}
+}
+
+func indexedRootEarlier(left, right IndexedSpan) bool {
+	if (left.ParentSpanID == "") != (right.ParentSpanID == "") {
+		return left.ParentSpanID == ""
+	}
+	if left.StartUnixNanos != right.StartUnixNanos {
+		return left.StartUnixNanos < right.StartUnixNanos
+	}
+	if left.SpanID != right.SpanID {
+		return left.SpanID < right.SpanID
+	}
+	return left.Namespace < right.Namespace
 }
 
 func indexedSpanEarlier(left, right IndexedSpan) bool {

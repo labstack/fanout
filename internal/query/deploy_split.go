@@ -26,7 +26,7 @@ func (e *Executor) runDeploySplit(ctx context.Context, p *Panel, checked *Checke
 			continue
 		}
 		if f.EqField == "service" || f.EqField == "namespace" {
-			field, value, err := rollupFilterValue(ctx, e.engine, f, scope)
+			field, value, err := rollupFilterValue(f, scope)
 			if err != nil {
 				return nil, "", err
 			}

@@ -2382,6 +2382,13 @@ func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemet
 	return d.repository.Parquet.Trace(ctx, query)
 }
 
+// TraceSummaries pins one snapshot for the bounded multi-trace root pass.
+func (d *Duck) TraceSummaries(ctx context.Context, ids []telemetry.TraceIdentity, start, end int64) ([]telemetry.TraceTotals, error) {
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
+	return d.repository.Parquet.TraceSummaries(ctx, ids, start, end)
+}
+
 // PublishParquet runs one catalog swap. Readers are never excluded or waited
 // for: the swap is atomic under the catalog lock, and what it replaces stays
 // on disk until no pinned reader can open it. The budget only bounds the
