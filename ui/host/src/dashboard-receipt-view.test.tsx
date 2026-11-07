@@ -121,3 +121,19 @@ it('uses milliseconds for short checks and singular counts', async () => {
  expect(host.textContent).toContain('Checked in 24 ms'); expect(host.textContent).toContain('1 row'); expect(host.textContent).not.toContain('1 rows');
  } finally {await act(async()=>root.unmount());}
 });
+
+it.each([invalidReceipt, savedInvalidReceipt])('shows invalid panels once, with danger status and no fabricated execution metrics', async receipt => {
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try {await act(async()=>root.render(view(receipt,false,true)));
+ expect(host.textContent?.match(/Unknown field: request_total/g)).toHaveLength(1);
+ expect(host.querySelector('[role="status"]')?.textContent).toContain('1 invalid panel');
+ for(const row of [...host.querySelectorAll('div')].filter(el=>el.textContent?.startsWith('Preview · Requests:') || el.textContent?.startsWith('Save · Requests:'))) {
+   if(row.querySelector('div')) continue;
+   expect(row.textContent).not.toMatch(/0 ms|0 rows/);
+ }
+ const invalid=[...host.querySelectorAll('.mantine-Badge-root')].filter(el=>el.textContent==='Invalid');
+ expect(invalid.length).toBeGreaterThan(0);
+ for(const badge of invalid) expect(badge.getAttribute('style')).toContain('--mantine-color-red');
+ if(!receipt.saved) expect(host.textContent).not.toContain('Save verification');
+ } finally {await act(async()=>root.unmount());host.remove();}
+});

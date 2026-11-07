@@ -54,7 +54,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
   const rows = frameRows(frame);
   const dimensions = frame.columns.filter(column => column.role === "dimension").map(column => column.name);
   const measures = frame.columns.filter(column => column.role === "measure");
-  const bucketUnit = panel.unit ?? frame.columns.find(column => column.name === "bucket_lower")?.unit;
+  const bucketUnit = panel.x_unit ?? frame.columns.find(column => column.name === "bucket_lower")?.unit ?? (panel.query?.histogram?.field === "duration_ms" ? "ms" : undefined);
   const base = {
     animation: false,
     aria: { enabled: true, description: analysisSummary(panel, result) },
@@ -78,8 +78,8 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       const values = rows.map(row => row[measure]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
       const min = Math.min(0, ...values), max = Math.max(0, ...values);
       const bounds = scale === "log" ? undefined : valueAxis(min, max, unit, pixels);
-      return { type: scale === "log" ? "log" : "value", ...(bounds ?? {splitNumber:valueAxisTicks(pixels)}),
-        axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { lineStyle: { color: theme.grid } }, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatAxis(unit, bounds), hideOverlap: true } };
+      return { fanout_unit_in_name: true, type: scale === "log" ? "log" : "value", ...(bounds ?? {splitNumber:valueAxisTicks(pixels)}),
+        axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { lineStyle: { color: theme.grid } }, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatAxis(undefined), hideOverlap: true } };
     };
     return {
       ...base,
@@ -161,7 +161,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const counts = occupied.map(bucket => Number(bucket.value[2])).sort((a,b)=>a-b);
     // Nearest-rank p99 uses only finite, non-empty cells; outliers saturate.
     const cap = counts[Math.max(0, Math.ceil(counts.length * .99) - 1)] ?? 1, ramp = heatRamp(theme);
-    const data = heat ? occupied.map(bucket => ({ ...bucket, value: [...bucket.value, heatStep(Number(bucket.value[2]), cap)] })) : mergeStateRuns(buckets).map(run => ({ ...run, tooltip: { formatter: () => `${escapeHTML(names[Number(run.value[1])])} · ${["Unknown", "OK", "Warn", "Bad"][Number(run.value[4])]}\n${formatTimestamp(Number(run.value[0]))} – ${formatTimestamp(Number(run.value[3]))}` } }));
+    const data = heat ? occupied.map(bucket => ({ ...bucket, value: [...bucket.value, heatStep(Number(bucket.value[2]), cap)] })) : mergeStateRuns(buckets).map(run => ({ ...run, tooltip: { formatter: () => `${escapeHTML(names[Number(run.value[1])])} · ${["Unknown", "Healthy", "Degraded", "Unhealthy"][Number(run.value[4])]}\n${formatTimestamp(Number(run.value[0]))} – ${formatTimestamp(Number(run.value[3]))}` } }));
     const capLabel = heatCountLabel(counts.length ? cap : 0);
     return {
       ...base,

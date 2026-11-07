@@ -14,8 +14,8 @@ function number(value: number, formatter = plain): string {
 function panelDuration(value: number, unit: string): string {
   const ms = unit === "s" ? value * 1000 : unit === "ns" ? value / 1e6 : value;
   // Keep the original unit if conversion underflows, rather than printing zero.
-  if (value !== 0 && ms === 0) return `${small(value)}${unit}`;
-  return ms !== 0 && Math.abs(ms) < 1 ? `${small(ms)}ms` : duration(ms);
+  if (value !== 0 && ms === 0) return `${small(value)} ${unit}`;
+  return ms !== 0 && Math.abs(ms) < 1 ? `${small(ms)} ms` : duration(ms);
 }
 
 const byteUnits = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -65,7 +65,7 @@ export function formatAxis(unit?: string, axis?: { min: number; max: number; int
     const extent = Math.max(Math.abs(axis.min), Math.abs(axis.max)) * factor, step = axis.interval * factor;
     // The largest unit the axis reaches whose ticks still read in two decimals.
     const [scale, suffix] = durationScales.find(([size]) => extent >= size && Math.abs(step / size * 100 - Math.round(step / size * 100)) < 1e-6) ?? [1, "ms"];
-    return (value: number) => Number.isFinite(value) ? `${number(value * factor / scale)}${suffix}` : "—";
+    return (value: number) => Number.isFinite(value) ? `${number(value * factor / scale)} ${suffix}` : "—";
   }
   return (value: number) => {
     if ((!unit || unit === "count") && Math.abs(value) >= 1000) return number(value, compact);
@@ -118,7 +118,7 @@ export function adaptValueAxis(axis: Record<string, unknown>, pixels: number): R
   const unit = typeof axis.fanout_unit === "string" ? axis.fanout_unit : undefined;
   const next = valueAxis(axis.min, axis.max, unit, pixels);
   // New ticks may need another duration or binary unit.
-  return { ...axis, ...next, ...(unit && (unit in durationFactor || unit === "bytes") ? { axisLabel: { ...(axis.axisLabel as object), formatter: formatAxis(unit, next) } } : {}) };
+  return { ...axis, ...next, ...(unit && (unit in durationFactor || unit === "bytes") ? { axisLabel: { ...(axis.axisLabel as object), formatter: formatAxis(axis.fanout_unit_in_name ? undefined : unit, next) } } : {}) };
 }
 
 /** Use one duration scale for both ends of a bucket. */

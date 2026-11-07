@@ -194,7 +194,7 @@ function FormattedCell({ format, value, max, panel, better, trend, traceHref, tr
         event.preventDefault(); event.stopPropagation(); onTrace();
       }
     }}>{(display.text.length > 16 ? `${display.text.slice(0,16)}…` : display.text)}</Anchor> : <Text fz={12} ff="monospace" title={display.text}>{(display.text.length > 16 ? `${display.text.slice(0,16)}…` : display.text)}</Text>}</TraceIdCopy>;
-    case "service_link": return <Anchor title={display.text} className="dashboard-dimension-nowrap" style={{display:"block",maxWidth:"100%"}} component="button" type="button" onClick={event => {
+    case "service_link": return <Anchor fz="inherit" title={display.text} className="dashboard-dimension-nowrap" style={{display:"block",maxWidth:"100%"}} component="button" type="button" onClick={event => {
       event.stopPropagation();
       if (display.variable && value !== null) onService(display.variable, display.text);
     }}>{display.text}</Anchor>;

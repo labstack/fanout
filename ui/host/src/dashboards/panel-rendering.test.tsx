@@ -36,7 +36,7 @@ describe("panel rendering", () => {
       const option = gaugeOption({ ...panel, viz: "gauge", unit: "percent", min: 0, max: 10, thresholds: [{ value: 1, status: "warn" }, { value: 5, status: "bad" }] }, 1.72, theme, "percent", size);
       expect(option.series).toEqual([]);
       const texts=(option.graphic as {type:string;style:{text:string;fontSize:number}}[]).filter(g=>g.type==="text");
-      expect(texts.map(g=>g.style.text)).toEqual(expect.arrayContaining(["1.72%","0.00%","10.0%","■ Warn"]));
+      expect(texts.map(g=>g.style.text)).toEqual(expect.arrayContaining(["1.72%","0.00%","10.0%","■ Degraded"]));
       expect(texts.find(g=>g.style.text==="1.72%")!.style.fontSize).toBeGreaterThanOrEqual(28);
     }
   });
@@ -87,7 +87,7 @@ describe("panel rendering", () => {
   });
   it("supplies a four-state icon legend in place of the unknown note", async () => {
     const host = await render(<Viz panel={{ ...panel, viz: "state_timeline" }} result={result} dark={false} height={248} group="g" />);
-    expect(host.querySelector('[aria-label="State legend"]')?.textContent).toBe("● OK■ Warn◆ Bad○ Unknown");
+    expect(host.querySelector('[aria-label="State legend"]')?.textContent).toBe("● Healthy■ Degraded◆ Unhealthy○ Unknown");
     expect(host.textContent).not.toContain("Gaps and gray");
   });
   it.each([false, true])("uses round duration intervals and recessive grids (dark=%s)", dark => {
@@ -97,7 +97,7 @@ describe("panel rendering", () => {
     const x = got.xAxis as { name?: string; splitLine: { lineStyle: { color: string } } };
     const y = got.yAxis as { name?: string; interval: number; splitLine: { lineStyle: { color: string } }; axisLabel: { formatter: (v: number) => string } };
     expect(x.name).toBe("Requests"); expect(y.name).toBe("p95 (ms)"); expect(y.interval).toBe(600000);
-    expect(y.axisLabel.formatter(y.interval)).toBe("10m");
+    expect(y.axisLabel.formatter(y.interval)).toBe("600K");
     expect(x.splitLine.lineStyle.color).toBe(theme.grid); expect(y.splitLine.lineStyle.color).toBe(theme.grid);
   });
   it("fills the heatmap and anchors the scale beneath its right edge", () => {

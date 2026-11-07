@@ -7,7 +7,7 @@ import { hiddenSeriesNote, isOtherSeries, visibleSeries, wrappingLegend } from "
 import { statusFor } from "./thresholds";
 import type { Frame, Panel, PanelResult, Status } from "./types";
 import { formatAxis, formatTimeAxis, formatValue, valueAxis, valueAxisTicks } from "./units";
-import { lineStyle, markStyle } from "./style";
+import { lineStyle, markStyle, statusInk } from "./style";
 
 export type ChartTheme = { dark: boolean; text: string; muted: string; grid: string; surface: string; border: string; status: { ok: string; warn: string; bad: string }; font: string };
 
@@ -275,19 +275,20 @@ export function gaugeOption(panel: Panel, value: number | null, theme: ChartThem
   const bands = gaugeBands(panel, min, max, theme);
   const text = formatValue(unit, value);
   const status = statusFor(value, panel.thresholds, panel.better);
-  const cue = status === "bad" ? "◆ Bad" : status === "warn" ? "■ Warn" : status === "ok" ? "● OK" : value === null ? "○ Unknown" : undefined;
+  const cue = status === "bad" ? "◆ Unhealthy" : status === "warn" ? "■ Degraded" : status === "ok" ? "● Healthy" : value === null ? "○ Unknown" : undefined;
   const mute = (hex: string) => `${hex}${theme.dark ? "99" : "66"}`;
   const valueWidth = size.measureText?.(text,`600 28px ${theme.font}`) ?? text.length * 28 * .6;
-  const cueWidth = size.measureText?.(cue ?? "",`11px ${theme.font}`) ?? (cue?.length ?? 0) * 11 * .6;
+  const cueWidth = size.measureText?.(cue ?? "",`12px ${theme.font}`) ?? (cue?.length ?? 0) * 12 * .6;
   const stacked = size.width < valueWidth + cueWidth + 16;
-  const top = Math.max(0, (size.height - (stacked ? 78 : 62)) / 2), trackY = top + (stacked ? 50 : size.height < 62 ? 32 : 34);
-  const trackWidth = Math.max(1, size.width - 8), fraction = Math.max(0, Math.min(1, ((value ?? min) - min) / (max - min || 1)));
+  const compact = stacked && size.height < 78;
+  const top = Math.max(0, (size.height - (stacked ? 78 : 62)) / 2), trackY = compact ? 30 : top + (stacked ? 50 : size.height < 62 ? 32 : 34);
+  const trackWidth = Math.max(1, size.width - 8 - (compact ? cueWidth + 12 : 0)), fraction = Math.max(0, Math.min(1, ((value ?? min) - min) / (max - min || 1)));
   let start = 0;
   return {
     animation: false, textStyle: { fontFamily: theme.font, color: theme.text }, series: [],
     graphic: [
       { id: "gauge-value", type: "text", left: 4, top, style: { text, fill: theme.text, fontSize: 28, fontWeight: 600, fontFamily: theme.font } },
-      ...(cue ? [{ type: "text", right: 4, top: top + (stacked ? 30 : 10), style: { text: cue, fill: theme.text, fontSize: 12, fontFamily: theme.font } }] : []),
+      ...(cue ? [{ type: "text", right: 4, top: compact ? 30 : top + (stacked ? 30 : 10), style: { text: cue, fill: status ? statusInk(status, theme.dark) : theme.muted, fontSize: 12, fontFamily: theme.font } }] : []),
       { id: "gauge-track", type: "rect", shape: { x: 4, y: trackY, width: trackWidth, height: 10, r: 5 }, style: { fill: theme.grid } },
       ...bands.map(([end, color],i) => { const x = start; start = end; return { type: "rect", shape: { x: 4 + x * trackWidth, y: trackY, width: (end - x) * trackWidth, height: 10, r: [i===0?5:0,i===bands.length-1?5:0,i===bands.length-1?5:0,i===0?5:0] }, style: { fill: mute(color) } }; }),
       { id: "gauge-fill", type: "rect", shape: { x: 4, y: trackY, width: fraction * trackWidth, height: 10, r: 5 }, style: { fill: status ? theme.status[status] : seriesSlot(0, theme.dark) } },

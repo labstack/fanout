@@ -11,7 +11,7 @@ export type SpanEvent = { offset_ns: number; name: string; attributes: Record<st
 /** What the trace read leaves out of each span, read on demand for the selected one. */
 export type SpanExtras = { attributes: Record<string, unknown>; resource: Record<string, unknown>; events: SpanEvent[]; scope: string };
 
-const statuses: Record<string, string> = { STATUS_CODE_ERROR: "Error", STATUS_CODE_OK: "Ok", STATUS_CODE_UNSET: "Unset" };
+const statuses: Record<string, string> = { STATUS_CODE_ERROR: "Error", STATUS_CODE_OK: "OK", STATUS_CODE_UNSET: "Unset" };
 
 /** An event attribute as text: strings verbatim, other values as JSON. */
 const text = (value: unknown): string | undefined => value == null ? undefined : typeof value === "string" ? value : JSON.stringify(value);

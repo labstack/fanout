@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { analysisOption } from "../../../panels/analysis";
+import { relativeLuminance } from "@labstack/ui";
 import { heatRamp, heatStep } from "../../../panels/heat-scale";
 import { chartThemeFor } from "../../../panels/compile";
 import type { PanelResult } from "../../../panels/types";
@@ -48,4 +49,11 @@ it("handles empty and unit caps without non-finite steps", () => {
   expect(heatStep(1, 1)).toBe(0);
   expect(heatStep(3000, 3000)).toBe(6);
   expect(heatStep(10000, 3000)).toBe(6);
+});
+
+it("keeps the populated light latency buckets perceptually separated", () => {
+  const o = option([25, 150, 1100, 2300, 3100]);
+  const lightness = [25, 150, 1100, 2300, 3100].map(count => relativeLuminance(fill(o, count)));
+  expect(lightness.every((value, index) => index === 0 || value < lightness[index - 1])).toBe(true);
+  expect(lightness[0] - lightness[2]).toBeGreaterThan(.25);
 });

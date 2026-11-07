@@ -47,7 +47,7 @@ describe("headline panel views", () => {
     expect(host.textContent).toContain("click for exemplar traces");
     const button = (view: string) => host.querySelector<HTMLButtonElement>(`[data-panel-view="${view}"]`)!;
     await act(async () => button("Data").click());
-    expect(host.querySelector("table")?.textContent).toContain("500ms");
+    expect(host.querySelector("table")?.textContent).toContain("500 ms");
     expect(host.textContent).toContain("SELECT 1");
     expect(button("Data").getAttribute("aria-pressed")).toBe("true");
     await act(async () => button("Spec").click());

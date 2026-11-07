@@ -138,9 +138,8 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
   }, {modalOpen: historyOpen || helpOpen || Boolean(search.drill), fullscreenScope: search.view ? scope : undefined, enabled: preference.enabled});
   return <Box component="section" ref={region} aria-label="Dashboard" maw={1600} mx="auto" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
     <Stack gap="sm" mb="md">
-      <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
-        <PageHeader title={spec.name} description={spec.description || "Monitor your services and investigate changes."} meta={<LiveDataMeta time={time} updatedAt={data.updatedAt} />} actions={<Group gap="xs">{canManage && <Tooltip label="Duplicate dashboard"><ActionIcon variant="subtle" color="gray" aria-label="Duplicate dashboard" onClick={() => setDuplicating(true)}><Copy size={16} /></ActionIcon></Tooltip>}
-        <Toolbar selecting={ranges.size > 0} time={time} refresh={refresh} compare={compare} editing={search.edit === "1"} fetching={data.fetching} updatedAt={data.updatedAt}
+        <PageHeader title={spec.name} description={spec.description || "Monitor your services and investigate changes."} meta={<LiveDataMeta time={time} updatedAt={data.updatedAt} />} actions={<Group gap="xs">{canManage && <Tooltip label="Duplicate dashboard"><ActionIcon variant="subtle" color="gray" aria-label="Duplicate dashboard" onClick={() => setDuplicating(true)}><Copy size={16} /></ActionIcon></Tooltip>}</Group>} />
+      <Toolbar selecting={ranges.size > 0} time={time} refresh={refresh} compare={compare} editing={search.edit === "1"} fetching={data.fetching} updatedAt={data.updatedAt}
           onRange={(range) => { resetBrush(); onSearch({ ...search, range, from: undefined, to: undefined }); }}
           onAbsolute={(from, to) => { resetBrush(); onSearch({ ...search, range: undefined, from, to }); }}
           onZoomOut={() => {
@@ -153,8 +152,7 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
           }}
           onRefresh={setRefresh} onRefreshNow={data.refetch}
           onCompare={(on) => onSearch({ ...search, compare: on ? "1" : "0" }, true)}
-          onEdit={edit} onHistory={() => setHistoryOpen(true)} onShortcuts={() => setHelpOpen(true)} /></Group>} />
-      </Group>
+          onEdit={edit} onHistory={() => setHistoryOpen(true)} onShortcuts={() => setHelpOpen(true)} />
       <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVar} />
       {Object.entries(vars).filter(([, v]) => v !== ALL).length > 0 && <Group gap={6}>
         {Object.entries(vars).filter(([, v]) => v !== ALL).map(([name, value]) => <Button key={name} color="iris" size="compact-xs" variant="light" aria-label={`$${name} = ${Array.isArray(value) ? value.join(", ") : value} ×: remove filter`} onClick={() => setVar(name, undefined)}>${name} = {Array.isArray(value) ? value.join(", ") : value} ×</Button>)}

@@ -5,6 +5,7 @@ import { Bell, ChatCircle, SquaresFour, Gear, Compass, DotsThree, ListMagnifying
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { getJSON, threadHistoryQueryKey } from "./api";
+import { formatTimestamp } from "../../panels/units";
 import { authorizedFetch } from "./auth";
 import { dashboardsKey, dashboardsStaleTime, listDashboards } from "./dashboards/api";
 
@@ -140,10 +141,10 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
           <SectionLabel>Chats</SectionLabel>
           {history.isLoading && <DataState state="loading" rows={3} />}
           {history.isError && <Notice tone="danger">Chats could not be loaded.</Notice>}
-          {!history.isLoading && !history.isError && threads.length === 0 && <DataState state="empty" variant="inline" empty={{title: query ? "No matching chats" : "No chats yet", description: "Start a chat to investigate your telemetry.", action: <Button size="compact-xs" variant="subtle" onClick={onNewChat}>New chat</Button>}} />}
+          {!history.isLoading && !history.isError && threads.length === 0 && <Text size="xs" c="dimmed" px="sm">{query ? "No matching chats. Try another name." : "No chats yet. Start one above."}</Text>}
           {groups.map((group) => <Stack key={group.label} gap={2}>
             {groups.length > 1 && <Text c="dimmed" size="xs" px="sm" pt={4}>{group.label}</Text>}
-            {group.threads.map((thread) => <ThreadRow key={thread.id} thread={thread} active={thread.id === activeThreadID} onSelect={() => onSelectThread(thread.id)} onRename={() => beginRename(thread)} onDelete={() => { setMutationError(""); setDeleting(thread); }} />)}
+            {group.threads.map((thread) => <ThreadRow key={thread.id} thread={thread} active={(activePath ? activePath.startsWith("/chat/") : !activeDashboardID) && thread.id === activeThreadID} onSelect={() => onSelectThread(thread.id)} onRename={() => beginRename(thread)} onDelete={() => { setMutationError(""); setDeleting(thread); }} />)}
           </Stack>)}
           {history.hasNextPage && <Button variant="subtle" color="gray" size="compact-sm" loading={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>See all</Button>}
         </Stack>}
@@ -178,15 +179,15 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
               why the list emptied. */}
           {!dashboards.isLoading && !dashboards.isError && query && visibleDashboards.length === 0 && <DataState state="empty" variant="inline" empty={{title: "No matching dashboards", description: "Try a different dashboard name.", action: <Button variant="subtle" size="compact-xs" onClick={() => setSearch("")}>Clear search</Button>}} />}
           {visibleDashboards.map((dashboard) => {
-            const active = dashboard.id === activeDashboardID;
+            const active = (!activePath || activePath.startsWith("/dashboards")) && dashboard.id === activeDashboardID;
             return <Stack key={dashboard.id} gap={0}><UnstyledButton component="a" href={`/dashboards/${encodeURIComponent(dashboard.id)}`} className="rail-row" data-active={active || undefined} aria-current={active ? "page" : undefined} p="sm" onClick={(event) => {
               if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
               event.preventDefault();
               onSelectDashboard(dashboard.id);
             }}>
               <Group justify="space-between" gap="sm" wrap="nowrap">
-                <Group gap="xs" wrap="nowrap"><SquaresFour size={16} style={{flexShrink: 0}} /><Text size="sm" fw={active ? 600 : 500} truncate>{dashboard.name}</Text></Group>
-                {dashboard.is_default && <Badge size="xs" variant="light" color="gray">Default</Badge>}
+                <Group gap="xs" wrap="nowrap" style={{minWidth: 0, flex: 1}}><SquaresFour size={16} style={{flexShrink: 0}} /><Text size="sm" fw={active ? 600 : 500} truncate>{dashboard.name}</Text></Group>
+                {dashboard.is_default && <Badge size="xs" variant="light" color="gray" style={{flexShrink: 0}} styles={{label: {whiteSpace: "nowrap"}}}>Default</Badge>}
               </Group>
             </UnstyledButton>
               {agentAvailable && dashboard.origin && <UnstyledButton component="a" href={`/chat/${encodeURIComponent(dashboard.origin.thread_id)}`} data-request-provenance px="sm" pb="xs" onClick={(event) => {
@@ -242,7 +243,7 @@ function ThreadRow({ thread, active, onSelect, onRename, onDelete }: { thread: T
         <Stack gap={0} pl={24} style={{position: "relative"}}>
           <ChatCircle size={16} style={{position: "absolute", left: 0, top: 2}} />
           <Text size="sm" fw={active ? 600 : 500} truncate title={thread.title}>{thread.title}</Text>
-          <Text c="dimmed" size="xs">{threadTime(thread.updated_at)}</Text>
+          <Text c="dimmed" size="xs" ff="monospace">{threadTime(thread.updated_at)}</Text>
         </Stack>
       </UnstyledButton>
       <Menu position="bottom-end" withinPortal>
@@ -287,9 +288,5 @@ function groupThreads(threads: ThreadSummary[]): Array<{ label: string; threads:
 }
 
 function threadTime(value: string): string {
-  const date = parseSQLiteTime(value);
-  const today = dayStart(new Date());
-  const age = Math.floor((today - dayStart(date)) / (24 * 60 * 60 * 1000));
-  if (age <= 1) return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+  return formatTimestamp(parseSQLiteTime(value).valueOf());
 }

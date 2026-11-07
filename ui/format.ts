@@ -1,3 +1,6 @@
+export const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+const decimal = (value: number, digits: number) => String(Number(value.toFixed(digits)));
+
 export const integer = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
 /** A rate as a percentage. A rate that is small but real is said to be small
@@ -21,28 +24,28 @@ export function duration(value: number): string {
   // A negative duration is bad data, not missing data, and saying so is more
   // use than an em dash that reads as "nothing recorded".
   if (value < 0) return `-${duration(-value)}`;
-  if (value === 0) return "0ms";
+  if (value === 0) return "0 ms";
   // Small but real, for the same reason percent says "<0.01%": a four-microsecond
   // span is not a zero-length one, and the waterfall is full of them.
-  if (value < 0.01) return "<0.01ms";
-  if (value < 1) return `${value.toFixed(2)}ms`;
+  if (value < 0.01) return "<0.01 ms";
+  if (value < 1) return `${decimal(value, 2)} ms`;
   // Each unit decides its precision on the value it will actually print, so a
   // number never rounds up into the next unit's territory — 999.5ms was
   // rendered "1000ms", four digits of milliseconds in a column of seconds.
-  if (Math.round(value * 10) / 10 < 100) return `${value.toFixed(1)}ms`;
-  if (Math.round(value) < 1000) return `${Math.round(value)}ms`;
+  if (Math.round(value * 10) / 10 < 100) return `${decimal(value, 1)} ms`;
+  if (Math.round(value) < 1000) return `${Math.round(value)} ms`;
 
   const totalSeconds = Math.round(value / 100) / 10;
-  if (totalSeconds < 10) return `${(value / 1000).toFixed(2)}s`;
-  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)}s`;
+  if (totalSeconds < 10) return `${decimal(value / 1000, 2)} s`;
+  if (totalSeconds < 60) return `${decimal(totalSeconds, 1)} s`;
 
   const whole = Math.round(value / 1000);
   const minutes = Math.floor(whole / 60);
   const seconds = whole % 60;
-  if (minutes < 60) return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+  if (minutes < 60) return seconds === 0 ? `${minutes} m` : `${minutes} m ${seconds} s`;
   const hours = Math.floor(minutes / 60);
   const restMinutes = minutes % 60;
-  return restMinutes === 0 ? `${hours}h` : `${hours}h ${restMinutes}m`;
+  return restMinutes === 0 ? `${hours} h` : `${hours} h ${restMinutes} m`;
 }
 
 /** The whole instant — date, seconds and zone — for the title of a timestamp

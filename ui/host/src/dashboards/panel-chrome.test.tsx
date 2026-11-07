@@ -380,8 +380,8 @@ it("shows a zero count's diagnosis as a note under the 0",async()=>{
 });
 
 it("shows invalid problem paths and hints without claiming execution", async () => {
- const host = await render(p, {id: p.id, status: "invalid", elapsed_ms: 0, error: "Invalid field", problems: [{path: "query.measures[0]", message: "Unknown field", hint: "Use count()"}]});
- expect(host.textContent).toContain("query.measures[0]"); expect(host.textContent).toContain("Use count()");
+ const host = await render(p, {id: p.id, status: "invalid", elapsed_ms: 0, error: "Unknown field", problems: [{path: "query.measures[0]", message: "Unknown field", hint: "Use count()"}]});
+ expect(host.textContent?.match(/Unknown field/g)).toHaveLength(1); expect(host.textContent).toContain("query.measures[0]"); expect(host.textContent).toContain("Use count()");
  await act(async()=>host.querySelector<HTMLButtonElement>('[data-panel-view="Data"]')!.click());
  expect(host.textContent).not.toContain("Ran in 0 ms");
 });

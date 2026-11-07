@@ -230,3 +230,13 @@ body,
 .mantine-Table-tbody .mantine-Table-tr:hover { background: var(--mantine-color-default-hover); }
 .mantine-Table-td:is([data-field$="_id"], [data-field="time"], [data-field="start"]) { font-family: var(--mantine-font-family-monospace); font-size: inherit; }
 .chat-table td[align="right"], .panel-markdown td[align="right"] { font-family: var(--mantine-font-family-monospace); text-align: right; }
+
+/* The composer owns the focus indicator for its complete input/action group. */
+.chat-composer-field .mantine-Textarea-input,
+.chat-composer-field .mantine-Textarea-input:focus,
+.chat-composer-field .mantine-Textarea-input:focus-visible {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  padding: 6px 8px;
+}

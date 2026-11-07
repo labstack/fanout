@@ -74,7 +74,7 @@ it.each(["text", "link", "button"])("names trace ID %s from its visible text and
   expect(link.title).toBe(id);
 });
 
-it.each([["STATUS_CODE_ERROR","Error"],["STATUS_CODE_OK","Ok"],["STATUS_CODE_UNSET","Unset"]])("labels OTLP %s as %s", async (value,label) => {
+it.each([["STATUS_CODE_ERROR","Error"],["STATUS_CODE_OK","OK"],["STATUS_CODE_UNSET","Unset"]])("labels OTLP %s as %s", async (value,label) => {
   await render({...panel,viz:"traces"},resultFor("status",value));
   const badge = container.querySelector<HTMLElement>(".mantine-Badge-root")!;
   expect(badge.textContent).toBe(label);
@@ -145,5 +145,5 @@ it("heads the trace duration without a unit because each cell names its own", as
   await render({ id: "p", title: "Traces", viz: "traces" }, traces);
   const header = container.querySelector("th")!;
   expect(header.textContent).toBe("Duration");
-  expect(container.querySelector("td")!.textContent).toContain("10m");
+  expect(container.querySelector("td")!.textContent).toContain("10 m");
 });

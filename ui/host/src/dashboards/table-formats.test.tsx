@@ -101,7 +101,7 @@ it("pairs a formatted row value with its sparkline", async () => {
  const frame: Frame = {columns:[{name:"latency",type:"number",role:"measure",unit:"ms"}],values:[[900]],rows:1,trends:{latency:[[1,2,3]]}};
  const {host} = await render(<TableViz panel={panel} result={{...result,frame}} height={200}/>);
  const cell = host.querySelector("tbody td");
- expect(cell?.textContent).toContain("900ms");
+ expect(cell?.textContent).toContain("900 ms");
  expect(cell?.querySelector('svg[role="img"]')).not.toBeNull();
 });
 
@@ -122,7 +122,7 @@ it("renders all formats safely and keeps trends and current callbacks aligned af
  expect(host.querySelector("tbody tr td:nth-child(4)")?.textContent).toBe("3");
  expect(host.querySelector<HTMLElement>("tbody tr td:nth-child(4) div div div")?.style.width).toBe("50%");
  expect(host.querySelector("tbody tr td:nth-child(5)")?.textContent).toBe("12");
- expect(host.querySelector("tbody tr td:nth-child(6)")?.textContent).toBe("900ms");
+ expect(host.querySelector("tbody tr td:nth-child(6)")?.textContent).toBe("900 ms");
  expect(host.querySelector("tbody tr:nth-child(2) td:nth-child(6)")?.textContent).toBe("—");
  expect([...host.querySelectorAll("[data-template-chip]")].map(mark=>mark.textContent)).toEqual(["<*>","<*>","<*>"]);
  expect(host.querySelector("img,script")).toBeNull();

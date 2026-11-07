@@ -21,7 +21,7 @@ it.each([false,true])("discrete full-height heat cells and single-hue inline ram
   // Q1 uses a surface gap without a uniform identity-colour outline.
   expect(cell.shape).toMatchObject({x:.5,y:10.5,width:59,height:19});
   expect(option.visualMap.inRange.color).toHaveLength(7);
-  expect(option.visualMap.inRange.color.at(-1)).toBe(dark ? "#7dd3fc" : "#1d4ed8");
+  expect(option.visualMap.inRange.color.at(-1)).toBe(dark ? "#7dd3fc" : "#0d4a6d");
   expect(option.visualMap.itemWidth).toBe(8);
   expect(option.grid.bottom).toBeLessThanOrEqual(32);
   expect(option.yAxis.data).toEqual(["<25 ms","25–50 ms","≥3.2 s"]);
@@ -46,9 +46,9 @@ it.each([false,true])("adaptive bar labels and bounded middle-ellipsis, dark=%s"
   expect(option.series[0].itemStyle.color).toBe(seriesSlot(0,dark));
   expect(option.series[0].itemStyle.borderRadius).toEqual([0,4,4,0]);
   // Bars read durations as time series axes do.
-  expect(option.series[0].label.formatter({value:1450})).toBe("1.45s");
-  expect(option.series[0].label.formatter({value:330})).toBe("330ms");
-  expect([0,300,1200].map(option.xAxis.axisLabel.formatter)).toEqual(["0s","0.3s","1.2s"]);
+  expect(option.series[0].label.formatter({value:1450})).toBe("1.45 s");
+  expect(option.series[0].label.formatter({value:330})).toBe("330 ms");
+  expect([0,300,1200].map(option.xAxis.axisLabel.formatter)).toEqual(["0 s","0.3 s","1.2 s"]);
 });
 it.each([false,true])("deploy split uses a thinner grey before and labelled slot-zero since, dark=%s", dark => {
   const frame: Frame = {...bars,columns:[bars.columns[0],{name:"period",type:"string",role:"dimension"},bars.columns[1]],values:[[path,path],["Before deploy","Since deploy"],[50,1450]],rows:2,periods:{"Before deploy":{from:"2026-10-07T00:00:00Z",to:"2026-10-07T00:30:00Z"},"Since deploy":{from:"2026-10-07T00:30:00Z",to:"2026-10-07T01:00:00Z"}}};

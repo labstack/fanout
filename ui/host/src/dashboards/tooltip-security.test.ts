@@ -16,11 +16,11 @@ describe("telemetry tooltip HTML security", () => {
     const timeFrame: Frame = { columns: [{ name: "time", type: "time", role: "time" }, { name: "p95", type: "number", role: "measure", unit: "ms" }], values: [[1000], [1500]], rows: 1 };
     const time = timeseriesOption({ id: "x", title: "x", viz: "timeseries" }, { ...result, frame: timeFrame }, theme);
     const text = (time.tooltip as Tooltip).formatter({ name: "Jan 1", seriesName: (time.series as { name: string }[])[0].name, value: [1000,1500] });
-    expect(text).toContain("1.50s"); expect(text).not.toContain("1.00s");
+    expect(text).toContain("1.5 s"); expect(text).not.toContain("1 s");
     const scatterFrame: Frame = { columns: [{ name: "item", role: "dimension", type: "string" }, { name: "calls", role: "measure", type: "number", unit: "count" }, { name: "latency", role: "measure", type: "number", unit: "ms" }], values: [[attack],[12],[1500]], rows: 1 };
     const scatter = analysisOption({ id: "x", title: "x", viz: "scatter" }, { ...result, frame: scatterFrame }, theme);
     const point = (scatter.tooltip as Tooltip).formatter({ name: attack, seriesName: "Items", value: [12,1500] });
-    safe(point); expect(point).toContain("Requests: 12"); expect(point).toContain("Latency (ms): 1.50s");
+    safe(point); expect(point).toContain("Requests: 12"); expect(point).toContain("Latency (ms): 1.5 s");
   });
   it("escapes service labels across shared timeseries, heatmap and bar formatters",()=>{
     for(const option of [timeseriesOption({id:"x",title:attack,viz:"timeseries"},result,theme),analysisOption({id:"x",title:attack,viz:"heatmap"},result,theme),barOption({id:"x",title:attack,viz:"bar"},frame,theme)]) safe((option.tooltip as Tooltip).formatter({name:attack,seriesName:attack,axisValueLabel:attack,value:[1000,0,3]}));

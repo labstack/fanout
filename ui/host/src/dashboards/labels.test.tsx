@@ -53,7 +53,7 @@ it("heads a table duration column without the unit its cells already print", () 
   const table = renderToStaticMarkup(<MantineProvider><TableViz panel={panel} result={result} height={240}/></MantineProvider>);
   expect(table).toContain(">Max<");
   expect(table).not.toContain("Max (ms)");
-  expect(table).toContain(">10m<");
+  expect(table).toContain(">10 m<");
   // Without a duration unit the cell is a bare number and the header keeps the name's unit.
   const bare = renderToStaticMarkup(<MantineProvider><TableViz panel={{...panel,unit:undefined}} result={result} height={240}/></MantineProvider>);
   expect(bare).toContain("Max (ms)");

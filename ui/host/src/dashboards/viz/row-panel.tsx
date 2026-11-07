@@ -52,14 +52,14 @@ export function RowPanel(props: AnalysisProps) {
       </Group>;
     }
     if (name === "service" && value) return props.onSelect
-      ? <Anchor component="button" type="button" className="dashboard-dimension-nowrap" style={serviceStyle} title={String(value)} onClick={() => props.onSelect?.(String(value))}>{String(value)}</Anchor>
+      ? <Anchor fz="inherit" component="button" type="button" className="dashboard-dimension-nowrap" style={serviceStyle} title={String(value)} onClick={() => props.onSelect?.(String(value))}>{String(value)}</Anchor>
       : <Text fz={12} className="dashboard-dimension-nowrap" style={serviceStyle} title={String(value)}>{String(value)}</Text>;
     if (name === "health" || name === "severity" || name === "status") {
       const severity = name === "severity" ? severityLabel(value) : undefined;
       const bad = severity ? severity === "ERROR" || severity === "FATAL" : String(value).includes("ERROR") || value === "FATAL" || value === "CRITICAL" || value === "unhealthy";
       const warn = severity ? severity === "WARN" : value === "degraded" || String(value).startsWith("WARN");
       const label = severity ?? (name === "status" ? traceStatuses[String(value)] ?? String(value ?? "Unknown") : String(value ?? "Unknown"));
-      return <span title={String(value ?? "UNSPECIFIED")}><StatusBadge tone={bad ? "danger" : warn ? "warning" : "neutral"}>{label.charAt(0).toUpperCase() + label.slice(1).toLowerCase()}</StatusBadge></span>;
+      return <span title={String(value ?? "UNSPECIFIED")}><StatusBadge tone={bad ? "danger" : warn ? "warning" : "neutral"}>{name === "status" && label === "OK" ? "OK" : label.charAt(0).toUpperCase() + label.slice(1).toLowerCase()}</StatusBadge></span>;
     }
     if (name === "body" || name === "body_template") return <RowText text={String(value ?? "")} template={name === "body_template"} highlight={props.panel.options?.highlight} />;
     if (name === "trend") {

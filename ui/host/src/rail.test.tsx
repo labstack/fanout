@@ -86,7 +86,8 @@ describe("Rail", () => {
     expect(new URL(String(historyRequest?.[0]), "http://localhost").searchParams.get("page_size")).toBe("30");
 
     const activeRows = document.querySelectorAll('[aria-current="page"]');
-    expect(activeRows).toHaveLength(2);
+    expect(activeRows).toHaveLength(1);
+    expect(activeRows[0].textContent).toContain("System overview");
 
     const thread = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Checkout latency"));
     await act(async () => thread?.click());
@@ -99,6 +100,28 @@ describe("Rail", () => {
     const newChat = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim() === "New chat");
     await act(async () => newChat?.click());
     expect(handlers.onNewChat).toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it.each(["/settings", "/logs", "/traces"])("marks only the current route active on %s", async activePath => {
+    const {root, render} = mount({activePath});
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Checkout latency"));
+    const active = document.querySelectorAll('[aria-current="page"]');
+    expect(active).toHaveLength(1);
+    expect(active[0].getAttribute("href")).toBe(activePath);
+    expect(document.querySelectorAll('[data-active="true"]')).toHaveLength(1);
+    await act(async () => root.unmount());
+  });
+
+  it.each(["/chat/thread-checkout", "/dashboards/dash-main"])("keeps the matching record active on %s", async activePath => {
+    const {root, render} = mount({activePath});
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Checkout latency"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
+    const active = document.querySelectorAll('[aria-current="page"]');
+    expect(active).toHaveLength(1);
+    expect(active[0].textContent).toContain(activePath.startsWith("/chat/") ? "Checkout latency" : "System overview");
     await act(async () => root.unmount());
   });
 

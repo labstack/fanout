@@ -86,11 +86,11 @@ describe("visualizations",()=>{
 it("formats distinct scatter axis units and numeric bucket order",()=>{
  const panel:Panel={id:"p",title:"Rows versus latency",viz:"scatter",x_unit:"count",unit:"ms",query:{from:"spans",by:["service"],measures:["count()","p95(duration_ms)"]}};
  const option=analysisOption(panel,resultFor("scatter"),chartThemeFor(false)) as {xAxis:{name:string;axisLabel:{formatter:(n:number)=>string}};yAxis:{name:string;axisLabel:{formatter:(n:number)=>string}}};
- expect(option.xAxis.name).toBe("Count");expect(option.yAxis.name).toBe("p95 (ms)");expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
+ expect(option.xAxis.name).toBe("Count");expect(option.yAxis.name).toBe("p95 (ms)");expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toBe("50");
  const frame={columns:fixtures.histogram!.columns,values:[[10,null,2],[20,1,10],[1,2,3]],rows:3};
  for(const viz of ["histogram","heatmap"] as const){
   const f=viz==="heatmap"?{columns:[col("time","time","time"),...frame.columns],values:[[3000,1000,2000],...frame.values],rows:3}:frame;
-  const got=analysisOption({...panel,viz}, {id:"p",status:"ok",elapsed_ms:1,frame:f},chartThemeFor(false)) as {xAxis?:{data?:string[]};yAxis?:{data?:string[]}};
+  const got=analysisOption({...panel,viz,x_unit:"ms"}, {id:"p",status:"ok",elapsed_ms:1,frame:f},chartThemeFor(false)) as {xAxis?:{data?:string[]};yAxis?:{data?:string[]}};
   expect(viz==="heatmap"?got.yAxis?.data:got.xAxis?.data).toEqual(["<1 ms","2–10 ms","10–20 ms"]);
  }
 });
@@ -149,7 +149,7 @@ it("formats midnight ticks as local month and day across time charts", () => {
  const daytime = new Date(2026,9,6,13,45,0).getTime();
  const expected = new Date(midnight).toLocaleDateString(undefined,{month:"short",day:"numeric"});
  const panel: Panel = {id:"p",title:"Time",viz:"timeseries"};
- const options = [timeseriesOption(panel,resultFor("heatmap"),chartThemeFor(false)),...(["heatmap","state_timeline"] as const).map(viz=>analysisOption({...panel,viz},resultFor(viz),chartThemeFor(false)))];
+ const options = [timeseriesOption(panel,resultFor("heatmap"),chartThemeFor(false)),...(["heatmap","state_timeline"] as const).map(viz=>analysisOption({...panel,viz,x_unit:"ms"},resultFor(viz),chartThemeFor(false)))];
  for (const option of options as {xAxis:{axisLabel?:{formatter?:(n:number)=>string}}}[]) {
   expect(option.xAxis.axisLabel?.formatter?.(midnight)).toBe(expected);
   expect(option.xAxis.axisLabel?.formatter?.(daytime)).toBe("13:45");

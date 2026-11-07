@@ -1,5 +1,5 @@
 import { DataState, Notice, StatusBadge } from "@labstack/ui";
-import { Badge, Box, Button, Group, Paper, Stack, Text, VisuallyHidden } from "@mantine/core";
+import { Badge, Box, Button, Group, Paper, Stack, Tabs, Text, VisuallyHidden } from "@mantine/core";
 import { Tooltip } from "@mantine/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Result, TraceDetail, TraceSpan } from "../../../../contracts";
@@ -25,9 +25,9 @@ export function TraceDetailView({ result, dark, onSpan, loadSpan }: { result: Re
   } }), [data.logs]);
   const loadedMs = useMemo(() => spanBounds(data.spans).total, [data.spans]);
   return <Stack gap="sm">
-    <Group><Text fw={600} ff="monospace" size="sm">{data.trace_id}</Text><StatusBadge tone={data.has_error ? "danger" : "success"}>{data.has_error ? "Error" : "Ok"}</StatusBadge></Group>
+    <Group><Text fw={600} ff="monospace" size="sm">{data.trace_id}</Text><StatusBadge tone={data.has_error ? "danger" : "success"}>{data.has_error ? "Error" : "OK"}</StatusBadge></Group>
     {data.spans.length > 0 ? <>
-      <Group role="group" aria-label="Trace view"><Button color="iris" aria-pressed={view === "waterfall"} variant={view === "waterfall" ? "light" : "subtle"} onClick={() => setView("waterfall")}>Waterfall</Button><Button color="iris" aria-pressed={view === "flame"} variant={view === "flame" ? "light" : "subtle"} onClick={() => setView("flame")}>Flame graph</Button></Group>
+      <Tabs value={view} onChange={value => value && setView(value)} aria-label="Trace view"><Tabs.List><Tabs.Tab value="waterfall" aria-pressed={view === "waterfall"}>Waterfall</Tabs.Tab><Tabs.Tab value="flame" aria-pressed={view === "flame"}>Flame graph</Tabs.Tab></Tabs.List></Tabs>
       {/* Beside the chart it qualifies: a truncated trace draws only the spans that loaded. */}
       {data.truncated && <Box data-trace-truncated><Notice tone="warning">This trace is truncated: {data.spans.length} of {data.span_count} spans, {data.services.length} of {data.service_count} services.{loadedMs < data.duration_ms ? ` The timeline shows the loaded spans: ${duration(loadedMs)} of the trace's ${duration(data.duration_ms)}.` : ""}</Notice></Box>}
       {view === "waterfall" ? <Waterfall spans={data.spans} dark={dark} onSpan={select} selected={picked?.span_id} /> : <FlameGraph spans={data.spans} dark={dark} onSpan={select} traceMs={data.truncated ? data.duration_ms : undefined} />}

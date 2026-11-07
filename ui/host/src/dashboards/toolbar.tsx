@@ -58,7 +58,6 @@ export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, 
     <Button variant={editing ? "filled" : "default"} size="sm" leftSection={<PencilSimple size={15} />} onClick={onEdit}>{editing ? "Done" : "Edit layout"}</Button>
     <Button variant="default" size="sm" leftSection={<ClockCounterClockwise size={15} />} onClick={onHistory}>History</Button>
     {onShortcuts && <ShortcutButton onClick={onShortcuts}/>}
-    {updatedAt && <Text size="xs" c="dimmed" visibleFrom="md">Updated {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(updatedAt)}</Text>}
     {selecting && <Text data-range-paused size="xs" c="dimmed" role="status">Paused while selecting</Text>}
   </Group>;
 }

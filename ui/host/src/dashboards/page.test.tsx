@@ -172,7 +172,8 @@ describe("DashboardPage", () => {
       const notes=host.querySelectorAll('[data-range-paused]');expect(notes).toHaveLength(1);
       expect(notes[0].closest('[aria-label="Dashboard controls"]')).not.toBeNull();
       expect((notes[0] as HTMLElement).style.position).not.toBe('absolute');
-      expect(notes[0].previousElementSibling?.textContent).toMatch(/^Updated /);
+      expect(host.querySelector('header')?.textContent).toMatch(/Updated /);
+      expect(host.querySelector('[aria-label="Dashboard controls"]')?.textContent).not.toMatch(/Updated /);
       expect(host.textContent?.match(/Paused while selecting/g)).toHaveLength(1);
       await act(async()=>vi.advanceTimersByTimeAsync(60000));await settle(client);expect(queryBodies).toHaveLength(before);
       await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label^="Cancel range"]')!.click());

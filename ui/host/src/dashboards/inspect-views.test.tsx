@@ -64,7 +64,7 @@ it.each([{width:219,height:180},{width:300,height:139},{width:238,height:56}])("
   expect(option.series).toEqual([]);
   expect(option.graphic.find((g:any)=>g.id==="gauge-value").style).toMatchObject({text:"1.76%",fontSize:28});
   expect(option.graphic.find((g:any)=>g.id==="gauge-track").shape.height).toBe(10);
-  expect(option.graphic.filter((g:any)=>g.type==="text").map((g:any)=>g.style.text)).toEqual(expect.arrayContaining(["0.00%","10.0%","■ Warn"]));
+  expect(option.graphic.filter((g:any)=>g.type==="text").map((g:any)=>g.style.text)).toEqual(expect.arrayContaining(["0.00%","10.0%","■ Degraded"]));
 });
 it.each([
  {viz:"timeseries",drill:"logs",hint:"click for matching logs"},
@@ -114,4 +114,11 @@ it.each([false,true])("table body shows a 16px fade only for measured scrolling 
  if(overflow){expect(fade).not.toBeNull();expect(fade!.style.height).toBe("16px");expect(fade!.style.pointerEvents).toBe("none");}else expect(fade).toBeNull();
  const body=h.querySelector('[data-panel-body]')!,note=h.querySelector('[data-panel-notes]')!;
  expect(body.contains(note)).toBe(false);expect(body.nextElementSibling).toBe(note);
+});
+
+it("uses singular row counts in the panel data footer", async () => {
+ const host=await render({id:"p",title:"Requests",viz:"table"});
+ await act(async()=>host.querySelector<HTMLButtonElement>('[data-panel-view="Data"]')!.click());
+ expect(host.querySelector('[data-panel-data]')?.textContent).toContain('Ran in 1 ms, 1 row.');
+ expect(host.textContent).not.toContain('1 rows');
 });

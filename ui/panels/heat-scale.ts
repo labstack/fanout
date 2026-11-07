@@ -1,8 +1,9 @@
 /** Sequential ramps have strictly ordered luminance, with a readable high end. */
+import { info } from "../tokens";
 import type { ChartTheme } from "./compile";
 export function heatRamp(theme: ChartTheme): string[] {
   return theme.dark ? ["#0f2a43", "#164267", "#1e5a8a", "#2879ae", "#399aca", "#57b8e3", "#7dd3fc"]
-    : ["#dbeafe", "#bfdbfe", "#93c5fd", "#60a5fa", "#3b82f6", "#2563eb", "#1d4ed8"];
+    : [info[0], info[1], info[2], info[3], info[5], info[7], info[9]];
 }
 /** Continuous capped log position; square-root spacing opens the low end. */
 export function heatStep(count: number, cap: number): number {

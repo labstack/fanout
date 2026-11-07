@@ -18,9 +18,9 @@ it.each([false, true])("heat counts use distinct monotonic quantile colours and 
   const levels = colours.map(relativeLuminance);
   const surface = relativeLuminance(theme.surface);
   expect(levels.every((level:number,i:number)=>i===0 || Math.abs(level-surface)>Math.abs(levels[i-1]-surface))).toBe(true);
-  expect(colours.at(-1)).toBe(dark ? "#7dd3fc" : "#1d4ed8");
+  expect(colours.at(-1)).toBe(dark ? "#7dd3fc" : "#0d4a6d");
   expect(render(1).style.stroke).toBeUndefined();
-  expect(colours[0]).toBe(dark ? "#0f2a43" : "#dbeafe");
+  expect(colours[0]).toBe(dark ? "#0f2a43" : "#e8f6ff");
   expect(render(0)).toBeUndefined();
   expect(render(99999).style.fill).toBe(colours.at(-1));
   expect(option.visualMap.dimension).toBe(5);
@@ -34,5 +34,5 @@ it.each([false,true])("a window of only singleton cells stays dim (%s)",dark=>{
  const theme=chartThemeFor(dark),result={id:"h",status:"ok" as const,elapsed_ms:1,frame:{columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"count",type:"number" as const,role:"measure" as const}],values:[[0],[1]],rows:1}};
  const option=analysisOption({id:"h",title:"Heat",viz:"heatmap"},result,theme) as any;
  const cell=option.series[0].renderItem({}, {value:(i:number)=>[0,0,1,60000][i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],visual:()=>seriesSlot(0,dark)});
- expect(cell.style.fill).toBe(dark ? "#0f2a43" : "#dbeafe");
+ expect(cell.style.fill).toBe(dark ? "#0f2a43" : "#e8f6ff");
 });

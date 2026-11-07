@@ -279,7 +279,7 @@ describe("visualization regressions", () => {
     const tableFrame: Frame = { columns: [{ name: "service", type: "string", role: "dimension" }, { name: "latency", type: "number", role: "measure", unit: "ms" }, { name: "size", type: "number", role: "measure", unit: "bytes" }], values: [["cart", "checkout"], [900, 40], [2048, 1024]], rows: 2 };
     const { host } = await render(<TableViz panel={{ ...panel, viz: "table", better: "lower", unit: "count", thresholds: [{ value: 100, status: "warn" }] }} result={{ ...result, frame: tableFrame }} height={200} />);
     const cells = host.querySelectorAll("tbody tr:first-child td p");
-    expect(cells[1].textContent).toBe("900ms");
+    expect(cells[1].textContent).toBe("900 ms");
     expect(cells[1].getAttribute("style")).toContain(statusInk("warn",false));
     expect(cells[2].textContent).toBe("2.0 KiB");
     expect(cells[2].getAttribute("style") ?? "").not.toMatch(/warn|bad|ok/);

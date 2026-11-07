@@ -175,7 +175,7 @@ export function ChatPage() {
       {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} running={running && message.id === lastSent} awaitingAnswer={!hasFinalText} activity={activity} /></Box>}
     </Box>;
   return <Box className="chat-pane">
-    <Box p="md"><PageHeader title="Chat" description="Investigate your telemetry with Fanout." /></Box>
+    <Container size={880} w="100%" px={{ base: "md", sm: "xl" }} py="md"><PageHeader title="Chat" description="Investigate your telemetry with Fanout." /></Container>
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
         scroller focusable only when it holds no focusable children, and this
         one holds copy buttons and links, so it says so itself. */}
@@ -269,7 +269,7 @@ function ChatMessage({ message, time, appView }: { message: Message; time?: numb
   return <Box className="chat-message" data-chat-anchor data-role={user ? "user" : "assistant"}>
     {user
       ? <Paper radius="lg" px="md" py="sm" bg="var(--labstack-inset)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
-      : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm, answerHeadingLevels]} components={markdownComponents}>{content}</Markdown></Typography>}
+      : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm, answerStructure]} components={markdownComponents}>{content}</Markdown></Typography>}
     {(stamp || !user) && <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4} h={24}>
       {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}
       {!user && <CopyButton text={content} label="Copy message" />}
@@ -286,13 +286,19 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   </Tooltip>;
 }
 
-type MarkdownNode = { type: string; depth?: number; children?: MarkdownNode[] };
+type MarkdownNode = { type: string; depth?: number; value?: string; align?: ("left" | "right" | "center" | null)[]; children?: MarkdownNode[] };
 
-/** Answers are sections under the page h1; authored heading gaps do not skip DOM levels. */
-function answerHeadingLevels() {
+/** Answers follow the page heading and give numeric table columns one alignment. */
+function answerStructure() {
   return (tree: MarkdownNode) => {
     const parents: number[] = [];
     const visit = (node: MarkdownNode) => {
+      if (node.type === "table" && node.children) {
+        const text = (cell: MarkdownNode): string => cell.value ?? cell.children?.map(text).join("") ?? "";
+        const rows = node.children.slice(1);
+        node.align = (node.children[0]?.children ?? []).map((_, index) =>
+          rows.length && rows.every(row => /^[-+−]?\d[\d,.]*(?:%|\s?(?:ms|s|K|M))?$/.test(text(row.children?.[index] ?? {type: "text"}).trim())) ? "right" : node.align?.[index] ?? null);
+      }
       if (node.type === "heading" && node.depth !== undefined) {
         const depth = node.depth;
         while (parents.length && parents.at(-1)! >= depth) parents.pop();
@@ -313,8 +319,8 @@ const markdownComponents: Components = {
   thead: ({ children }) => <Table.Thead>{children}</Table.Thead>,
   tbody: ({ children }) => <Table.Tbody>{children}</Table.Tbody>,
   tr: ({ children }) => <Table.Tr>{children}</Table.Tr>,
-  th: ({ children }) => <Table.Th>{children}</Table.Th>,
-  td: ({ children }) => <Table.Td ta={typeof children === "string" && /^[-+−]?\d[\d,.]*(?:%|\s?(?:ms|s|K|M))?$/.test(children.trim()) ? "right" : undefined} ff={typeof children === "string" && /^[-+−]?\d/.test(children.trim()) ? "monospace" : undefined}>{children}</Table.Td>,
+  th: ({ children, style }) => <Table.Th style={style}>{children}</Table.Th>,
+  td: ({ children, style }) => <Table.Td style={style} ta={typeof children === "string" && /^[-+−]?\d[\d,.]*(?:%|\s?(?:ms|s|K|M))?$/.test(children.trim()) ? "right" : undefined} ff={typeof children === "string" && /^[-+−]?\d/.test(children.trim()) ? "monospace" : undefined}>{children}</Table.Td>,
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
 };

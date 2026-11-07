@@ -439,6 +439,8 @@ describe("ChatPage", () => {
     const table = document.querySelector(".chat-markdown table");
     expect(table).not.toBeNull();
     expect(table?.closest(".chat-table")).not.toBeNull();
+    expect(table?.querySelectorAll("th")[1].style.textAlign).toBe("right");
+    expect(table?.querySelectorAll("td")[1].style.textAlign).toBe("right");
     expect(document.querySelector(".chat-markdown pre code")?.textContent).toContain("SELECT 1");
     expect(document.querySelector('button[aria-label="Copy code"]')).not.toBeNull();
     expect(document.querySelector('button[aria-label="Copy message"]')).not.toBeNull();

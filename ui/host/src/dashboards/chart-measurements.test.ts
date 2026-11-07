@@ -115,7 +115,7 @@ it.each([false,true])("measures actual SVG renderer heat gaps/scale and bar labe
   expect(audit.marks.length).toBeGreaterThan(0);expect(audit.texts.every(t=>t.size>=11)).toBe(true);
   const bars=barOption({id:"b",title:"Bars",viz:"bar"},{columns:[{name:"route",type:"string",role:"dimension"},{name:"latency",type:"number",role:"measure",unit:"ms"}],values:[["/cart","/checkout"],[1450,330]],rows:2},theme);
   chart.setOption({...bars,animation:false},{notMerge:true});
-  const bar=nativeAudit(chart,bars,{width:500,height:240});expect(bar.bars!.value_labels).toContain("1.45s");expect(bar.bars!.value_labels).toContain("330ms");expect(bar.bars!.category_fraction).toBeLessThanOrEqual(.4);
+  const bar=nativeAudit(chart,bars,{width:500,height:240});expect(bar.bars!.value_labels).toContain("1.45 s");expect(bar.bars!.value_labels).toContain("330 ms");expect(bar.bars!.category_fraction).toBeLessThanOrEqual(.4);
  } finally {chart.dispose();el.remove();}
 });
 

@@ -18,9 +18,10 @@ export const Building: Story = { args: { receipt: { ...savedReceipt, saved: unde
 
 export const InvalidPanel: Story = { args: { receipt: invalidReceipt }, play: async ({ canvas, userEvent }) => {
   await expect(canvas.getByText("Requests: Unknown field: request_total")).toBeVisible();
+  await expect(canvas.getAllByText("Requests: Unknown field: request_total")).toHaveLength(1);
   await userEvent.click(canvas.getByRole("button", { name: /^Details/ }));
   await waitFor(() => {
-    expect(canvas.getByText(/Preview · Requests:/)).toHaveTextContent("Preview · Requests: Invalid · 0 ms");
+    expect(canvas.getByText(/Preview · Requests:/)).toHaveTextContent("Preview · Requests: Invalid");
     expect(canvas.getByText(/Preview · Requests:/)).toBeVisible();
     expect(canvas.getByText(/Preview · p95 latency:/)).toBeVisible();
   });
@@ -35,6 +36,7 @@ export const Corrected: Story = { args: { receipt: correctedReceipt }, play: asy
 export const SavedWithInvalidPanel: Story = { args: { receipt: savedInvalidReceipt }, play: async ({ canvas, userEvent }) => {
   await expect(canvas.getByText(/Saved v1/)).toBeVisible();
   await expect(canvas.getByText("Requests: Unknown field: request_total")).toBeVisible();
+  await expect(canvas.getAllByText("Requests: Unknown field: request_total")).toHaveLength(1);
   await userEvent.click(canvas.getByRole("button", { name: /^Details/ }));
-  await waitFor(() => expect(canvas.getByText(/Save · Requests:/)).toHaveTextContent("Save · Requests: Invalid · 0 rows · 0 ms"));
+  await waitFor(() => expect(canvas.getByText(/Save · Requests:/)).toHaveTextContent("Save · Requests: Invalid"));
 } };

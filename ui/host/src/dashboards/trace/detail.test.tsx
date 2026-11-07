@@ -116,7 +116,7 @@ it("keeps flame ticks on one line and folds services past the palette into one l
     await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><TraceDetailView result={{ ...traceFixture, data: { ...traceFixture.data, spans } }} dark={false} /></QueryClientProvider></MantineProvider>));
     await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
     const ticks = [...node.querySelectorAll<HTMLElement>("[data-flame-graph] > div:first-child > *")];
-    expect(ticks.at(-1)?.textContent).toBe("50m 20s");
+    expect(ticks.at(-1)?.textContent).toBe("50 m 20 s");
     expect(ticks.every(tick => tick.style.whiteSpace === "nowrap")).toBe(true);
     const legend = [...node.querySelectorAll("[data-flame-legend] > *")].map(item => item.textContent);
     expect(legend).toEqual(["svc0", "svc1", "svc2", "svc3", "svc4", "svc5", "2 other services: svc6, svc7"]);
