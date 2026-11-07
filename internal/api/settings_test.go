@@ -61,15 +61,15 @@ func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 	}
 }
 
-// An owner created from FANOUT_OWNER_EMAIL never runs interactive setup, so
+// An administrator created from FANOUT_FIRST_ADMIN_EMAIL never runs interactive setup, so
 // the first ingest token comes from the rotate action on an empty setting.
-func TestRotateIngestToken_IssuesFirstTokenForOwner(t *testing.T) {
+func TestRotateIngestToken_IssuesFirstTokenForDesignatedAdministrator(t *testing.T) {
 	s, store := newConfigServer(t, config.Config{Addr: ":7520"})
-	owner, _, err := s.users.DesignateOwner("owner@example.com")
+	firstAdmin, _, err := s.users.DesignateFirstAdmin("first@example.com")
 	if err != nil {
-		t.Fatalf("DesignateOwner: %v", err)
+		t.Fatalf("DesignateFirstAdmin: %v", err)
 	}
-	cookie := s.login(t, owner)
+	cookie := s.login(t, firstAdmin)
 	read := func() ingestResponse {
 		t.Helper()
 		rec := httptest.NewRecorder()
@@ -84,7 +84,7 @@ func TestRotateIngestToken_IssuesFirstTokenForOwner(t *testing.T) {
 		return resp
 	}
 	if read().TokenRequired {
-		t.Fatal("owner database already has an ingest token")
+		t.Fatal("designated administrator database already has an ingest token")
 	}
 	rec := httptest.NewRecorder()
 	req := sessionRequest(http.MethodPost, "/api/settings/ingest/token/rotate", nil, cookie)
@@ -104,7 +104,7 @@ func TestRotateIngestToken_IssuesFirstTokenForOwner(t *testing.T) {
 		t.Fatal("token_required is false after the first token was issued")
 	}
 	var events int
-	if err := s.db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'ingest_key.rotated' AND actor_user_id = ?`, owner.ID).Scan(&events); err != nil {
+	if err := s.db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'ingest_key.rotated' AND actor_user_id = ?`, firstAdmin.ID).Scan(&events); err != nil {
 		t.Fatalf("query audit: %v", err)
 	}
 	if events != 1 {

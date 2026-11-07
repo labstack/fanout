@@ -283,12 +283,12 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 	}
 }
 
-// An owner designated by FANOUT_OWNER_EMAIL has no linked identity until the
+// An administrator designated by FANOUT_FIRST_ADMIN_EMAIL has no linked identity until the
 // first OIDC sign-in. That sign-in must link by verified email, audit the
-// link, and keep the owner an administrator even when the group mapping would
-// demote it, because the owner is the only active administrator.
-func TestOIDCCallbackLinksDesignatedOwnerAndKeepsAdministrator(t *testing.T) {
-	idp := newTestOIDCProvider(t, "Owner@Example.com")
+// link, and keep the account an administrator even when the group mapping would
+// demote it, because it is the only active administrator.
+func TestOIDCCallbackLinksDesignatedFirstAdministrator(t *testing.T) {
+	idp := newTestOIDCProvider(t, "First@Example.com")
 	idp.groups = []string{"staff"}
 	db, err := appstore.NewSQLite(":memory:")
 	if err != nil {
@@ -296,9 +296,9 @@ func TestOIDCCallbackLinksDesignatedOwnerAndKeepsAdministrator(t *testing.T) {
 	}
 	defer db.Close()
 	users := appauth.NewUserStore(db.DB)
-	owner, outcome, err := users.DesignateOwner("owner@example.com")
-	if err != nil || outcome != appauth.OwnerCreated {
-		t.Fatalf("DesignateOwner = (%v, %v)", outcome, err)
+	firstAdmin, outcome, err := users.DesignateFirstAdmin("first@example.com")
+	if err != nil || outcome != appauth.FirstAdminCreated {
+		t.Fatalf("DesignateFirstAdmin = (%v, %v)", outcome, err)
 	}
 	cfg := config.Config{
 		AuthMode: "oidc", OIDCIssuerURL: idp.issuer, OIDCClientID: "fanout-client", OIDCClientSecret: "client-secret",
@@ -312,15 +312,15 @@ func TestOIDCCallbackLinksDesignatedOwnerAndKeepsAdministrator(t *testing.T) {
 		t.Fatalf("OIDC callback = %d location %q: %s", callbackRecorder.Code, callbackRecorder.Header().Get("Location"), callbackRecorder.Body.String())
 	}
 	identity, err := identities.Find(t.Context(), idp.issuer, "subject-1")
-	if err != nil || identity.UserID != owner.ID {
-		t.Fatalf("linked identity = %+v, err %v; want owner %s", identity, err, owner.ID)
+	if err != nil || identity.UserID != firstAdmin.ID {
+		t.Fatalf("linked identity = %+v, err %v; want first administrator %s", identity, err, firstAdmin.ID)
 	}
-	after, err := users.GetByID(owner.ID)
+	after, err := users.GetByID(firstAdmin.ID)
 	if err != nil || after.Role != appauth.RoleAdmin || after.Status != appauth.UserStatusActive {
-		t.Fatalf("owner after OIDC login = %+v err %v, want active admin", after, err)
+		t.Fatalf("first administrator after OIDC login = %+v err %v, want active admin", after, err)
 	}
 	var linked, roleChanges int
-	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'identity.linked' AND actor_user_id = ?`, owner.ID).Scan(&linked); err != nil {
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'identity.linked' AND actor_user_id = ?`, firstAdmin.ID).Scan(&linked); err != nil {
 		t.Fatalf("count identity.linked: %v", err)
 	}
 	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'role.changed'`).Scan(&roleChanges); err != nil {

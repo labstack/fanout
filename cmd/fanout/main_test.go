@@ -218,7 +218,7 @@ func TestCreateLoginLink(t *testing.T) {
 	}
 }
 
-func TestPrepareFirstAdministratorWithoutOwnerEmailKeepsSetup(t *testing.T) {
+func TestPrepareFirstAdministratorWithoutFirstAdminEmailKeepsSetup(t *testing.T) {
 	sqlite, err := store.NewSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("NewSQLite: %v", err)
@@ -234,13 +234,13 @@ func TestPrepareFirstAdministratorWithoutOwnerEmailKeepsSetup(t *testing.T) {
 	}
 }
 
-func TestPrepareFirstAdministratorCreatesOwnerWhoCanUseLoginLink(t *testing.T) {
+func TestPrepareFirstAdministratorCreatesAdministratorWhoCanUseLoginLink(t *testing.T) {
 	cfg := config.Config{
-		AuthMode:       "local",
-		AuthCodeSecret: "0123456789abcdef0123456789abcdef",
-		DataDir:        t.TempDir(),
-		Addr:           ":7520",
-		OwnerEmail:     "Owner@Example.com",
+		AuthMode:        "local",
+		AuthCodeSecret:  "0123456789abcdef0123456789abcdef",
+		DataDir:         t.TempDir(),
+		Addr:            ":7520",
+		FirstAdminEmail: "First@Example.com",
 	}
 	if err := os.MkdirAll(cfg.ControlDir(), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -250,16 +250,16 @@ func TestPrepareFirstAdministratorCreatesOwnerWhoCanUseLoginLink(t *testing.T) {
 		t.Fatalf("NewSQLite: %v", err)
 	}
 	users := auth.NewUserStore(sqlite.DB)
-	setupRequired, err := prepareFirstAdministrator(cfg.OwnerEmail, users)
+	setupRequired, err := prepareFirstAdministrator(cfg.FirstAdminEmail, users)
 	if err != nil || setupRequired {
 		t.Fatalf("prepareFirstAdministrator = (%v, %v), want (false, nil)", setupRequired, err)
 	}
-	owner, err := users.GetByEmail("owner@example.com")
-	if err != nil || owner.Role != auth.RoleAdmin || owner.Status != auth.UserStatusActive {
-		t.Fatalf("owner = %+v err = %v, want active admin", owner, err)
+	firstAdmin, err := users.GetByEmail("first@example.com")
+	if err != nil || firstAdmin.Role != auth.RoleAdmin || firstAdmin.Status != auth.UserStatusActive {
+		t.Fatalf("firstAdmin = %+v err = %v, want active admin", firstAdmin, err)
 	}
 	// A restart with the same setting is a no-op, and still issues no setup URL.
-	setupRequired, err = prepareFirstAdministrator(cfg.OwnerEmail, users)
+	setupRequired, err = prepareFirstAdministrator(cfg.FirstAdminEmail, users)
 	if err != nil || setupRequired {
 		t.Fatalf("restart prepareFirstAdministrator = (%v, %v), want (false, nil)", setupRequired, err)
 	}
@@ -270,15 +270,15 @@ func TestPrepareFirstAdministratorCreatesOwnerWhoCanUseLoginLink(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 	var output bytes.Buffer
-	if err := createLoginLink(cfg, "owner@example.com", &output); err != nil {
-		t.Fatalf("createLoginLink for owner: %v", err)
+	if err := createLoginLink(cfg, "first@example.com", &output); err != nil {
+		t.Fatalf("createLoginLink for first administrator: %v", err)
 	}
 	if !strings.Contains(output.String(), "login_token=") {
 		t.Fatalf("login link output = %q", output.String())
 	}
 }
 
-func TestPrepareFirstAdministratorRefusesSecondOwner(t *testing.T) {
+func TestPrepareFirstAdministratorRefusesDifferentAddress(t *testing.T) {
 	sqlite, err := store.NewSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("NewSQLite: %v", err)
@@ -291,16 +291,16 @@ func TestPrepareFirstAdministratorRefusesSecondOwner(t *testing.T) {
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	setupRequired, err := prepareFirstAdministrator(" Owner@Example.com", users)
+	setupRequired, err := prepareFirstAdministrator(" First@Example.com", users)
 	slog.SetDefault(previous)
 	if err != nil || setupRequired {
 		t.Fatalf("prepareFirstAdministrator = (%v, %v), want (false, nil)", setupRequired, err)
 	}
-	if _, err := users.GetByEmail("owner@example.com"); !errors.Is(err, auth.ErrUserNotFound) {
-		t.Fatalf("second owner lookup err = %v, want ErrUserNotFound", err)
+	if _, err := users.GetByEmail("first@example.com"); !errors.Is(err, auth.ErrUserNotFound) {
+		t.Fatalf("different address lookup err = %v, want ErrUserNotFound", err)
 	}
-	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "FANOUT_OWNER_EMAIL ignored") || !strings.Contains(out, "email=owner@example.com") {
-		t.Fatalf("refusal log = %q, want a warning naming owner@example.com", out)
+	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "FANOUT_FIRST_ADMIN_EMAIL ignored") || !strings.Contains(out, "email=first@example.com") {
+		t.Fatalf("refusal log = %q, want a warning naming first@example.com", out)
 	}
 }
 

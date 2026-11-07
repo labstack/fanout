@@ -167,9 +167,9 @@ type Config struct {
 	AuthCodeSecret string `group:"auth" env:"FANOUT_AUTH_CODE_SECRET" secret:"true"`
 	// SelfSignup allows verified email addresses to create viewer accounts; requires local auth and SMTP.
 	SelfSignup bool `group:"auth" env:"FANOUT_SELF_SIGNUP" default:"false"`
-	// OwnerEmail creates this address as the first active administrator when the control
+	// FirstAdminEmail creates this address as the first active administrator when the control
 	// database has no users, instead of printing the one-time setup URL; ignored once users exist.
-	OwnerEmail string `group:"auth" env:"FANOUT_OWNER_EMAIL"`
+	FirstAdminEmail string `group:"auth" env:"FANOUT_FIRST_ADMIN_EMAIL"`
 	// SessionIdleTTL expires inactive sessions; use a Go duration of at least 5m.
 	SessionIdleTTL time.Duration `group:"auth" env:"FANOUT_SESSION_IDLE_TTL" default:"12h"`
 	// SessionAbsoluteTTL limits total session lifetime; it must be at least FANOUT_SESSION_IDLE_TTL.
@@ -323,9 +323,9 @@ func (c Config) Validate() error {
 			return fmt.Errorf("FANOUT_AUTH_CODE_SECRET must be at least 32 characters")
 		}
 	}
-	if c.OwnerEmail != "" {
-		if _, err := appauth.NormalizeEmail(c.OwnerEmail); err != nil {
-			return fmt.Errorf("FANOUT_OWNER_EMAIL must be a valid email address")
+	if c.FirstAdminEmail != "" {
+		if _, err := appauth.NormalizeEmail(c.FirstAdminEmail); err != nil {
+			return fmt.Errorf("FANOUT_FIRST_ADMIN_EMAIL must be a valid email address")
 		}
 	}
 	if anySet(c.SMTPHost, c.SMTPUser, c.SMTPPass, c.SMTPFrom) {

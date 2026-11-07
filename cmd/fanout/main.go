@@ -195,7 +195,7 @@ func main() {
 	auditStore := auth.NewAuditStore(sqlite.DB)
 	setup := auth.NewSetup()
 
-	setupRequired, err := prepareFirstAdministrator(cfg.OwnerEmail, userStore)
+	setupRequired, err := prepareFirstAdministrator(cfg.FirstAdminEmail, userStore)
 	if err != nil {
 		slog.Error("auth status init failed", "err", err)
 		os.Exit(1)
@@ -694,25 +694,25 @@ func browserLoginURL(cfg config.Config) *url.URL {
 	return loginURL
 }
 
-// prepareFirstAdministrator applies FANOUT_OWNER_EMAIL and reports whether the
+// prepareFirstAdministrator applies FANOUT_FIRST_ADMIN_EMAIL and reports whether the
 // control database still has no users, in which case the caller opens the
-// one-time setup URL. The owner is created only in an empty database; once
+// one-time setup URL. The administrator is created only in an empty database; once
 // any user exists the setting never creates, promotes or reactivates anyone.
-func prepareFirstAdministrator(ownerEmail string, users *auth.UserStore) (bool, error) {
-	if ownerEmail != "" {
-		owner, outcome, err := users.DesignateOwner(ownerEmail)
+func prepareFirstAdministrator(firstAdminEmail string, users *auth.UserStore) (bool, error) {
+	if firstAdminEmail != "" {
+		firstAdmin, outcome, err := users.DesignateFirstAdmin(firstAdminEmail)
 		if err != nil {
-			return false, fmt.Errorf("designate owner from FANOUT_OWNER_EMAIL: %w", err)
+			return false, fmt.Errorf("designate first administrator from FANOUT_FIRST_ADMIN_EMAIL: %w", err)
 		}
 		switch outcome {
-		case auth.OwnerCreated:
-			slog.Info("auth: owner created as the first administrator from FANOUT_OWNER_EMAIL; no setup URL is issued", "email", owner.Email)
-		case auth.OwnerPresent:
-			if owner.Role != auth.RoleAdmin || owner.Status != auth.UserStatusActive {
-				slog.Warn("auth: FANOUT_OWNER_EMAIL names an existing account that is not an active administrator; it was left unchanged", "email", owner.Email, "role", owner.Role, "status", owner.Status)
+		case auth.FirstAdminCreated:
+			slog.Info("auth: first administrator created from FANOUT_FIRST_ADMIN_EMAIL; no setup URL is issued", "email", firstAdmin.Email)
+		case auth.FirstAdminPresent:
+			if firstAdmin.Role != auth.RoleAdmin || firstAdmin.Status != auth.UserStatusActive {
+				slog.Warn("auth: FANOUT_FIRST_ADMIN_EMAIL names an existing account that is not an active administrator; it was left unchanged", "email", firstAdmin.Email, "role", firstAdmin.Role, "status", firstAdmin.Status)
 			}
-		case auth.OwnerRefused:
-			slog.Warn("auth: FANOUT_OWNER_EMAIL ignored; the control database already has users and none has this email, so no owner was created. Unset it, or have an administrator add the account", "email", owner.Email)
+		case auth.FirstAdminRefused:
+			slog.Warn("auth: FANOUT_FIRST_ADMIN_EMAIL ignored; the control database already has users and none has this email, so no account was created. Unset it, or have an administrator add the account", "email", firstAdmin.Email)
 		}
 	}
 	count, err := users.CountUsers()

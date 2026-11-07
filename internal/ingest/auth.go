@@ -83,7 +83,7 @@ func (a *ingestAuthorizer) authorizeToken(ctx context.Context, token string) err
 	}
 	if ingestCfg.TokenHash == "" {
 		// No token has been issued yet: interactive setup issues the first one,
-		// and an owner created from FANOUT_OWNER_EMAIL issues it from Settings.
+		// and an administrator created from FANOUT_FIRST_ADMIN_EMAIL issues it from Settings.
 		// Reject all requests until then; collectors must wait.
 		slog.Warn("ingest: rejecting request — no ingest token configured; an administrator must issue one")
 		return errIngestNotInitialized
