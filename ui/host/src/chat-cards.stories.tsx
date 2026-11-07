@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useArgs } from "storybook/preview-api";
 import { expect, fn, waitFor } from "storybook/test";
 import { useRef, type FormEvent } from "react";
+import { contrastRatio } from "@labstack/ui";
 import type { Message } from "@ag-ui/client";
 import { FanoutAppContext } from "./app-context";
 import { ChatPage } from "./chat";
@@ -32,6 +33,13 @@ export const Composer: Story = { args: { messages: [] }, play: async ({ canvas, 
     typed += character;
     await waitFor(() => expect(input).toHaveValue(typed));
   }
+  const composer = input.closest<HTMLElement>(".chat-composer-field")!;
+  const style = getComputedStyle(composer);
+  const hex = (color: string) => "#" + color.match(/\d+/g)!.slice(0, 3).map(channel => Number(channel).toString(16).padStart(2, "0")).join("");
+  const focus = style.getPropertyValue("--fanout-focus").trim();
+  await expect(hex(style.borderColor)).toBe(focus.toLowerCase());
+  await expect(contrastRatio(hex(style.borderColor), hex(style.backgroundColor))).toBeGreaterThanOrEqual(3);
+  await expect(style.boxShadow).toContain(style.borderColor);
   await expect(input).toHaveValue("How is checkout?");
   await expect(canvas.getByRole("button", { name: "Send message" })).toBeEnabled();
 } };

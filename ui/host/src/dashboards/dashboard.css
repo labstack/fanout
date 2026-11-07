@@ -32,7 +32,7 @@
 
 .react-grid-item.react-grid-placeholder {
   border-radius: var(--mantine-radius-lg);
-  background: var(--mantine-primary-color-filled);
+  background: var(--fanout-focus);
   opacity: 0.14;
 }
 
@@ -74,7 +74,7 @@
   padding-inline: 16px;
 }
 
-.chart-keyboard-point:focus-visible, [data-panel] button:focus-visible, [data-panel] tr:focus-visible, [data-panel]:focus-visible { outline: 2px solid var(--mantine-primary-color-filled); outline-offset: -2px; }
+.chart-keyboard-point:focus-visible, [data-panel] button:focus-visible, [data-panel] tr:focus-visible, [data-panel]:focus-visible { outline: 2px solid var(--fanout-focus); outline-offset: -2px; }
 
 /* Narrow logs and traces stack each row: its context on one wrapping line and
    the body or operation at full width, so nothing important scrolls away. */

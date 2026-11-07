@@ -1,6 +1,6 @@
 import { useComputedColorScheme } from "@mantine/core";
 import type { ReactNode } from "react";
-import { brand, fonts } from "../../../../tokens";
+import { brand, fonts, surfaces } from "../../../../tokens";
 import { chart } from "../../../../theme";
 
 export function RowText({ text, template = false, highlight = "" }: { text: string; template?: boolean; highlight?: string }) {
@@ -27,7 +27,7 @@ export function RowText({ text, template = false, highlight = "" }: { text: stri
   let cursor = 0;
   if (template) for (const match of text.matchAll(/<\*>|<str>|<num>|<ip>|<time>/g)) {
     parts.push(...decorate(cursor,match.index));
-    parts.push(<span key={`chip-${match.index}`} data-template-chip style={{background:`rgba(${rgb}, .15)`,color:brand[dark ? 3 : 9],borderRadius:3,padding:"0 3px",fontSize:12}}>{decorate(match.index,match.index+match[0].length)}</span>);
+    parts.push(<span key={`chip-${match.index}`} data-template-chip style={{background:surfaces[dark ? "dark" : "light"].inset,color:chart[dark ? "dark" : "light"].text,borderRadius:3,padding:"0 3px",fontSize:12}}>{decorate(match.index,match.index+match[0].length)}</span>);
     cursor = match.index+match[0].length;
   }
   parts.push(...decorate(cursor,text.length));

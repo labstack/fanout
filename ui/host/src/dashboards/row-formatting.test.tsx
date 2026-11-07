@@ -10,7 +10,7 @@ import { PanelCard } from "./panel-card";
 import { TableViz } from "./viz/table";
 import { RowPanel } from "./viz/row-panel";
 import { StateTimelineViz } from "./viz/state-timeline";
-import { ok, warn, bad } from "../../../tokens";
+import { ok, warn, bad, surfaces } from "../../../tokens";
 import { chart } from "../../../theme";
 import { PanelSpec } from "./inspect";
 import { RowText } from "./viz/cell-text";
@@ -18,6 +18,7 @@ import { RowText } from "./viz/cell-text";
 const contrastRatio=(a:string,b:string)=>{const x=relativeLuminance(a),y=relativeLuminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
 const toHex=(color:string)=>color.startsWith("#")?color:"#"+(color.match(/[\d.]+/g)??[]).slice(0,3).map(n=>Math.round(Number(n)).toString(16).padStart(2,"0")).join("");
 function composite(color:string,surface:string) {
+ if(color.startsWith("#")) return color;
  const values=color.match(/[\d.]+/g)!.map(Number),alpha=values[3]??1;
  return "#"+[1,3,5].map((at,i)=>Math.round(values[i]*alpha+parseInt(surface.slice(at,at+2),16)*(1-alpha)).toString(16).padStart(2,"0")).join("");
 }
@@ -70,11 +71,15 @@ it.each([false,true])("log body owns remaining width, clamps then expands; trace
  await act(async()=>row.click()); expect(row.dataset.rowExpanded).toBe("true"); expect(text.style.maxHeight).toBe("");
  await act(async()=>row.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}))); expect(row.dataset.rowExpanded).toBe("false");
 });
-it.each([false,true])("templates use five accent chips, numeric dimensions align, trace links clip, dark=%s",async dark=>{
+it.each([false,true])("templates use five neutral chips, numeric dimensions align, trace links clip, dark=%s",async dark=>{
  const p:Panel={id:"t",title:"Table",viz:"table",options:{columns:[{field:"template",format:"log_template"},{field:"duration",format:"bar",unit:"ms"},{field:"trace",format:"trace_link"}]}};
  const f:Frame={columns:[{name:"template",type:"string",role:"dimension"},{name:"duration",type:"number",role:"measure",unit:"ms"},{name:"attempts",type:"number",role:"dimension"},{name:"trace",type:"string",role:"dimension"}],values:[[body],[1450],[3],[id]],rows:1};
  await mount(<TableViz panel={p} result={{...result,frame:f}} height={350}/>,dark);
  expect([...host.querySelectorAll("[data-template-chip]")].map(e=>e.textContent)).toEqual(["<*>","<str>","<num>","<ip>","<time>"]);
+ for (const chip of host.querySelectorAll<HTMLElement>("[data-template-chip]")) {
+  expect(toHex(chip.style.background).toLowerCase()).toBe(surfaces[dark ? "dark" : "light"].inset.toLowerCase());
+  expect(toHex(chip.style.color).toLowerCase()).toBe(surfaces[dark ? "dark" : "light"].text.toLowerCase());
+ }
  expect(host.querySelector("mark")).toBeNull();
  const cells=host.querySelectorAll<HTMLElement>("tbody td"); expect(cells[1].textContent).toContain("1.45 s"); expect(cells[2].style.textAlign).toBe("right");
  expect(cells[2].querySelector<HTMLElement>("p")?.style.fontFamily).toContain("monospace");

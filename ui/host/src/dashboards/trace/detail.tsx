@@ -26,7 +26,7 @@ export function TraceDetailView({ result, dark, onSpan, loadSpan }: { result: Re
   return <Stack gap="sm">
     <Group><Text fw={600}>{data.trace_id}</Text><Text c={data.has_error ? "bad" : "dimmed"}>{data.has_error ? "■ Error" : "● OK"}</Text></Group>
     {data.spans.length > 0 ? <>
-      <Group role="group" aria-label="Trace view"><Button aria-pressed={view === "waterfall"} variant={view === "waterfall" ? "light" : "subtle"} onClick={() => setView("waterfall")}>Waterfall</Button><Button aria-pressed={view === "flame"} variant={view === "flame" ? "light" : "subtle"} onClick={() => setView("flame")}>Flame graph</Button></Group>
+      <Group role="group" aria-label="Trace view"><Button color="iris" aria-pressed={view === "waterfall"} variant={view === "waterfall" ? "light" : "subtle"} onClick={() => setView("waterfall")}>Waterfall</Button><Button color="iris" aria-pressed={view === "flame"} variant={view === "flame" ? "light" : "subtle"} onClick={() => setView("flame")}>Flame graph</Button></Group>
       {/* Beside the chart it qualifies: a truncated trace draws only the spans that loaded. */}
       {data.truncated && <Alert color="warn" data-trace-truncated>This trace is truncated: {data.spans.length} of {data.span_count} spans, {data.services.length} of {data.service_count} services.{loadedMs < data.duration_ms ? ` The timeline shows the loaded spans: ${duration(loadedMs)} of the trace's ${duration(data.duration_ms)}.` : ""}</Alert>}
       {view === "waterfall" ? <Waterfall spans={data.spans} dark={dark} onSpan={select} selected={picked?.span_id} /> : <FlameGraph spans={data.spans} dark={dark} onSpan={select} traceMs={data.truncated ? data.duration_ms : undefined} />}

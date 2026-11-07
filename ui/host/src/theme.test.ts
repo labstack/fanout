@@ -19,9 +19,9 @@ it("uses Geist for UI and headings and Geist Mono for data", () => {
   expect(theme.fontFamilyMonospace).toBe(fonts.display);
 });
 it("sets the Console scale, soft radii and compact controls", () => {
-  expect(typeScale).toEqual({ micro: 11, small: 12, body: 14, title: 16, section: 18, page: 24 });
-  expect(theme.headings.sizes.h1.fontSize).toBe("1.5rem");
-  expect(theme.headings.sizes.h2.fontSize).toBe("1.125rem");
+  expect(typeScale).toEqual({ micro: 11, small: 12, body: 14, title: 16, section: 20, page: 28 });
+  expect(theme.headings.sizes.h1.fontSize).toBe("1.75rem");
+  expect(theme.headings.sizes.h2.fontSize).toBe("1.25rem");
   expect(theme.radius).toMatchObject({ sm: "4px", md: "8px", lg: "12px" });
   expect(theme.components.Button.defaultProps).toMatchObject({ size: "sm", radius: 4 });
 });
@@ -40,8 +40,17 @@ describe.each(["light", "dark"] as const)("%s scheme", scheme => {
       expect(contrastRatio(accent, background)).toBeGreaterThanOrEqual(3);
     }
     expect(value("--mantine-color-anchor")).toBe(accent);
-    expect(value("--mantine-primary-color-filled")).toBe(accent);
+    expect(value("--mantine-primary-color-filled")).toBe(surfaces[scheme].text);
+    expect(value("--fanout-focus")).toBe(accent);
     expect(contrastRatio(surfaces[scheme].muted, value("--mantine-color-iris-light"))).toBeGreaterThanOrEqual(4.5);
+  });
+  it("uses token surfaces for neutral variants and hover", () => {
+    expect(value("--mantine-color-default-hover")).toBe(surfaces[scheme].hover);
+    for (const color of ["brand", "gray", "dark", "ink"]) {
+      expect(value(`--mantine-color-${color}-light`)).toBe(surfaces[scheme].inset);
+      expect(value(`--mantine-color-${color}-light-hover`)).toBe(surfaces[scheme].hover);
+      expect(value(`--mantine-color-${color}-light-color`)).toBe(surfaces[scheme].text);
+    }
   });
   it("reads ink and every semantic filled surface at AA at rest and hover", () => {
     for (const color of ["brand", "ok", "warn", "bad", "info"]) {

@@ -226,7 +226,7 @@ function Composer() {
   const { input, setInput, inputRef, submit, send, stop, ready, running } = useFanoutApp();
   return <Box className="chat-composer">
     <Container size={880} px={{ base: "md", sm: "xl" }}>
-      <Paper component="form" onSubmit={submit} className="chat-composer-field" withBorder radius={24} py={6} pl="lg" pr={6}>
+      <Paper component="form" onSubmit={submit} className="chat-composer-field" style={{ borderColor: "var(--composer-border, var(--labstack-border))" }} withBorder radius={24} py={6} pl="lg" pr={6}>
         <Group align="flex-end" gap="xs" wrap="nowrap">
           <Textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is working…" : "Ask about health, errors, or latency…"} disabled={!ready} autosize minRows={1} maxRows={8} variant="unstyled" flex={1} />
           {running

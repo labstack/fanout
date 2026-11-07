@@ -7,8 +7,8 @@ export const brand = [
 ] as const;
 
 export const surfaces = {
-  dark: { ground: "#0B0B0C", raised: "#121214", inset: "#08080A", hover: "#1A1A1D", border: "#232327", borderSoft: "#1A1A1E", controlBorder: "#34343A", text: "#EDEDEF", muted: "#8E8E96" },
-  light: { ground: "#F5F5F6", raised: "#FFFFFF", inset: "#EFEFF1", hover: "#EDEDEF", border: "#E3E3E6", borderSoft: "#ECECEE", controlBorder: "#C8C8CE", text: "#111113", muted: "#63636B" },
+  dark: { ground: "#0B0B0C", raised: "#121214", inset: "#08080A", hover: "#1A1A1D", border: "#232327", borderSoft: "#1A1A1E", controlBorder: "#828288", text: "#EDEDEF", muted: "#A1A1A9" },
+  light: { ground: "#F5F5F6", raised: "#FFFFFF", inset: "#EFEFF1", hover: "#EDEDEF", border: "#E3E3E6", borderSoft: "#ECECEE", controlBorder: "#6D6D73", text: "#111113", muted: "#53535B" },
 } as const;
 
 /** Healthy. Ayu's green, the hue the landing page's service table already uses. */
@@ -40,17 +40,18 @@ export const info = [
   "#33a7e6", "#1e86bd", "#146694", "#0d4a6d",
 ] as const;
 
-/** Six fixed identity slots. Slot 2 is magenta, away from error red and warn
- * amber. WCAG relative luminance checks every mark against ground and raised;
- * failing light slots are darkened without changing hue. Palette tests use
+/** Six fixed identity slots. Slot 2 maximizes its worst simulated OKLab
+ * separation from the five retained slots over opaque sRGB, keeping chroma
+ * >=.10, 3:1 surface contrast and >=30° from error red and warn amber.
+ * WCAG relative luminance checks every mark against ground and raised. Palette tests use
  * OKLab distance and Machado full-severity CVD simulation for distinctness;
  * labels, shapes and dashes remain necessary when hues converge under CVD. */
 export const chartSeries = {
-  dark: ["#3987e5", "#ed83fb", "#199e70", "#9085e9", "#c98500", "#d55181"],
-  light: ["#2a78d6", "#9719a7", "#19a170", "#4a3aa7", "#bd8000", "#ce6d92"],
+  dark: ["#3987e5", "#ffffaf", "#199e70", "#9085e9", "#c98500", "#d55181"],
+  light: ["#2a78d6", "#000033", "#19a170", "#4a3aa7", "#bd8000", "#ce6d92"],
 } as const;
 
-export const typeScale = { micro: 11, small: 12, body: 14, title: 16, section: 18, page: 24 } as const;
+export const typeScale = { micro: 11, small: 12, body: 14, title: 16, section: 20, page: 28 } as const;
 
 export const fonts = {
   /** Mono is for data: code, ids, timestamps, numeric cells, and the chart

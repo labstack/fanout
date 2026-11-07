@@ -37,14 +37,19 @@ body,
   min-height: 100%;
 }
 
+.mantine-focus-auto:focus-visible,
+.mantine-focus-always:focus {
+  outline-color: var(--fanout-focus);
+}
+
 .chat-composer-field {
   background: var(--mantine-color-body);
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .chat-composer-field:focus-within {
-  border-color: var(--mantine-color-iris-filled);
-  box-shadow: 0 0 0 2px var(--mantine-color-iris-light);
+  --composer-border: var(--fanout-focus);
+  box-shadow: 0 0 0 2px var(--fanout-focus);
 }
 
 .rail-row {

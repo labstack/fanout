@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { contrastRatio } from "@labstack/ui";
-import { surfaces } from "../../../tokens";
+import { bad, warn, surfaces } from "../../../tokens";
 import { chart, series } from "../../../theme";
 
 type Triple = [number, number, number];
@@ -140,6 +140,22 @@ it.each(["light", "dark"] as const)("checks all fifteen slot pairs and both %s c
   expect(distances).toHaveLength(15);
   // The retained dark blue/violet pair is the closest, at 9.76. Adjacent
   // slots retain the stricter 15 normal / 6 CVD thresholds above.
-  expect(Math.min(...distances)).toBeGreaterThanOrEqual(9);
+  expect(Math.min(...distances)).toBeGreaterThanOrEqual(9.7);
   console.log(`${scheme} minimum all-pairs OKLab distance: ${Math.min(...distances).toFixed(2)}`);
+});
+
+// Slot 2 is optimized against every other slot, including nonadjacent pairs,
+// across all four vision modes. Keep the existing palette gates above too.
+it.each(["light", "dark"] as const)("separates slot 2 in every %s vision mode and avoids status hues", scheme => {
+  const colors = series[scheme].map(decode);
+  const candidate = colors[1];
+  const minima = modes.map(mode => Math.min(...colors.filter((_, slot) => slot !== 1).map(color =>
+    distance(lab(simulate(candidate, mode)), lab(simulate(color, mode))))));
+  for (const minimum of minima) expect(minimum).toBeGreaterThanOrEqual(scheme === "dark" ? 29.9 : 26.6);
+  const hue = (rgb: Triple) => { const [, a, b] = lab(rgb); return (Math.atan2(b, a) * 180 / Math.PI + 360) % 360; };
+  for (const palette of [bad, warn]) {
+    const delta = Math.abs(hue(candidate) - hue(decode(palette[scheme === "dark" ? 5 : 7])));
+    expect(Math.min(delta, 360 - delta)).toBeGreaterThanOrEqual(30);
+  }
+  console.log(JSON.stringify({ scheme, slot: 2, minima: Object.fromEntries(modes.map((mode, i) => [mode, minima[i]])) }));
 });

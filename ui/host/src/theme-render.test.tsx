@@ -1,4 +1,4 @@
-import { Badge, Button, MantineProvider, Progress } from "@mantine/core";
+import { Badge, Button, MantineProvider, Progress, Table } from "@mantine/core";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,6 +31,14 @@ describe("what actually lands on the element", () => {
     expect(remove.style.getPropertyValue("--button-color")).toBe("var(--labstack-color-bad-contrast)");
     expect(save.style.getPropertyValue("--button-color")).toBe("var(--labstack-color-brand-contrast)");
     expect(plain.style.getPropertyValue("--button-color")).toBe("var(--mantine-color-white)");
+    await act(async () => root.unmount());
+  });
+
+  it("puts token stripe and hover variables on the table", async () => {
+    const { root, container } = await render(<Table striped highlightOnHover><Table.Tbody><Table.Tr><Table.Td>Value</Table.Td></Table.Tr></Table.Tbody></Table>);
+    const table = container.querySelector("table")!;
+    expect(table.style.getPropertyValue("--table-striped-color")).toBe("var(--labstack-inset)");
+    expect(table.style.getPropertyValue("--table-highlight-on-hover-color")).toBe("var(--labstack-hover)");
     await act(async () => root.unmount());
   });
 

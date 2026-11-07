@@ -101,7 +101,7 @@ function HistoryContent({ id, opened, currentVersion, currentSpec, selected, onS
         <Stack gap="xs" pr="sm" role="list" aria-label="Saved versions">
           {list.data.map(item => <Paper key={item.version} role="listitem" withBorder p="xs" radius="sm" style={{ borderColor: version === item.version ? "var(--mantine-color-iris-filled)" : undefined }}>
             <Group justify="space-between" gap="xs">
-              <Button variant={version === item.version ? "light" : "subtle"} size="compact-sm" aria-pressed={version === item.version} onClick={() => onSelect(item.version)}>Version {item.version}</Button>
+              <Button color="iris" variant={version === item.version ? "light" : "subtle"} size="compact-sm" aria-pressed={version === item.version} onClick={() => onSelect(item.version)}>Version {item.version}</Button>
               {item.version === currentVersion && <Badge color="gray" variant="light" tt="none">Current</Badge>}
               <VersionTime at={item.created_at} />
             </Group>
