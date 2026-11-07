@@ -42,11 +42,14 @@ works once. It can run while the server is online. See
 
 ## Health probes
 
-With no URL, `healthcheck` reads only `FANOUT_ADDR` and
-`FANOUT_TLS_CERT_FILE`. Unspecified bind hosts become `127.0.0.1`.
+With no URL, `healthcheck` reads only `FANOUT_ADDR`,
+`FANOUT_TLS_CERT_FILE`, `FANOUT_HEALTHCHECK_CERT_FILE` and
+`FANOUT_HEALTHCHECK_KEY_FILE`. Unspecified bind hosts become `127.0.0.1`.
 A certificate selects HTTPS. Derived probes bypass environment proxies;
 HTTPS IP probes trust the configured certificate and verify its first DNS or
-IP SAN. Hostname probes use normal verification.
+IP SAN. Hostname probes use normal verification. Derived HTTPS probes present
+the healthcheck client certificate when one is configured, for a listener that
+[requires client certificates](/docs/guides/tls#require-client-certificates).
 
 An explicit URL uses normal proxy and certificate verification. Each probe has
 a three-second timeout and succeeds only on HTTP 200. No auth secret is needed.

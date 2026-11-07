@@ -205,8 +205,14 @@ type Config struct {
 	// TLSCertFile selects the TLS certificate file; requires FANOUT_TLS_KEY_FILE.
 	TLSCertFile string `group:"server" env:"FANOUT_TLS_CERT_FILE"`
 	// TLSKeyFile selects the TLS private key file; requires FANOUT_TLS_CERT_FILE.
-	TLSKeyFile     string `group:"server" env:"FANOUT_TLS_KEY_FILE"`
-	resolvedSizing sizingSource
+	TLSKeyFile string `group:"server" env:"FANOUT_TLS_KEY_FILE"`
+	// TLSClientCAFile selects a PEM CA bundle; when set, the listener requires client certificates signed by it. Requires FANOUT_TLS_CERT_FILE and FANOUT_TLS_KEY_FILE.
+	TLSClientCAFile string `group:"server" env:"FANOUT_TLS_CLIENT_CA_FILE"`
+	// HealthcheckCertFile selects the client certificate fanout healthcheck presents; requires FANOUT_HEALTHCHECK_KEY_FILE and FANOUT_TLS_CLIENT_CA_FILE.
+	HealthcheckCertFile string `group:"server" env:"FANOUT_HEALTHCHECK_CERT_FILE"`
+	// HealthcheckKeyFile selects the private key for FANOUT_HEALTHCHECK_CERT_FILE; requires FANOUT_HEALTHCHECK_CERT_FILE.
+	HealthcheckKeyFile string `group:"server" env:"FANOUT_HEALTHCHECK_KEY_FILE"`
+	resolvedSizing     sizingSource
 }
 
 // LogStartup reports the effective non-secret sizing and security-sensitive
@@ -260,6 +266,12 @@ func (c Config) ControlSQLitePath() string {
 func (c Config) TLSEnabled() bool {
 	return strings.TrimSpace(c.TLSCertFile) != "" &&
 		strings.TrimSpace(c.TLSKeyFile) != ""
+}
+
+// ClientCertificatesRequired reports whether the TLS listener requires and
+// verifies client certificates against FANOUT_TLS_CLIENT_CA_FILE.
+func (c Config) ClientCertificatesRequired() bool {
+	return c.TLSEnabled() && strings.TrimSpace(c.TLSClientCAFile) != ""
 }
 
 // Validate checks that config values are sane.
@@ -400,6 +412,17 @@ func (c Config) Validate() error {
 	}
 	if anySet(c.TLSCertFile, c.TLSKeyFile) && !c.TLSEnabled() {
 		return fmt.Errorf("FANOUT_TLS_CERT_FILE and FANOUT_TLS_KEY_FILE must both be set")
+	}
+	if anySet(c.TLSClientCAFile) && !c.TLSEnabled() {
+		return fmt.Errorf("FANOUT_TLS_CLIENT_CA_FILE requires FANOUT_TLS_CERT_FILE and FANOUT_TLS_KEY_FILE")
+	}
+	if anySet(c.HealthcheckCertFile, c.HealthcheckKeyFile) {
+		if !anySet(c.HealthcheckCertFile) || !anySet(c.HealthcheckKeyFile) {
+			return fmt.Errorf("FANOUT_HEALTHCHECK_CERT_FILE and FANOUT_HEALTHCHECK_KEY_FILE must both be set")
+		}
+		if !anySet(c.TLSClientCAFile) {
+			return fmt.Errorf("FANOUT_HEALTHCHECK_CERT_FILE and FANOUT_HEALTHCHECK_KEY_FILE require FANOUT_TLS_CLIENT_CA_FILE")
+		}
 	}
 	return nil
 }

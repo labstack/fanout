@@ -81,7 +81,8 @@ func main() {
 		}
 	}
 	if healthURL != "" || derivedProbe {
-		if err := checkHealth(healthURL, derivedProbe, os.Getenv("FANOUT_TLS_CERT_FILE")); err != nil {
+		if err := checkHealth(healthURL, derivedProbe, os.Getenv("FANOUT_TLS_CERT_FILE"),
+			os.Getenv("FANOUT_HEALTHCHECK_CERT_FILE"), os.Getenv("FANOUT_HEALTHCHECK_KEY_FILE")); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -110,6 +111,15 @@ func main() {
 		return
 	}
 	cfg.LogStartup()
+	var clientCAs *x509.CertPool
+	if cfg.ClientCertificatesRequired() {
+		// Load before opening any store so a bad bundle fails startup at once.
+		clientCAs, err = server.LoadClientCAs(cfg.TLSClientCAFile)
+		if err != nil {
+			slog.Error("invalid configuration", "err", err)
+			os.Exit(1)
+		}
+	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		slog.Error("create data dir failed", "err", err)
@@ -413,8 +423,11 @@ func main() {
 	e.GET("/*", spa)
 
 	httpSrv := server.New(cfg.Addr, e, ingest.NewHTTPHandler(ing, settingsStore), grpcSrv)
+	if clientCAs != nil {
+		server.RequireClientCertificates(httpSrv, clientCAs)
+	}
 	go func() {
-		slog.Info("HTTP and OTLP listening", "addr", cfg.Addr, "tls", cfg.TLSEnabled())
+		slog.Info("HTTP and OTLP listening", "addr", cfg.Addr, "tls", cfg.TLSEnabled(), "client_certificates", clientCAs != nil)
 		var err error
 		if cfg.TLSEnabled() {
 			err = httpSrv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
@@ -579,18 +592,31 @@ func healthcheckURL(addr, certFile string) (string, error) {
 	return (&url.URL{Scheme: scheme, Host: net.JoinHostPort(host, port), Path: "/healthz"}).String(), nil
 }
 
-func checkHealth(healthURL string, derivedProbe bool, certFile string) error {
+func checkHealth(healthURL string, derivedProbe bool, certFile, clientCertFile, clientKeyFile string) error {
 	client := &http.Client{Timeout: 3 * time.Second}
 	if derivedProbe {
 		// Derived probes bypass proxies. HTTPS IP literals trust only the configured
 		// certificate and verify its first DNS or IP SAN instead of the bind IP.
 		// Hostnames verify normally; explicit URLs retain all default behaviour.
+		// A configured healthcheck client certificate is presented on derived
+		// HTTPS probes so the check passes a listener that requires one.
 		probe, err := url.Parse(healthURL)
 		if err != nil {
 			return fmt.Errorf("healthcheck: %w", err)
 		}
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = nil
+		if probe.Scheme == "https" && (clientCertFile != "" || clientKeyFile != "") {
+			if clientCertFile == "" || clientKeyFile == "" {
+				return fmt.Errorf("healthcheck: FANOUT_HEALTHCHECK_CERT_FILE and FANOUT_HEALTHCHECK_KEY_FILE must both be set")
+			}
+			pair, err := tls.LoadX509KeyPair(clientCertFile, clientKeyFile)
+			if err != nil {
+				// Key-pair errors describe structure only, never key material.
+				return fmt.Errorf("healthcheck: load client certificate %q and key %q: %w", clientCertFile, clientKeyFile, err)
+			}
+			transport.TLSClientConfig = &tls.Config{Certificates: []tls.Certificate{pair}}
+		}
 		if _, err := netip.ParseAddr(probe.Hostname()); probe.Scheme == "https" && err == nil {
 			data, err := os.ReadFile(certFile)
 			if err != nil {
@@ -620,7 +646,11 @@ func checkHealth(healthURL string, derivedProbe bool, certFile string) error {
 			}
 			roots := x509.NewCertPool()
 			roots.AddCert(leaf)
-			transport.TLSClientConfig = &tls.Config{RootCAs: roots, ServerName: serverName}
+			if transport.TLSClientConfig == nil {
+				transport.TLSClientConfig = &tls.Config{}
+			}
+			transport.TLSClientConfig.RootCAs = roots
+			transport.TLSClientConfig.ServerName = serverName
 		}
 		defer transport.CloseIdleConnections()
 		client.Transport = transport

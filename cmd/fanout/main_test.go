@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
 	"flag"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/server"
 	"github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -122,7 +124,7 @@ func TestCheckHealth(t *testing.T) {
 				writer.WriteHeader(test.statusCode)
 			}))
 			defer server.Close()
-			if err := checkHealth(server.URL, false, ""); (err != nil) != test.wantErr {
+			if err := checkHealth(server.URL, false, "", "", ""); (err != nil) != test.wantErr {
 				t.Fatalf("checkHealth() error = %v, wantErr %v", err, test.wantErr)
 			}
 		})
@@ -340,11 +342,11 @@ func TestCheckHealthWithLocalTLS(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	defer server.Close()
 	certFile := writeHealthcheckCertificate(t, server.Certificate().Raw)
-	if err := checkHealth(server.URL+"/healthz", true, certFile); err != nil {
+	if err := checkHealth(server.URL+"/healthz", true, certFile, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	var verificationError *tls.CertificateVerificationError
-	if err := checkHealth(server.URL+"/healthz", false, certFile); !errors.As(err, &verificationError) {
+	if err := checkHealth(server.URL+"/healthz", false, certFile, "", ""); !errors.As(err, &verificationError) {
 		t.Fatalf("explicit URL must verify the certificate, got %v", err)
 	}
 	other := *server.Certificate()
@@ -359,11 +361,11 @@ func TestCheckHealthWithLocalTLS(t *testing.T) {
 	if err := os.WriteFile(otherFile, chain, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkHealth(server.URL+"/healthz", true, otherFile); !errors.As(err, &verificationError) {
+	if err := checkHealth(server.URL+"/healthz", true, otherFile, "", ""); !errors.As(err, &verificationError) {
 		t.Fatalf("derived IP probe must reject a different certificate, got %v", err)
 	}
 	probe := strings.Replace(server.URL, "127.0.0.1", "localhost", 1) + "/healthz"
-	if err := checkHealth(probe, true, certFile); !errors.As(err, &verificationError) {
+	if err := checkHealth(probe, true, certFile, "", ""); !errors.As(err, &verificationError) {
 		t.Fatalf("derived hostname probe must verify the certificate, got %v", err)
 	}
 }
@@ -390,6 +392,106 @@ func newHealthcheckCertificate(t *testing.T, certificate *x509.Certificate) tls.
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }
 
+// The derived probe presents FANOUT_HEALTHCHECK_CERT_FILE to a listener that
+// requires client certificates, and fails without it.
+func TestCheckHealthWithClientCertificate(t *testing.T) {
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(10), Subject: pkix.Name{CommonName: "healthcheck CA"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+		SerialNumber: big.NewInt(11), Subject: pkix.Name{CommonName: "fanout healthcheck"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}, ca, &clientKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	caFile := filepath.Join(dir, "client-ca.pem")
+	clientCertFile := filepath.Join(dir, "healthcheck.pem")
+	clientKeyFile := filepath.Join(dir, "healthcheck-key.pem")
+	keyDER, err := x509.MarshalPKCS8PrivateKey(clientKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, block := range map[string]*pem.Block{
+		caFile:         {Type: "CERTIFICATE", Bytes: caDER},
+		clientCertFile: {Type: "CERTIFICATE", Bytes: clientDER},
+		clientKeyFile:  {Type: "PRIVATE KEY", Bytes: keyDER},
+	} {
+		if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ts := httptest.NewUnstartedServer(nil)
+	ts.Config = server.New("", http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/healthz" || len(request.TLS.PeerCertificates) == 0 {
+			t.Errorf("probe path %q with %d client certificates", request.URL.Path, len(request.TLS.PeerCertificates))
+		}
+		w.WriteHeader(http.StatusOK)
+	}), http.NotFoundHandler(), http.NotFoundHandler())
+	clientCAs, err := server.LoadClientCAs(caFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.RequireClientCertificates(ts.Config, clientCAs)
+	ts.TLS = ts.Config.TLSConfig.Clone()
+	ts.TLS.Certificates = []tls.Certificate{newHealthcheckCertificate(t, &x509.Certificate{
+		SerialNumber: big.NewInt(12), IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	})}
+	ts.EnableHTTP2 = true
+	ts.StartTLS()
+	defer ts.Close()
+	certFile := writeHealthcheckCertificate(t, ts.Certificate().Raw)
+
+	probe, err := healthcheckURL(ts.Listener.Addr().String(), certFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkHealth(probe, true, certFile, clientCertFile, clientKeyFile); err != nil {
+		t.Fatalf("healthcheck with client certificate: %v", err)
+	}
+	if err := checkHealth(probe, true, certFile, "", ""); err == nil {
+		t.Fatal("healthcheck without a client certificate must fail")
+	}
+	if err := checkHealth(probe, true, certFile, clientCertFile, ""); err == nil || !strings.Contains(err.Error(), "FANOUT_HEALTHCHECK_KEY_FILE") {
+		t.Fatalf("partial client pair must name both variables, got %v", err)
+	}
+	missing := filepath.Join(dir, "missing-key.pem")
+	if err := checkHealth(probe, true, certFile, clientCertFile, missing); err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("unreadable client key must name its path, got %v", err)
+	}
+	keyPEM, err := os.ReadFile(clientKeyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A key passed as the certificate must fail without echoing key material.
+	if err := checkHealth(probe, true, certFile, clientKeyFile, clientKeyFile); err == nil || !strings.Contains(err.Error(), clientKeyFile) || strings.Contains(err.Error(), string(keyPEM[40:80])) {
+		t.Fatalf("invalid client pair must name its path without contents, got %v", err)
+	}
+}
+
 func TestCheckHealthCertificateFileErrors(t *testing.T) {
 	const contents = "private file contents must not appear in errors"
 	for _, test := range []struct {
@@ -408,7 +510,7 @@ func TestCheckHealthCertificateFileErrors(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err := checkHealth("https://127.0.0.1:7520/healthz", true, path)
+			err := checkHealth("https://127.0.0.1:7520/healthz", true, path, "", "")
 			if err == nil || !strings.HasPrefix(err.Error(), "healthcheck:") || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), contents) {
 				t.Fatalf("certificate file error must name its path without contents, got %v", err)
 			}
@@ -453,7 +555,7 @@ func TestCheckHealthTLSCertificate(t *testing.T) {
 			server.StartTLS()
 			defer server.Close()
 			certFile := writeHealthcheckCertificate(t, server.Certificate().Raw)
-			err := checkHealth(server.URL+"/healthz", true, certFile)
+			err := checkHealth(server.URL+"/healthz", true, certFile, "", "")
 			if (err != nil) != test.wantErr {
 				t.Fatalf("checkHealth() error = %v, wantErr %v", err, test.wantErr)
 			}
@@ -504,7 +606,7 @@ func TestCheckHealthWithInterfaceTLS(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = checkHealth(probe, true, certFile)
+			err = checkHealth(probe, true, certFile, "", "")
 			var verificationError *tls.CertificateVerificationError
 			if strings.HasSuffix(addr, "example.com:7520") {
 				if !errors.As(err, &verificationError) {
@@ -517,7 +619,7 @@ func TestCheckHealthWithInterfaceTLS(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = checkHealth(explicitProbe, derivedProbe, certFile)
+			err = checkHealth(explicitProbe, derivedProbe, certFile, "", "")
 			if !errors.As(err, &verificationError) {
 				t.Fatalf("explicit TLS probe must use system verification, got %v", err)
 			}
@@ -596,10 +698,10 @@ func TestCheckHealthDerivedIgnoresEnvironmentProxy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := checkHealth(probe, true, certFile); err != nil {
+			if err := checkHealth(probe, true, certFile, "", ""); err != nil {
 				t.Fatalf("derived %s probe with unreachable proxy: %v", scheme, err)
 			}
-			if err := checkHealth(probe, false, certFile); err == nil || !strings.Contains(err.Error(), strings.TrimPrefix(os.Getenv("HTTP_PROXY"), "http://")) {
+			if err := checkHealth(probe, false, certFile, "", ""); err == nil || !strings.Contains(err.Error(), strings.TrimPrefix(os.Getenv("HTTP_PROXY"), "http://")) {
 				t.Fatalf("explicit %s probe must use the unreachable proxy, got %v", scheme, err)
 			}
 		})

@@ -164,6 +164,9 @@ Setting both `FANOUT_TLS_CERT_FILE` and `FANOUT_TLS_KEY_FILE` enables TLS 1.3 on
 the shared listener. A proxy must forward HTTP/2 to Fanout for gRPC: use
 h2c for a plaintext backend, or HTTP/2 over TLS when Fanout has a certificate.
 HTTP/1.1 forwarding supports OTLP/HTTP, but cannot carry gRPC.
+`FANOUT_TLS_CLIENT_CA_FILE` additionally requires every client, including a
+TLS-terminating proxy such as Cloudflare with Authenticated Origin Pulls, to
+present a certificate from that CA bundle.
 
 Set `FANOUT_PUBLIC_URL` to the externally reachable HTTPS browser origin. When
 using forwarded client addresses, set `FANOUT_TRUSTED_PROXY_CIDRS` to only the
@@ -182,8 +185,10 @@ default. Empty, `0.0.0.0`, and `::` bind hosts become `127.0.0.1`.
 `FANOUT_TLS_CERT_FILE` selects HTTPS. Derived probes bypass environment proxies.
 HTTPS IP-literal probes trust only the configured certificate and verify its
 first DNS or IP SAN, which may differ from the bind IP; hostname probes verify
-normally. Healthcheck reads only these two settings and does not require valid
-secrets. An explicit `fanout healthcheck <url>` uses default proxy and
+normally. Derived HTTPS probes present `FANOUT_HEALTHCHECK_CERT_FILE` and
+`FANOUT_HEALTHCHECK_KEY_FILE` when set, so they pass a listener with
+`FANOUT_TLS_CLIENT_CA_FILE`. Healthcheck
+reads only these settings and does not require valid secrets. An explicit `fanout healthcheck <url>` uses default proxy and
 certificate verification behaviour.
 
 - `/healthz` is the liveness check. It fails only when Fanout's own work on
