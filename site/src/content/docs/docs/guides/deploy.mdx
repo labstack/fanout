@@ -106,6 +106,11 @@ Some TLS-terminating proxies connect to the origin only on port 443. For
 example, [Cloudflare's gRPC proxying](https://developers.cloudflare.com/network/grpc-connections/)
 requires the origin to listen on 443 with TLS and HTTP/2 advertised through
 ALPN, which Fanout's [direct TLS](/docs/guides/tls#direct-tls) provides.
+On Cloudflare, also enable gRPC in the zone's network settings (otherwise
+Cloudflare answers gRPC requests with `403 Forbidden`), set the DNS record to
+proxied, and set the SSL/TLS encryption mode to Full (strict). Cloudflare
+accepts Full, but only Full (strict) verifies the origin certificate.
+
 Linux reserves ports below 1024 for privileged processes, so grant the
 unprivileged `fanout` user only the capability to bind them rather than running
 as root.
@@ -129,8 +134,11 @@ as `fanout`. `CapabilityBoundingSet` drops every other capability, and
 `NoNewPrivileges` stops the process and its children from gaining more.
 The later `FANOUT_ADDR` replaces the unit's loopback address; `:443` listens on
 every interface, so restrict the port to the proxy's networks with a firewall.
+For Cloudflare, allow only [Cloudflare's published IP ranges](https://www.cloudflare.com/ips/).
 The certificate and key are passed as credentials, like the auth secret, so
-they can stay readable only by root.
+they can stay readable only by root. systemd copies credentials when the
+service starts, and Fanout loads the certificate once, so restart the service
+after renewing the certificate.
 
 Restart and confirm the listener runs as `fanout` with only that capability:
 
@@ -149,3 +157,7 @@ readiness on the host with a name in the certificate:
 ```sh
 curl --resolve fanout.example.com:443:127.0.0.1 https://fanout.example.com/readyz
 ```
+
+If the certificate comes from a private CA or is a Cloudflare Origin CA
+certificate, which public trust stores reject, pass that CA's certificate with
+`--cacert`, for example `--cacert /etc/fanout/tls/origin-ca.pem`.
