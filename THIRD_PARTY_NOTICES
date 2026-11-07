@@ -59,7 +59,7 @@ COMPONENT INVENTORY
 - Go: go.yaml.in/yaml/v3 v3.0.5
 - Go: golang.org/x/crypto v0.58.0
 - Go: golang.org/x/exp v0.0.0-20261011100332-faecfb24eb49
-- Go: golang.org/x/net v0.61.0
+- Go: golang.org/x/net v0.62.0
 - Go: golang.org/x/oauth2 v0.37.0
 - Go: golang.org/x/sync v0.24.0
 - Go: golang.org/x/sys v0.49.0
@@ -74,10 +74,10 @@ COMPONENT INVENTORY
 - Go: modernc.org/memory v1.12.1
 - Go: modernc.org/sqlite v1.61.0
 - Native: DuckDB v2.0.0 (d54cbbe3df)
-- npm: @ag-ui/client 1.0.2 (declared license: MIT)
-- npm: @ag-ui/core 1.0.2 (declared license: MIT)
-- npm: @ag-ui/encoder 1.0.2 (declared license: MIT)
-- npm: @ag-ui/proto 1.0.2 (declared license: MIT)
+- npm: @ag-ui/client 1.0.4 (declared license: MIT)
+- npm: @ag-ui/core 1.0.4 (declared license: MIT)
+- npm: @ag-ui/encoder 1.0.4 (declared license: MIT)
+- npm: @ag-ui/proto 1.0.4 (declared license: MIT)
 - npm: @bufbuild/protobuf 2.16.0 (declared license: (Apache-2.0 AND BSD-3-Clause)); no license file was present in the installed package
 - npm: @codemirror/autocomplete 6.20.3 (declared license: MIT)
 - npm: @codemirror/commands 6.11.1 (declared license: MIT)
@@ -289,7 +289,6 @@ COMPONENT INVENTORY
 - npm: walk-up-path 4.0.0 (declared license: ISC)
 - npm: which 2.0.2 (declared license: ISC)
 - npm: yaml 2.9.1 (declared license: ISC)
-- npm: zod 3.25.76 (declared license: MIT)
 - npm: zod 4.6.6 (declared license: MIT)
 - npm: zrender 6.1.0 (declared license: BSD-3-Clause)
 - npm: zwitch 2.0.4 (declared license: MIT)
@@ -753,10 +752,10 @@ Apache License
 
 --- Applies to -------------------------------------------------------------
 - Go: github.com/ag-ui-protocol/ag-ui/sdks/community/go v0.0.0-20260930215002-015baf5dc150 / LICENSE
-- npm: @ag-ui/client 1.0.2 / LICENSE
-- npm: @ag-ui/core 1.0.2 / LICENSE
-- npm: @ag-ui/encoder 1.0.2 / LICENSE
-- npm: @ag-ui/proto 1.0.2 / LICENSE
+- npm: @ag-ui/client 1.0.4 / LICENSE
+- npm: @ag-ui/core 1.0.4 / LICENSE
+- npm: @ag-ui/encoder 1.0.4 / LICENSE
+- npm: @ag-ui/proto 1.0.4 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License
@@ -2870,7 +2869,7 @@ limitations under the License.
 --- Applies to -------------------------------------------------------------
 - Go: golang.org/x/crypto v0.58.0 / LICENSE
 - Go: golang.org/x/exp v0.0.0-20261011100332-faecfb24eb49 / LICENSE
-- Go: golang.org/x/net v0.61.0 / LICENSE
+- Go: golang.org/x/net v0.62.0 / LICENSE
 - Go: golang.org/x/oauth2 v0.37.0 / LICENSE
 - Go: golang.org/x/sync v0.24.0 / LICENSE
 - Go: golang.org/x/sys v0.49.0 / LICENSE
@@ -10581,7 +10580,6 @@ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: zod 3.25.76 / LICENSE
 - npm: zod 4.6.6 / LICENSE
 ----------------------------------------------------------------------------
 

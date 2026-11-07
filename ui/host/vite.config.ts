@@ -1,9 +1,10 @@
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { defineConfig } from "vite";
+import { excludeCatalog } from "./build/catalog.ts";
 
 export default defineConfig({
-  plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react()],
+  plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react(), excludeCatalog()],
   server: {
     proxy: {
       "/api": { target: "http://localhost:7520", changeOrigin: true, secure: false },

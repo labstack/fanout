@@ -20,7 +20,9 @@
     "host/e2e/**/*.{ts,mjs}!",
     "!host/e2e/**/*.test.ts!",
     "!host/src/**/*.test.{ts,tsx}!",
-    "!panels/**/*.test.ts!"
+    "!panels/**/*.test.ts!",
+    "!host/src/**/*.stories.tsx!",
+    "!host/src/catalog/**!"
   ],
   "vite": {
     "config": [

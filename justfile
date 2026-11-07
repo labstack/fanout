@@ -57,6 +57,14 @@ ui-apps:
 ui-host:
     cd ui/host && bun run build:host
 
+# Local review only, never published.
+design port="6706": ui-deps
+    cd ui/host && bun run design -p {{port}}
+
+# Every story, interaction, accessibility and layout check in Chromium.
+design-check: ui-deps
+    cd ui/host && bun run design-check
+
 # Every embedded browser asset.
 ui: ui-lint ui-host ui-apps
 

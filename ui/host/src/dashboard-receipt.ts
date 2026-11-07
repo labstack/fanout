@@ -13,12 +13,13 @@ export type Correction=Problem & {title:string};
 function resolvedProblems(before:Problem[],after:Problem[],retainedIDs:Set<string>):Problem[] {
   return before.filter(p=>retainedIDs.has(p.panel_id) && !after.some(q=>q.panel_id===p.panel_id && q.path===p.path));
 }
-export type Stage = { state: "unobserved" | "incomplete" | "failed" | "complete" | "interrupted"; elapsed_ms?: number };
+export type StageState = "unobserved" | "incomplete" | "failed" | "complete" | "interrupted";
+export type Stage = { state: StageState; elapsed_ms?: number };
 export const stageNames = { schema: "Telemetry", context: "Context", draft: "Draft", validation: "Validation", preview: "Preview", save: "Save" };
 export type BuildReceipt = {
   turn_id: string; stages: Record<keyof typeof stageNames, Stage>;
   panel_count?: number; panel_titles: Record<string,string>; panels: PanelCheck[]; problems: Problem[]; corrections: Correction[];
-  save_attempts: Array<{call_id:string;state:Stage["state"] | "retried"}>;
+  save_attempts: Array<{call_id:string;state:StageState | "retried"}>;
   explanations: string[]; context_counts: { deploys: number; anomalies: number }; saved?: DashboardToolResult;
 };
 const contextTools = new Set(["get_insights", "query_telemetry", "get_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs"]);

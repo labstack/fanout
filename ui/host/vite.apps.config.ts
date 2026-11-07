@@ -3,9 +3,10 @@ import { defineConfig } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
 import { appBuildBoundary, blobWorkerOnly } from "./build/apps.ts";
+import { excludeCatalog } from "./build/catalog.ts";
 
 export default defineConfig({
-  plugins: [react(), appBuildBoundary(), blobWorkerOnly(), viteSingleFile(), {
+  plugins: [react(), excludeCatalog(), appBuildBoundary(), blobWorkerOnly(), viteSingleFile(), {
     name: "strip-trailing-whitespace", enforce: "post",
     generateBundle(_options, bundle) { for (const output of Object.values(bundle)) { if (output.type === "asset" && typeof output.source === "string") output.source = output.source.replace(/[ \t]+$/gm, ""); } },
   }],
