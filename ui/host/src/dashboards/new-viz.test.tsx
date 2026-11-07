@@ -86,7 +86,7 @@ describe("visualizations",()=>{
 it("formats distinct scatter axis units and numeric bucket order",()=>{
  const panel:Panel={id:"p",title:"Rows versus latency",viz:"scatter",x_unit:"count",unit:"ms",query:{from:"spans",by:["service"],measures:["count()","p95(duration_ms)"]}};
  const option=analysisOption(panel,resultFor("scatter"),chartThemeFor(false)) as {xAxis:{name:string;axisLabel:{formatter:(n:number)=>string}};yAxis:{name:string;axisLabel:{formatter:(n:number)=>string}}};
- expect(option.xAxis.name).toBe("Count");expect(option.yAxis.name).toBe("P95 (ms)");expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
+ expect(option.xAxis.name).toBe("Count");expect(option.yAxis.name).toBe("p95 (ms)");expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
  const frame={columns:fixtures.histogram!.columns,values:[[10,null,2],[20,1,10],[1,2,3]],rows:3};
  for(const viz of ["histogram","heatmap"] as const){
   const f=viz==="heatmap"?{columns:[col("time","time","time"),...frame.columns],values:[[3000,1000,2000],...frame.values],rows:3}:frame;
@@ -193,9 +193,10 @@ it("highlights log bodies and opens captured trace links without activating the 
     expect(container.querySelector("mark")?.textContent).toBe("failed");
     expect(container.querySelector('[data-trace-id="abc"]')?.textContent).toBe("abc");
     expect(container.querySelector('[data-trace-id="abc"]')?.closest("a")).not.toBeNull();
-    expect(container.querySelector("tbody button")).toBeNull();
+    expect(container.querySelectorAll('tbody button[aria-label="Copy trace ID"]')).toHaveLength(1);
+    expect(container.querySelectorAll('tbody button:not([aria-label="Copy trace ID"])')).toHaveLength(0);
     expect(container.querySelector('[data-trace-id="abc"]')?.getAttribute("aria-label")).toBeNull();
-    expect(container.querySelector(".mantine-Badge-root")?.textContent).toBe("◆ ERROR");
+    expect(container.querySelector(".mantine-Badge-root")?.textContent).toBe("Error");
     expect(onPoint).not.toHaveBeenCalled();
     const link = container.querySelector<HTMLAnchorElement>('[data-trace-id="abc"]')!;
     const target = JSON.parse(new URL(link.href).searchParams.get("drill")!);
@@ -223,7 +224,7 @@ it("selects the service exactly once after sorting trace rows and updating callb
     expect(container.querySelector("th:nth-child(5)")?.getAttribute("aria-sort")).toBe("ascending");
     expect(container.querySelector("tbody tr [data-trace-id]")?.getAttribute("data-trace-id")).toBe("def");
     await act(async () => root.render(<MantineProvider><Viz {...props} onSelect={next} /></MantineProvider>));
-    const service = container.querySelector<HTMLButtonElement>("tbody tr button")!;
+    const service = container.querySelector<HTMLButtonElement>('tbody tr td[data-field="service"] button')!;
     await act(async () => service.click());
     expect(next.mock.calls).toEqual([["payment"]]);
     expect(first).not.toHaveBeenCalled();

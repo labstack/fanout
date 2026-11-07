@@ -18,7 +18,7 @@ it("uses the dashboard logs table for correlated logs with compact times and com
     const table = node.querySelector(".dashboard-table")!;
     expect(table).not.toBeNull();
     expect(table.querySelector('td[data-field="time"]')?.textContent).toBe(formatTimestamp(Date.parse(log.time)));
-    expect(table.querySelector('td[data-field="severity"]')?.textContent).toContain("◆ ERROR");
+    expect(table.querySelector('td[data-field="severity"]')?.textContent).toContain("Error");
     expect(table.querySelector<HTMLElement>('td[data-field="service"] > *')?.style.whiteSpace).toBe("nowrap");
   } finally { await act(async () => root.unmount()); node.remove(); }
 });

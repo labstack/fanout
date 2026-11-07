@@ -2,7 +2,7 @@ import { DataState, Notice } from "@labstack/ui";
 import { logConstants } from "../../../panels/rows";
 import { useMergedRef } from "@mantine/hooks";
 import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
-import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, HourglassMedium, Info, ListMagnifyingGlass, Trash, WarningCircle, Wrench } from "@phosphor-icons/react";
+import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, Trash, WarningCircle } from "@phosphor-icons/react";
 import type { Panel, Selection, VarValue } from "../../../panels/types";
 import type { PanelDisplayResult } from "./panel-result";
 import type { AnnotationsResponse } from "../../../panels/annotations";
@@ -61,7 +61,9 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, [staleAt]);
-  const [view, setView] = useState<string>(initialView);
+  const tableOnly = ["logs", "traces", "table", "log_patterns"].includes(panel.viz);
+  const modes = tableOnly ? ["Table", "Data", "Spec"] : ["Chart", "Data", "Spec"];
+  const [view, setView] = useState<string>(tableOnly && initialView === "Chart" ? "Table" : initialView);
   const [mapView, setMapView] = useState<MapView>();
   const onMapView = useCallback((next: MapView) => setMapView(next), []);
   const hint = panel.click ? `click to filter by ${panel.click.set_variable}`
@@ -75,7 +77,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const constants = [...new Set(logConstants(panel, result?.frame).map(c => c.value))];
   const subtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")}${constants.length ? ` · ${constants.join(" · ")}` : ""}${hint ? ` · ${hint}` : ""}`;
   const canvas = ["timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline", "gauge", "service_map"].includes(panel.viz);
-  const scrolls = view !== "Chart" || !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
+  const scrolls = (view !== "Chart" && view !== "Table") || !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
   const rows = ["table", "logs", "traces", "log_patterns", "text"].includes(panel.viz);
   const note = formatPanelNote(result?.frame?.note);
   const refreshError = result?.frame && result.error;
@@ -121,13 +123,6 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     result?.annotation_scope?.limited ? "Annotation service scope is limited." : undefined,
   ].filter((text): text is string => Boolean(text)))];
   const body = useRef<HTMLDivElement>(null);
-  const [measuredBodyHeight, setMeasuredBodyHeight] = useState<number>();
-  const compactError = (measuredBodyHeight ?? bodyHeight) < 160;
-  useLayoutEffect(() => {
-    const el = body.current; if (!el) return;
-    const observer = new ResizeObserver(([entry]) => { if (entry) setMeasuredBodyHeight(entry.contentRect.height); });
-    observer.observe(el); return () => observer.disconnect();
-  }, []);
   const [fade, setFade] = useState<{bottom:number}>();
   useLayoutEffect(()=>{
     const el=body.current, parent=card.current;if(!el||!parent)return;
@@ -158,7 +153,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       </Group>
       <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
       {!compactViews && panel.viz !== "text" && <Group gap={0} wrap="nowrap" role="group" aria-label={`${title} view`} style={{ border: "1px solid var(--mantine-color-default-border)", borderRadius: 5, overflow: "hidden" }}>
-        {["Chart", "Data", "Spec"].map(mode => <button key={mode} type="button" data-panel-view={mode} aria-pressed={view === mode} onClick={() => setView(mode)} style={{ border: 0, borderLeft: mode === "Chart" ? undefined : "1px solid var(--mantine-color-default-border)", padding: "2px 6px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", background: view === mode ? "var(--mantine-color-default)" : "transparent", color: view === mode ? "var(--mantine-primary-color-filled)" : "var(--mantine-color-dimmed)", fontWeight: view === mode ? 600 : 400, boxShadow: view === mode ? "inset 0 -2px var(--mantine-primary-color-filled)" : undefined }}>{mode}</button>)}
+        {modes.map(mode => <button key={mode} type="button" data-panel-view={mode} aria-pressed={view === mode} onClick={() => setView(mode)} style={{ border: 0, borderLeft: mode === "Chart" ? undefined : "1px solid var(--mantine-color-default-border)", padding: "2px 6px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", background: view === mode ? "var(--mantine-color-default)" : "transparent", color: view === mode ? "var(--mantine-primary-color-filled)" : "var(--mantine-color-dimmed)", fontWeight: view === mode ? 600 : 400, boxShadow: view === mode ? "inset 0 -2px var(--mantine-primary-color-filled)" : undefined }}>{mode}</button>)}
       </Group>}
       {panel.viz === "service_map" && mapView?.canFit && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={mapView.overview ? `Return to readable ${title} view` : `Show whole ${title} graph`} onClick={mapView.fit}><ArrowsOut size={16} /></ActionIcon>}
       {zoomed && onZoomReset && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Reset ${title} zoom`} onClick={onZoomReset}><ArrowCounterClockwise size={16} /></ActionIcon>}
@@ -176,7 +171,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           {(compactViews || panel.viz === "text") && <>
             <Menu.RadioGroup value={view} onChange={setView}>
               <Box role="group" aria-label={`${title} view`}>
-                {(panel.viz === "text" ? ["Chart", "Spec"] : ["Chart", "Data", "Spec"]).map(mode => <Menu.RadioItem key={mode} value={mode} data-panel-view={mode} closeMenuOnClick>{panel.viz === "text" && mode === "Chart" ? "Content" : mode}</Menu.RadioItem>)}
+                {(panel.viz === "text" ? ["Chart", "Spec"] : modes).map(mode => <Menu.RadioItem key={mode} value={mode} data-panel-view={mode} closeMenuOnClick>{panel.viz === "text" && mode === "Chart" ? "Content" : mode}</Menu.RadioItem>)}
               </Box>
             </Menu.RadioGroup>
             <Menu.Divider />
@@ -206,7 +201,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           </Notice>
           {fixable && agentAvailable && onFix && <Button size="compact-xs" variant="light" onClick={onFix}>Ask Fanout to fix it</Button>}
         </Box>
-        : result?.status === "empty" ? <DataState state="empty" empty={{title: "No data in this time range", description: <Text size="sm" style={{overflowWrap: "anywhere"}}>{result.diagnosis || "Widen the time range to find matching telemetry."}</Text>, action: <Button variant="default" size="compact-xs" onClick={onZoomReset ?? (() => document.getElementById("shell-time-range")?.querySelector("button")?.click())}>Widen time range</Button>}} />
+        : result?.status === "empty" ? <DataState state="empty" empty={{title: "No data in this time range", description: <Text size="sm" style={{overflowWrap: "anywhere"}}>{result.diagnosis || "Widen the time range to find matching telemetry."}</Text>, action: <Button variant="default" size="compact-xs" onClick={() => { if (onZoom && result.from_ms !== undefined && result.to_ms !== undefined) { const span = result.to_ms - result.from_ms; onZoom(result.from_ms - span / 2, result.to_ms + span / 2); } else if (zoomed && onZoomReset) onZoomReset(); else document.getElementById("shell-time-range")?.querySelector("button")?.click(); }}>Widen time range</Button>}} />
         : <ChartHintContext.Provider value={chartHint}><Viz traceLinks={traceLinks} controls={controls} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} /></ChartHintContext.Provider>}
     </Box>
     {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, paddingTop: 8, background: "var(--mantine-color-body)", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>

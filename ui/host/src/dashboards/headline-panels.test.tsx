@@ -72,9 +72,9 @@ describe("headline panel values", () => {
     const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
     const health = { health: "unhealthy", counts: { healthy: 0, degraded: 0, unhealthy: 1 }, total_spans: 1, error_rate: 10, service_count: 1, error_trend: [] };
     await act(async () => root.render(<MantineProvider><StatViz compare={false} panel={{ ...panel, viz: "stat", reduce: "last" }} result={{ ...result, previous: result.frame, frame: { ...result.frame!, health } }} /></MantineProvider>));
-    expect(host.querySelector('[data-stat-delta]')).toBeNull(); expect(host.querySelector('[data-stat-status]')?.textContent).toBe("◆ Unhealthy");
+    expect(host.querySelector('[data-stat-delta]')).toBeNull(); expect(host.querySelector('[data-stat-status]')?.textContent).toBe("Unhealthy");
     await act(async () => root.render(<MantineProvider><StatViz panel={{ ...panel, viz: "stat", reduce: "last", thresholds: [{ value: 100, status: "warn", label: "Budget breached" }] }} result={result} /></MantineProvider>));
-    expect(host.querySelector('[data-stat-status]')?.textContent).toBe("■ Budget breached");
+    expect(host.querySelector('[data-stat-status]')?.textContent).toBe("Budget breached");
   });
   it.each([false, true])("renders bold value, threshold pill, range delta and slot-zero area (%s)", async dark => {
     const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
@@ -82,18 +82,18 @@ describe("headline panel values", () => {
     const f = { ...result.frame!, values: [[0, 1800000, 3599999], [800, 1010, 1010]], rows: 3 };
     const r = { ...result, frame: f, previous: { ...f, values: [f.values[0], [344, 344, 344]] }, from_ms: 0, to_ms: 3600000 };
     await act(async () => root.render(<MantineProvider><StatViz panel={p} result={r} dark={dark} /></MantineProvider>));
-    expect((host.querySelector('[data-stat-value]') as HTMLElement).style.fontWeight).toBe("700");
-    expect(host.querySelector('[data-stat-status]')?.textContent).toBe("■ Degraded");
-    expect((host.querySelector('[data-stat-status]') as HTMLElement).style.borderRadius).toBe("999px");
+    expect((host.querySelector('[data-stat-value]') as HTMLElement).style.fontWeight).toBe("500");
+    expect(host.querySelector('[data-stat-status]')?.textContent).toBe("Degraded");
+    expect(host.querySelector('[data-stat-status] .mantine-Badge-root')).not.toBeNull();
     expect(host.textContent).toContain("▲ +194%"); expect(host.textContent).toContain("vs previous hour");
     expect((host.querySelector('[data-stat-delta]') as HTMLElement).style.color).toBe(statusInk("bad",dark));
-    const svg = host.querySelector("svg")!; expect(svg.getAttribute("height")).toBe("40");
+    const svg = host.querySelector("svg[data-sparkline], svg:has([data-sparkline-area])")!; expect(svg.getAttribute("height")).toBe("40");
     expect(svg.querySelector('[data-sparkline-area]')?.getAttribute("fill")).toBe(seriesSlot(0, dark));
     expect(svg.querySelector('[data-sparkline-area]')?.getAttribute("opacity")).toBe("0.18");
     expect(svg.querySelector('[data-sparkline-line]')?.getAttribute("stroke")).toBe(seriesSlot(0, dark));
     expect(chartThemeFor(dark).status.warn).toBeTruthy();
   });
-  it.each([["higher", "bad", "◆ Unhealthy"], ["lower", "ok", "● Healthy"]] as const)("uses %s direction and a previous-day percentage-points delta", async (better, status, label) => {
+  it.each([["higher", "bad", "Unhealthy"], ["lower", "ok", "Healthy"]] as const)("uses %s direction and a previous-day percentage-points delta", async (better, status, label) => {
     const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
     const f = { ...result.frame!, columns: [{ ...result.frame!.columns[0] }, { ...result.frame!.columns[1], unit: "percent" }], values: [[0], [4.1]], rows: 1 };
     await act(async () => root.render(<MantineProvider><StatViz panel={{ ...panel, viz: "stat", reduce: "last", better, thresholds: [{ value: 5, status: "bad" }] }} result={{ ...result, frame: f, previous: { ...f, values: [[0], [7.1]] }, from_ms: 0, to_ms: 86400000 }} /></MantineProvider>));

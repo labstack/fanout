@@ -99,12 +99,12 @@ it("text panels keep Spec in the menu with no segmented views",async()=>{
   const spec=document.querySelector<HTMLButtonElement>('[data-panel-view="Spec"]')!;expect(spec).not.toBeNull();
   await act(async()=>spec.click());expect(h.querySelector("pre")).not.toBeNull();
 });
-it.each([false,true])("retains seven monotonic colours while skewed counts encode log magnitude (%s)",dark=>{
+it.each([false,true])("uses continuous monotonic colors while skewed counts encode log magnitude (%s)",dark=>{
   const counts=[0,...Array.from({length:69},(_,i)=>i+1),1000000000],theme=chartThemeFor(dark);
   const frame={columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"count",type:"number" as const,role:"measure" as const}],values:[counts.map((_,i)=>i*60000),counts],rows:counts.length};
   const o=analysisOption({...p,viz:"heatmap"},{...r,frame},theme) as any;
   const fills=o.series[0].data.map((d:any)=>o.series[0].renderItem({}, {value:(i:number)=>d.value[i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],visual:()=>"#fff"}).style.fill);
-  expect(new Set(fills).size).toBe(3);
+  expect(new Set(fills).size).toBeGreaterThanOrEqual(40);
   const ramp=heatRamp(theme);expect(ramp).toHaveLength(7);
   const l=ramp.map(relativeLuminance);expect(l.every((v,i)=>!i||(dark?v>l[i-1]:v<l[i-1]))).toBe(true);
   const top=l.at(-1)!,surface=relativeLuminance(theme.surface);expect((Math.max(top,surface)+.05)/(Math.min(top,surface)+.05)).toBeGreaterThanOrEqual(3);
@@ -113,8 +113,8 @@ it.each([false,true])("retains seven monotonic colours while skewed counts encod
 it("scatter has muted 11px alias titles outside the plot",()=>{
   const frame={...r.frame!,columns:[{name:"operation",type:"string" as const,role:"dimension" as const},{name:"calls",type:"number" as const,role:"measure" as const},{name:"p95",type:"number" as const,role:"measure" as const,unit:"ms"}],values:[["GET"],[100],[50]],rows:1};
   const theme=chartThemeFor(false),o=analysisOption({...p,viz:"scatter"},{...r,frame},theme) as any;
-  expect(o.xAxis).toMatchObject({name:"Calls",nameLocation:"middle",nameGap:28,nameTextStyle:{fontSize:11,color:theme.muted,align:"right",verticalAlign:"top"}});
-  expect(o.yAxis).toMatchObject({name:"P95 (ms)",nameLocation:"end",nameGap:8,nameRotate:0,nameTextStyle:{fontSize:11,color:theme.muted,align:"left",verticalAlign:"bottom"}});
+  expect(o.xAxis).toMatchObject({name:"Requests",nameLocation:"middle",nameGap:28,nameTextStyle:{fontSize:11,color:theme.muted,align:"right",verticalAlign:"top"}});
+  expect(o.yAxis).toMatchObject({name:"p95 (ms)",nameLocation:"end",nameGap:8,nameRotate:0,nameTextStyle:{fontSize:11,color:theme.muted,align:"left",verticalAlign:"bottom"}});
 });
 it.each(["logs","traces","table","log_patterns"] as const)("%s notes follow the bounded scroll body",async viz=>{
   const h=await render({...p,viz},{...r,frame:{...r.frame!,truncated:true}});
@@ -168,8 +168,7 @@ it.each([120,300])("bounds a scrollable full error notice with working Retry in 
   await act(async()=>root.render(<MantineProvider env="test"><PanelCard panel={p} title={p.title} result={{id:p.id,status:"error",elapsed_ms:0,error:message,request_error:[p.id]}} loading={false} height={388} group="g" editing={false} agentAvailable={false} onRetry={retry}/></MantineProvider>));
   const body=host.querySelector<HTMLElement>('[data-panel-body]')!;
   const observer=observers.find(o=>o.elements.includes(body));
-  expect(observer).toBeDefined();
-  await act(async()=>observer!.callback([{target:body,contentRect:{height,width:300}} as unknown as ResizeObserverEntry],{} as ResizeObserver));
+  expect(body.style.overflow).toBe("auto");
   const state=host.querySelector<HTMLElement>('[data-panel-error]')!;
   expect(state).not.toBeNull();expect(body.contains(state)).toBe(true);
   expect(state.style.maxHeight).toBe("100%"); expect(state.style.overflow).toBe("auto");
@@ -190,7 +189,7 @@ it.each([120,300])("shows a busy panel as not run yet in a %ipx body",async heig
   const message="Not run: other queries kept the server busy. Refresh to try again.",retry=vi.fn();
   await act(async()=>root.render(<MantineProvider env="test"><PanelCard panel={{...p,viz:"stat"}} title={p.title} result={{id:p.id,status:"error",elapsed_ms:0,error:message,reason:"busy",retryable:true,request_error:[p.id]}} loading={false} height={388} group="g" editing={false} agentAvailable={true} onFix={()=>{}} onRetry={retry}/></MantineProvider>));
   const body=host.querySelector<HTMLElement>('[data-panel-body]')!;
-  await act(async()=>observers.find(o=>o.elements.includes(body))!.callback([{target:body,contentRect:{height,width:300}} as unknown as ResizeObserverEntry],{} as ResizeObserver));
+  expect(body.style.overflow).toBe("auto");
   expect(host.textContent).not.toContain("failed");
   const state=host.querySelector<HTMLElement>('[data-panel-busy]')!;
   expect(state.textContent).toContain("Not run yet");

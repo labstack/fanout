@@ -217,6 +217,16 @@ body,
 }
 
 .mantine-AppShell-header, .mantine-AppShell-navbar { background: var(--labstack-raised); }
-.mantine-AppShell-main { background: var(--labstack-ground); }
+.mantine-AppShell-main { background: var(--mantine-color-body); }
 .rail-row:focus-within { outline: 2px solid var(--fanout-focus); outline-offset: -2px; }
 .rail-row:focus-within .mantine-UnstyledButton-root { outline: none; }
+
+.mantine-Table-table { --table-border-color: var(--labstack-border-soft); --table-highlight-on-hover-color: var(--mantine-color-default-hover); }
+.mantine-Table-thead { position: sticky; top: 0; z-index: 2; background: var(--labstack-raised); }
+.mantine-Table-th { font-size: 12px; font-weight: 500; color: var(--mantine-color-dimmed); }
+.mantine-Table-tr { height: 32px; }
+.mantine-Table-td { padding-block: 4px; border-color: var(--labstack-border-soft); }
+.mantine-Table-tr[data-row-selected] > td:first-child { box-shadow: inset 2px 0 var(--fanout-focus); }
+.mantine-Table-tbody .mantine-Table-tr:hover { background: var(--mantine-color-default-hover); }
+.mantine-Table-td:is([data-field$="_id"], [data-field="time"], [data-field="start"]) { font-family: var(--mantine-font-family-monospace); font-size: inherit; }
+.chat-table td[align="right"], .panel-markdown td[align="right"] { font-family: var(--mantine-font-family-monospace); text-align: right; }

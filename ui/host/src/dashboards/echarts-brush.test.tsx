@@ -75,12 +75,13 @@ it.each([false, true].flatMap(dark => [300, 600].map(width => ({ dark, width }))
         expect(button).toBeDefined();
         await act(async () => button.click());
       };
+      const primary = ["table", "logs", "traces", "log_patterns"].includes(viz) ? "Table" : "Chart";
       if (viz !== "text") {
         await choose("Data"); expect(card.querySelector("[data-panel-data]")).not.toBeNull();
-        await choose("Chart");
+        await choose(primary);
       }
       await choose("Spec"); expect(card.querySelector("[data-panel-spec]")).not.toBeNull();
-      await choose(viz === "text" ? "Content" : "Chart");
+      await choose(viz === "text" ? "Content" : primary);
       expect(card.querySelector("[data-panel-spec]")).toBeNull();
       if (viz === "text") expect(card.textContent).toContain("Notes");
     }

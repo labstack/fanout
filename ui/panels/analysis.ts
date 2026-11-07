@@ -1,5 +1,5 @@
 import { displayLabel } from "./labels";
-import { heatRamp, heatStep } from "./heat-scale";
+import { heatRamp, heatStep, heatColor } from "./heat-scale";
 import { escapeHTML, htmlTooltip, tooltipLines, type TooltipPoint } from "./escape";
 import { seriesSlot } from "../chart";
 import type { ChartSize, ChartTheme } from "./compile";
@@ -9,7 +9,7 @@ import { isOtherSeries, seriesGroups, sumPresent, wrappingLegend } from "./serie
 import { statusFor } from "./thresholds";
 import type { Cell, Panel, PanelResult } from "./types";
 import { formatAxis, formatBucket, formatTimeAxis, formatTimestamp, formatValue, valueAxis, valueAxisTicks } from "./units";
-import { markStyle } from "./style";
+import { tint, markStyle } from "./style";
 
 function spanMs(interval?: string): number {
   const match = /^(\d+)(s|m|h|d)$/.exec(interval ?? "");
@@ -22,7 +22,7 @@ const bucketKey = (row: Record<string, Cell>) => `${row.bucket_lower}:${row.buck
 const bucketSelection = (row: Record<string, Cell> | undefined) => typeof row?.bucket_lower === "number"
   ? { lower: row.bucket_lower, upper: typeof row.bucket_upper === "number" ? row.bucket_upper : undefined } : undefined;
 
-const heatCountLabel = (count: number) => count >= 1000 && count < 1e6 && count % 1000 === 0 ? `${count / 1000}k` : formatValue("count", count);
+const heatCountLabel = (count: number) => count >= 1000 && count < 1e6 && count % 1000 === 0 ? `${count / 1000}K` : formatValue("count", count);
 
 /** State runs merge only touching buckets of the same row and status. */
 function mergeStateRuns<T extends { value: (string | number | null | boolean)[]; selection: { from?: string; to?: string } }>(buckets: T[]): T[] {
@@ -95,7 +95,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       xAxis: { ...axis(xUnit, xScale, measures[0]?.name, size.width - 80), name: displayLabel(measures[0] ? { ...measures[0], unit: xUnit } : "x", panel), nameLocation: "middle", nameGap: 28, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "top" } },
       yAxis: { ...axis(yUnit, yScale, measures[1]?.name, size.height-legendLayout.top-74), name: displayLabel(measures[1] ? { ...measures[1], unit: yUnit } : "y", panel), nameLocation: "end", nameGap: 8, nameRotate: 0, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "left", verticalAlign: "bottom" } },
       series: groups.map(({ name, items }, index) => ({
-        type: "scatter", name, interactive: true, keyboard_unit: yUnit, keyboard_x_unit: xUnit, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
+        type: "scatter", name, interactive: true, label: {show: rows.length <= 12, formatter: "{b}", position: "right", color: theme.muted, fontFamily: theme.font, fontSize: 11, width: 120, overflow: "truncate"}, labelLayout: {hideOverlap: true}, keyboard_unit: yUnit, keyboard_x_unit: xUnit, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
         data: rows.filter(row => !colour || items.some(item => item.name === String(row[colour] ?? "")))
           .filter(row => typeof row[measures[0]?.name] === "number" && typeof row[measures[1]?.name] === "number")
           .filter(row => (xScale !== "log" || Number(row[measures[0].name]) > 0) && (yScale !== "log" || Number(row[measures[1].name]) > 0))
@@ -127,7 +127,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       legend: legendLayout.option,
       grid: { ...base.grid, left:16,right:8,top:legendLayout.option.show ? legendLayout.top + 20 : 28,bottom:8 },
       xAxis: { ...base.xAxis, type: "category", data: labels, splitLine:{show:false} },
-      yAxis: { ...base.yAxis, type: "value", name:displayLabel("count"),nameLocation:"end",nameGap:8,nameRotate:0,...valueAxis(0, Math.max(0, ...series.flatMap(s => s.data.map(d => d.value))), "count", size.height-(legendLayout.option.show ? legendLayout.top + 20 : 28)-30),axisLabel:{...base.yAxis.axisLabel,hideOverlap:true},nameTextStyle:{color:theme.muted,fontFamily:theme.font,fontSize:11,align:"right",verticalAlign:"bottom"} },
+      yAxis: { ...base.yAxis, type: "value", name:displayLabel("count"),nameLocation:"end",nameGap:8,nameRotate:0,...valueAxis(0, Math.max(0, ...series.flatMap(s => s.data.map(d => d.value))), "count", size.height-(legendLayout.option.show ? legendLayout.top + 20 : 28)-30),axisLabel:{...base.yAxis.axisLabel,hideOverlap:true,formatter:formatAxis("count")},nameTextStyle:{color:theme.muted,fontFamily:theme.font,fontSize:11,align:"right",verticalAlign:"bottom"} },
       series,
     };
   }
@@ -175,14 +175,14 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
         }).join("<br/>");
       } },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
-      xAxis: { type: "time", min: result.from_ms, max: result.to_ms, axisPointer: { show: true }, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatTimeAxis, hideOverlap: true } },
+      xAxis: { type: "time", min: buckets.length ? Math.min(...buckets.map(b => Number(b.value[0]))) : result.from_ms, max: result.to_ms, axisPointer: { show: true }, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatTimeAxis, hideOverlap: true } },
       yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, width: 140, overflow: "truncate", ...(heat ? { interval: (size.height-60)/Math.max(1,names.length)<12 ? 1 : 0, hideOverlap: true } : { interval: 0 }) } },
       visualMap: heat ? {
         type: "continuous", show: true, orient: "horizontal", right: 16, bottom: 0, padding: 0,
         itemWidth: 8, itemHeight: 96, text: [capLabel, counts.length ? "1" : "0"], textGap: 10, textStyle: { color: theme.muted,fontFamily:theme.font,fontSize:12 },
         min: 0, max: 6, dimension: 5, inRange: { color: ramp },
       } : undefined,
-      graphic: !heat && hiddenRows.length ? [{type:"text",right:0,bottom:0,style:{text:`+${hiddenRows.length} rows`,fill:theme.muted,fontSize:12,fontFamily:theme.font},tooltip:{formatter:()=>hiddenRows.map(escapeHTML).join("<br/>")}}] : [],
+      graphic: heat ? [{type:"text", left:8, bottom:2, style:{text:"Requests / bucket · log scale", fill:theme.muted, fontSize:11, fontFamily:theme.font}}] : hiddenRows.length ? [{type:"text",right:0,bottom:0,style:{text:`+${hiddenRows.length} rows`,fill:theme.muted,fontSize:12,fontFamily:theme.font},tooltip:{formatter:()=>hiddenRows.map(escapeHTML).join("<br/>")}}] : [],
       series: [{
         type: "custom", clip: true, name: panel.title, interactive: true, keyboard_unit: heat ? "count" : panel.unit ?? measures[0]?.unit, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
         renderItem: (_params: unknown, api: { value: (index: number) => number; coord: (value: number[]) => number[]; size: (value: number[]) => number[]; visual: (key: "color") => string }) => {
@@ -191,7 +191,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
           const height = Math.abs(api.size([0, 1])[1]) * (heat ? 1 : .65);
           const gap = heat && Math.abs(right[0]-left[0]) >= 8 ? 1 : 0;
           if (heat && !(api.value(2) > 0)) return undefined;
-          return { type: "rect", shape: { x: left[0] + gap/2, y: left[1] - height / 2 + gap/2, width: Math.max(0, right[0] - left[0] - gap), height: Math.max(0, height - gap), r: heat ? 0 : Math.min(3, height / 4) }, style: { fill: api.visual("color"), stroke: undefined, lineWidth: 0, ...(heat ? { fill: ramp[heatStep(api.value(2), cap)] } : {}) } };
+          return { type: "rect", shape: { x: left[0] + gap/2, y: left[1] - height / 2 + gap/2, width: Math.max(0, right[0] - left[0] - gap), height: Math.max(0, height - gap), r: heat ? 0 : Math.min(3, height / 4) }, style: { fill: !heat && theme.dark ? tint(api.visual("color"), .65) : api.visual("color"), stroke: undefined, lineWidth: 0, ...(heat ? { fill: heatColor(api.value(2), cap, ramp) } : {}) } };
         },
       }],
     };

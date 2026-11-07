@@ -1,4 +1,5 @@
-import { Alert, Button, Group, Text } from "@mantine/core";
+import { DataState, Notice } from "@labstack/ui";
+import { Box,  Button, Group, Text } from "@mantine/core";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 /**
@@ -33,9 +34,9 @@ export function useDiscard(dirty: boolean, onClose: () => void, what: string) {
     if (event.target instanceof Element && event.target.getAttribute("aria-expanded") === "true") return;
     if (confirming) resume(); else request();
   };
-  const prompt = confirming && <Alert color="warn" title="Discard changes?" mb="sm">
+  const prompt = confirming && <Box mb="sm"><Notice tone="warning" title="Discard changes?">
     <Text size="sm">Your changes to {what} have not been saved.</Text>
     <Group gap="xs" mt="sm"><Button ref={keep} variant="default" onClick={resume}>Keep editing</Button><Button color="bad" onClick={onClose}>Discard changes</Button></Group>
-  </Alert>;
+  </Notice></Box>;
   return { request, onKeyDown, prompt };
 }

@@ -1,3 +1,4 @@
+import { formatTimestamp } from "../../panels/units";
 import { DataState, Notice, PageHeader } from "@labstack/ui";
 import { Anchor, Box, Button, Code, CopyButton, Group, Modal, Paper, Stack, Text, TextInput, Title, Tooltip } from "@mantine/core";
 import { ArrowsClockwise, Check, Copy, WarningCircle } from "@phosphor-icons/react";
@@ -62,12 +63,12 @@ function ConnectedAgents() {
               <Button size="compact-sm" variant="light" onClick={() => void agents.refetch()}>Try again</Button>
             </Stack>
         : agents.data.connections.length === 0
-          ? <Text c="dimmed" size="sm">No agents connected. <Anchor href={docs.connect} target="_blank" rel="noopener noreferrer" underline="always">Connect an agent over MCP</Anchor> to get started.</Text>
+          ? <DataState state="empty" empty={{title: "No agents connected.", description: "Authorize an agent to access this workspace.", action: <Anchor href={docs.connect} target="_blank" rel="noopener noreferrer" underline="always">Connect an agent over MCP</Anchor>}} />
           : <Stack gap="md">
               {agents.data.connections.map((agent) => <Group key={agent.client_id} justify="space-between" align="center">
                 <Box style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                   <Text size="sm" fw={600}>{agent.client_name}</Text>
-                  <Text size="xs" c="dimmed">Connected <time dateTime={agent.connected_at}>{new Date(agent.connected_at).toLocaleDateString()}</time></Text>
+                  <Text size="xs" c="dimmed">Connected <time style={{fontFamily: "var(--mantine-font-family-monospace)"}} dateTime={agent.connected_at}>{formatTimestamp(Date.parse(agent.connected_at))}</time></Text>
                 </Box>
                 <Button variant="default" size="sm" onClick={() => { disconnect.reset(); setSelected(agent); }} disabled={disconnect.isPending}>Disconnect</Button>
               </Group>)}
@@ -217,7 +218,7 @@ export default function Settings() {
   const canRotate = viewer.role === "admin";
   const authorization = `${header}: Bearer <your token>`;
 
-  return <Box w="100%" px={{ base: "md", sm: "xl" }} pt={{ base: "lg", sm: "xl" }} pb="xl">
+  return <Box w="100%" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
     <Stack gap="xl">
       <PageHeader title="Settings" description="Manage telemetry connections and authorized agents." />
       <Title order={2} fz={18}>Connect telemetry</Title>

@@ -195,7 +195,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
   const stale = ran !== undefined && (ran.text !== text || ran.terms !== terms || ran.sort !== sort || ran.window !== windowKey);
   const canSave = ran !== undefined && !stale && !running && ran.result.status === "ok" && (ran.result.frame?.rows ?? 0) > 0;
 
-  return <Stack gap="md" p="lg" maw={1400} data-search-page={preset.viz}>
+  return <Stack gap="md" px={{base:"md",sm:"xl"}} pt="lg" pb="xl" maw={1600} mx="auto" data-search-page={preset.viz}>
     <Group justify="space-between" align="flex-end">
       <PageHeader title={preset.name} description={preset.name === "Logs" ? "Search and inspect log events." : "Find slow requests and inspect their traces."} meta={<LiveDataMeta time={time} updatedAt={ran ? ranAt : null} />} />
       <RangeMenu time={time} onRange={range => onSearch({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => onSearch({ ...search, from, to })} />

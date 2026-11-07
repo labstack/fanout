@@ -1,3 +1,4 @@
+import { StatusBadge } from "@labstack/ui";
 import { Box, Group, Text } from "@mantine/core";
 import { previousStatValue as previousStat } from "./previous";
 import { statValue, sparkline } from "../../../../panels/frame";
@@ -5,7 +6,6 @@ import { statusFor, thresholdDirection } from "../../../../panels/thresholds";
 import type { Panel, PanelResult } from "../../../../panels/types";
 import { formatValue } from "../../../../panels/units";
 import { seriesSlot } from "../../../../chart";
-import { chartThemeFor } from "../../../../panels/compile";
 import { statusInk } from "../../../../panels/style";
 
 export function StatViz({ panel, result, dark = false, compare = true, range }: { panel: Panel; result: PanelResult; dark?: boolean; compare?: boolean; range?: string }) {
@@ -17,11 +17,10 @@ export function StatViz({ panel, result, dark = false, compare = true, range }: 
   const previous = previousStat(panel, result);
   const points = sparkline(frame);
   const thresholdLabel = panel.thresholds?.find(t => t.status === status && value !== null && (better === "higher" ? value <= t.value : value >= t.value))?.label;
-  const theme = chartThemeFor(dark);
   return <Box h="100%" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 4 }}>
     <Group justify="space-between" align="flex-start" wrap="nowrap" gap="xs">
-      <Text data-stat-value fz={32} fw={700} lh={1.1} lts="-0.02em" ff="var(--mantine-font-family-monospace)">{formatValue(unit, value)}</Text>
-      {status && <Text data-stat-status fz={12} fw={500} style={{ borderRadius: 999, padding: "1px 8px", whiteSpace: "nowrap", background: `${theme.status[status]}22`, color: theme.text }}><span style={{ color: theme.status[status] }}>{status === "bad" ? "◆" : status === "warn" ? "■" : "●"}</span> {thresholdLabel ?? (status === "bad" ? "Unhealthy" : status === "warn" ? "Degraded" : "Healthy")}</Text>}
+      <Text data-stat-value fz={24} fw={500} lh={1.1} lts="-0.02em" ff="var(--mantine-font-family-monospace)">{formatValue(unit, value)}</Text>
+      {status && <Box data-stat-status><StatusBadge tone={status === "bad" ? "danger" : status === "warn" ? "warning" : "success"}>{thresholdLabel ?? (status === "bad" ? "Unhealthy" : status === "warn" ? "Degraded" : "Healthy")}</StatusBadge></Box>}
     </Group>
     {compare && previous !== null && value !== null && <Delta dark={dark} value={value} previous={previous} better={better} unit={unit} period={previousPeriod(range, result)} />}
     <Sparkline points={points} area dark={dark} height={40} />

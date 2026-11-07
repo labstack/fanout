@@ -1,4 +1,5 @@
-import { Alert, Button, Group, Modal, SegmentedControl, Select, Stack, TextInput } from "@mantine/core";
+import { DataState, Notice } from "@labstack/ui";
+import { Box,  Button, Group, Modal, SegmentedControl, Select, Stack, TextInput } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { DashboardTime, Panel } from "../../../panels/types";
@@ -65,8 +66,8 @@ export function SaveDialog({ panel, time, onClose, onSaved }: {
         ? <Select label="Dashboard" placeholder="Choose a dashboard" searchable value={dashboardId} onChange={setDashboardId} data={(dashboards.data ?? []).map(d => ({ value: d.id, label: d.name }))} />
         : <TextInput label="Dashboard name" value={name} onChange={event => setName(event.currentTarget.value)} data-autofocus />}
       <TextInput label="Panel title" value={title} onChange={event => setTitle(event.currentTarget.value)} />
-      {dashboards.error && <Alert color="bad">Dashboards could not be loaded.</Alert>}
-      {error && <Alert color="bad" title="Not saved">{error}</Alert>}
+      {dashboards.error && <Box ><Notice tone="danger">Dashboards could not be loaded.</Notice></Box>}
+      {error && <Box ><Notice tone="danger" title="Not saved">{error}</Notice></Box>}
       <Group justify="flex-end" gap="xs">
         <Button variant="default" disabled={saving} onClick={onClose}>Cancel</Button>
         <Button loading={saving} disabled={!ready} onClick={() => void save()}>Save</Button>

@@ -7,7 +7,7 @@ import { PanelCard } from "./panel-card";
 
 const meta = {
   id: "components-dashboard-panels", title: "Components/Dashboard panels", component: PanelCard,
-  args: { panel: panels[0], title: panels[0].title, result: results[0], height: 440, loading: false, group: "catalog", editing: false, agentAvailable: false, onSelect: fn(), onRetry: fn() },
+  args: { panel: panels[0], title: panels[0].title, result: results[0], height: 440, loading: false, group: "catalog", editing: false, agentAvailable: false, onSelect: fn(), onRetry: fn(), onZoom: fn() },
   decorators: [(Story, context) => <Box h={context.args.height}><Story /></Box>],
   parameters: { docs: { description: { component: "All fifteen shipping visualizations. The host and embedded app share these panel cards and the package-free panel model." } } },
 } satisfies Meta<typeof PanelCard>;
@@ -35,9 +35,9 @@ export const Logs: Story = panel("logs");
 export const LogPatterns: Story = panel("patterns");
 export const Traces: Story = panel("traces");
 export const ServiceDependencies: Story = panel("topology");
-export const Loading: Story = { args: { result: undefined }, parameters: { } };
+export const Loading: Story = { args: { result: undefined },  };
 export const Empty: Story = { args: { result: { id: "requests", status: "empty", diagnosis: "No requests in this time range.", elapsed_ms: 18 } } };
-export const Error: Story = { args: { result: { id: "requests", status: "error", error: "The telemetry query timed out. Try a shorter time range.", elapsed_ms: 3000 } } };
+export const Error: Story = { args: { result: { id: "requests", status: "error", error: "The telemetry query timed out. Try a shorter time range.", elapsed_ms: 3000, request_error: ["requests"], retryable: true } } };
 export const Data: Story = { args: { initialView: "Data" }, play: async ({ canvas, userEvent }) => {
   await expect(await canvas.findByRole("table")).toBeVisible();
   await userEvent.click(canvas.getByRole("button", { name: /^Spec$/ }));
@@ -49,9 +49,18 @@ export const Invalid: Story = { args: { result: invalidResult }, play: async ({ 
   await expect(canvas.getByText("Unknown field: request_total", { exact: true })).toBeVisible();
   await expect(canvas.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
 } };
-export const InvalidDataTab: Story = { args: { result: invalidResult }, play: async ({ canvas, userEvent, args }) => {
+export const InvalidDataTab: Story = { args: { result: invalidResult, initialView: "Data" }, play: async ({ canvas, userEvent, args }) => {
   await expect(canvas.getByText("Unknown field: request_total", { exact: true })).toBeVisible();
   await expect(canvas.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   await userEvent.click(canvas.getByRole("button", { name: /^Data$/ }));
   await expect(args.onRetry).not.toHaveBeenCalled();
 } };
+
+export const HeatmapResolution: Story = { ...panel("density"), args: { ...panel("density").args, result: {id: "density", status: "ok", elapsed_ms: 24, interval: "1m", from_ms: 0, to_ms: 4200000, frame: {columns: [{name:"time",type:"time",role:"time"},{name:"bucket_lower",type:"number",role:"dimension",unit:"ms"},{name:"bucket_upper",type:"number",role:"dimension",unit:"ms"},{name:"count",type:"number",role:"measure",unit:"count"}], values: [Array.from({length:70},(_,i)=>i*60000),Array(70).fill(0),Array(70).fill(100),Array.from({length:70},(_,i)=>i+1)],rows:70}} } };
+export const TraceIds: Story = { ...panel("traces"), play: async ({canvas}) => {
+  const ids=canvas.getAllByTitle(/^[a-f0-9]{32}$/);
+  await expect(ids[0].textContent).toMatch(/…$/);
+  await expect(canvas.queryByRole("button", {name: /^Chart$/})).not.toBeInTheDocument();
+} };
+
+export const SelectedLog: Story = { ...panel("logs"), args: { ...panel("logs").args, controls: {selected: 0} } };

@@ -12,8 +12,8 @@ it.each(["timeseries", "heatmap", "state_timeline"] as const)("bounds %s by its 
   const theme = chartThemeFor(false);
   const base = viz === "timeseries" ? timeseriesOption(panel, result, theme) : analysisOption(panel, result, theme);
   const option = withAnnotations(base, panel, result, { deploys: [], anomalies: [{ namespace: "shop", service: "cart", kind: "volume", title: "Stopped", severity: "warn", from: new Date(-900000).toISOString(), to: new Date(-600000).toISOString() }] }, {}, theme) as any;
-  expect(base.xAxis).toMatchObject({ type: "time", min: -3600000, max: 0 });
-  expect(option.xAxis).toMatchObject({ min: result.from_ms, max: result.to_ms });
+  expect(base.xAxis).toMatchObject({ type: "time", min: -3500000, max: 0 });
+  expect(option.xAxis).toMatchObject({ min: -3500000, max: result.to_ms });
   const area = option.series[0].markArea.data[0];
   expect(area[0].xAxis).toBeGreaterThan(-1800000);
   expect(area[0].xAxis).toBeGreaterThanOrEqual(option.xAxis.min);

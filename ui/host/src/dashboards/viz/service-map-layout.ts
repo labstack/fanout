@@ -1,3 +1,4 @@
+import { percent } from "../../../../format";
 import { graphlib, layout } from "@dagrejs/dagre";
 import type { ChartSize } from "../../../../panels/compile";
 import { healthGlyph, type ServiceGraph, type ServiceNode } from "../../../../panels/rollups";
@@ -146,7 +147,7 @@ const shortNumber = (value: number | null): string => {
   if (bounded >= 1000) return `${Math.min(999, Math.round(bounded / 1000))}K`;
   return String(Number(bounded.toFixed(bounded < 1 ? 2 : bounded < 10 ? 1 : 0)));
 };
-const shortError = (value: number | null): string => value === null || !Number.isFinite(value) ? "— err" : `${Number((value > 0 ? clamp(value, .1, 100) : 0).toFixed(1))}% err`;
+const shortError = (value: number | null): string => value === null || !Number.isFinite(value) ? "— err" : `${percent(clamp(value,0,100) / 100)} err`;
 const shortDuration = (value: number | null) => value === null ? "—" : Number(value.toPrecision(2)) >= 1000 ? `${shortNumber(value / 1000)}s` : `${shortNumber(value)}ms`;
 
 const textMeasure: NonNullable<ChartSize["measureText"]> = (text,font)=>Array.from(text).length*Number(font.match(/([\d.]+)px/)?.[1]??11)*.6;

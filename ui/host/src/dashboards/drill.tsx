@@ -1,8 +1,7 @@
-import {
-  Alert,
+import { DataState, Notice } from "@labstack/ui";
+import { Box,
   Button,
   Drawer,
-  Loader,
   Stack,
   Text,
   useComputedColorScheme,
@@ -84,13 +83,13 @@ export function DrillDrawer({
         onChange(next);
       }}>Back to traces</Button>}
       {!panel && (
-        <Alert color="bad">This panel is no longer in the dashboard.</Alert>
+        <Box ><Notice tone="danger">This panel is no longer in the dashboard.</Notice></Box>
       )}
       {(exemplars.isFetching || trace.isFetching) && (
-        <Loader role="status" aria-label="Loading drill data" size="sm" />
+        <Box role="status" aria-label="Loading drill data"><DataState state="loading" loadingLabel="Loading drill data" rows={3} /></Box>
       )}
       {(exemplars.error || trace.error) && (
-        <Alert color="bad">{(exemplars.error ?? trace.error)?.message}</Alert>
+        <Box ><Notice tone="danger" retryLabel="Retry" onRetry={() => {void (target?.trace_id ? trace.refetch() : exemplars.refetch());}}>{(exemplars.error ?? trace.error)?.message}</Notice></Box>
       )}
       {directLogs && exemplars.data?.logs && panel && (
         <LogsViz
@@ -108,12 +107,12 @@ export function DrillDrawer({
         />
       )}
       {directLogs && exemplars.data?.logs?.rows === 0 && (
-        <Text c="dimmed">No logs match this selection.</Text>
+        <DataState state="empty" empty={{title: "No logs match this selection.", description: "Widen the time range to find matching logs.", action: <Button onClick={() => onChange(undefined)}>Change selection</Button>}} />
       )}
       {!directLogs && !target?.trace_id && exemplars.data && (
         <Stack gap="xs">
           {exemplars.data.traces.length === 0 && (
-            <Text c="dimmed">No exemplar traces match this selection.</Text>
+            <DataState state="empty" empty={{title: "No exemplar traces match this selection.", description: "Widen the time range to find matching requests.", action: <Button onClick={() => onChange(undefined)}>Change selection</Button>}} />
           )}
           {exemplars.data.traces.map((t) => (
             <Button

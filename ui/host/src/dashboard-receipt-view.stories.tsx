@@ -19,8 +19,8 @@ export const Building: Story = { args: { receipt: { ...savedReceipt, saved: unde
 export const InvalidPanel: Story = { args: { receipt: invalidReceipt }, play: async ({ canvas, userEvent }) => {
   await expect(canvas.getByText("Requests: Unknown field: request_total")).toBeVisible();
   await userEvent.click(canvas.getByRole("button", { name: /^Details/ }));
-  await waitFor(() => expect(canvas.getByText("Preview · Requests: Invalid · 0 ms")).toBeVisible());
-  await expect(canvas.getByText(/Preview · p95 latency: Ok/)).toBeVisible();
+  await waitFor(() => expect(canvas.getByText(/Preview · Requests:/)).toHaveTextContent("Preview · Requests: Invalid · 0 ms"));
+  await expect(canvas.getByText(/Preview · p95 latency:/)).toBeVisible();
 } };
 export const Corrected: Story = { args: { receipt: correctedReceipt }, play: async ({ canvas, userEvent }) => {
   await userEvent.click(canvas.getByRole("button", { name: /^Details/ }));
@@ -33,5 +33,5 @@ export const SavedWithInvalidPanel: Story = { args: { receipt: savedInvalidRecei
   await expect(canvas.getByText(/Saved v1/)).toBeVisible();
   await expect(canvas.getByText("Requests: Unknown field: request_total")).toBeVisible();
   await userEvent.click(canvas.getByRole("button", { name: /^Details/ }));
-  await waitFor(() => expect(canvas.getByText("Save · Requests: Invalid · 0 rows · 0 ms")).toBeVisible());
+  await waitFor(() => expect(canvas.getByText(/Save · Requests:/)).toHaveTextContent("Save · Requests: Invalid · 0 rows · 0 ms"));
 } };

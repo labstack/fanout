@@ -1,4 +1,5 @@
-import { Alert, Button, Group, Modal, Stack, TextInput } from "@mantine/core";
+import { DataState, Notice } from "@labstack/ui";
+import { Box,  Button, Group, Modal, Stack, TextInput } from "@mantine/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { DashboardSpec } from "../../../panels/types";
@@ -22,7 +23,7 @@ export function DuplicateDialog({ spec, onClose, onCreated }: { spec: DashboardS
   return <Modal opened onClose={() => { if (!saving) onClose(); }} title="Duplicate dashboard">
     <Stack gap="md">
       <TextInput label="New dashboard name" value={name} onChange={event => setName(event.currentTarget.value)} data-autofocus />
-      {error && <Alert color="bad">{error}</Alert>}
+      {error && <Box ><Notice tone="danger">{error}</Notice></Box>}
       <Group justify="flex-end" gap="xs">
         <Button variant="default" disabled={saving} onClick={onClose}>Cancel</Button>
         <Button loading={saving} disabled={!name.trim() || name.trim() === spec.name} onClick={() => void save()}>Duplicate</Button>

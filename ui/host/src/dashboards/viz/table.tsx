@@ -1,5 +1,7 @@
+import { TraceIdCopy } from "../../trace-id-copy";
+import { StatusBadge } from "@labstack/ui";
 import { seriesSlot } from "../../../../chart";
-import { Anchor, Badge, Box, Button, Group, Table, Text, UnstyledButton, useComputedColorScheme } from "@mantine/core";
+import { Anchor, Box, Button, Group, Table, Text, UnstyledButton, useComputedColorScheme } from "@mantine/core";
 import { CaretDown, CaretUp } from "@phosphor-icons/react";
 import { createSortedRowModel, rowSortingFeature, sortFn_alphanumeric, sortFn_basic, tableFeatures, useTable, type ColumnDef, type SortingState } from "@tanstack/react-table";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -14,8 +16,7 @@ import { columnDisplay, type ColumnFormat } from "../../../../panels/column-form
 import { makeDrill } from "../drill-state";
 import { drillHref } from "../search";
 import { RowText } from "./cell-text";
-import { statusInk, tint } from "../../../../panels/style";
-import { chartThemeFor } from "../../../../panels/compile";
+import { statusInk } from "../../../../panels/style";
 
 const features = tableFeatures({ rowSortingFeature, sortedRowModel: createSortedRowModel(), sortFns: { basic: sortFn_basic, alphanumeric: sortFn_alphanumeric } });
 
@@ -24,7 +25,7 @@ type Row = Cell[];
 export type TableCellProps = { column: Column; value: Cell; row: Cell[]; rowIndex: number; columnIndex: number };
 
 /** Logs and Traces pages render rows a page at a time, show a details row under an expanded log, and offer exclusions. */
-export type RowControls = { page?: number; details?: (row: Record<string, Cell>) => ReactNode; exclude?: (field: "service" | "operation", value: string) => void };
+export type RowControls = { page?: number; selected?: number; details?: (row: Record<string, Cell>) => ReactNode; exclude?: (field: "service" | "operation", value: string) => void };
 
 /** Formats that print a number in its unit; the rest print the cell as it came. */
 const unitFormats = new Set(["unit", "bar", "status", "sparkline"]);
@@ -37,7 +38,7 @@ function columnHeader(column: Column, panel: Panel): string {
   const format = panel.options?.columns?.find(c => c.field === column.name);
   const unit = format?.unit ?? column.unit ?? panel.unit;
   const printed = !format || unitFormats.has(format.format);
-  return printed && column.type === "number" && (unit === "ms" || unit === "s" || unit === "ns") ? label.replace(/ \((?:ms|s|ns)\)$/, "") : label;
+  return printed && column.type === "number" && unit && unit !== "none" && unit !== "count" ? label.replace(/ \([^)]*\)$/, "") : label;
 }
 
 export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderCell, traceLinks, foldConstants = true, controls }: { foldConstants?: boolean; traceLinks?: "button"; panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onVariable?: (name: string, value: string) => void; renderCell?: (props: TableCellProps) => ReactNode; controls?: RowControls }) {
@@ -49,9 +50,10 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   variableCallback.current = onVariable;
   const frame = result.frame!;
   const hidden = useMemo(() => new Set((foldConstants ? logConstants(panel,frame) : []).map(c=>c.name)),[panel,frame,foldConstants]);
+  const [selected, setSelected] = useState<number | undefined>(controls?.selected);
   const [expanded,setExpanded] = useState<Set<number>>(new Set());
   const [shown,setShown] = useState(controls?.page ?? Infinity);
-  useEffect(()=>{setExpanded(new Set());setShown(controls?.page ?? Infinity);},[frame,controls?.page]);
+  useEffect(()=>{setSelected(controls?.selected);setExpanded(new Set());setShown(controls?.page ?? Infinity);},[frame,controls?.page,controls?.selected]);
   const expandable = (column: Column) => ["body","body_template"].includes(column.name) || panel.options?.columns?.some(c=>c.field===column.name&&c.format==="log_template");
   const canExpand = frame.columns.some(expandable);
   const toggle = (index:number) => setExpanded(old=>{const next=new Set(old);if(next.has(index)) next.delete(index);else next.add(index);return next;});
@@ -85,9 +87,9 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
           {index === firstMeasure && maxima[index] > 0 && <Box w={56} h={6} bg="var(--mantine-color-default-border)" style={{ borderRadius: 3, overflow: "hidden", flex: "none" }}><Box h="100%" w={`${(value / maxima[index]) * 100}%`} bg={seriesSlot(0, dark)} /></Box>}
         </Box>;
       }
-      if (column.type === "time" && typeof value === "number") return <Text size="sm" ff="monospace" style={{ whiteSpace: "nowrap" }} title={new Date(value).toISOString()}>{formatTimestamp(value)}</Text>;
+      if (column.type === "time" && typeof value === "number") return <Text fz={12} ff="monospace" style={{ whiteSpace: "nowrap" }} title={new Date(value).toISOString()}>{formatTimestamp(value)}</Text>;
       const text = value === null ? "—" : String(value);
-      if (column.name === "trace_id") return <Text fz={12} ff="monospace" title={text} data-trace-id={text}>{text.slice(0,16)}</Text>;
+      if (column.name === "trace_id") return <TraceIdCopy value={text}><Text fz={12} ff="monospace" title={text} data-trace-id={text}>{(text.length > 16 ? `${text.slice(0,16)}…` : text)}</Text></TraceIdCopy>;
       return <Text fz={12} className="dashboard-dimension-nowrap" style={panel.viz === "traces" ? { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } : undefined} title={text} ff={column.type === "json" || /(_id|^id)$/.test(column.name) ? "monospace" : undefined}>{text}</Text>;
     },
     sortFn: column.role === "measure" ? "basic" : "alphanumeric",
@@ -111,6 +113,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   const rowInteractive = (index: number) => Boolean(onSelect || onPoint && (panel.click || panel.drill || selectionFor(index).trace_id));
   const activate = (index: number, original: Cell[]) => {
     if (!rowInteractive(index)) return;
+    setSelected(index);
     onPoint?.(selectionFor(index));
     const value = firstDimension >= 0 ? String(original[firstDimension] ?? "") : undefined;
     if (value !== undefined) onSelect?.(value);
@@ -138,13 +141,14 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
         </Table.Tr>)}
       </Table.Thead>
       <Table.Tbody>
-        {table.getRowModel().rows.slice(0, shown).map((row) => <Fragment key={row.id}><Table.Tr data-row-expanded={expanded.has(row.index)} aria-expanded={controls?.details ? expanded.has(row.index) : undefined} tabIndex={rowInteractive(row.index) || canExpand ? 0 : undefined} style={{ cursor: rowInteractive(row.index) || canExpand ? "pointer" : undefined }}
+        {table.getRowModel().rows.slice(0, shown).map((row) => <Fragment key={row.id}><Table.Tr data-row-selected={selected === row.index || expanded.has(row.index) || undefined} data-row-expanded={expanded.has(row.index)} tabIndex={rowInteractive(row.index) || canExpand ? 0 : undefined} style={{ cursor: rowInteractive(row.index) || canExpand ? "pointer" : undefined }}
           onClick={event => { if ((event.target as Element).closest("a,button")) return; if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); }}
           onKeyDown={event => { if ((!rowInteractive(row.index)&&!canExpand) || (event.target as Element).closest("a,button")) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); } }}>
           {row.getAllCells().map(cell => {
             const column=frame.columns.find(c=>c.name===cell.column.id)!;
+            const content = expandable(column) ? <div data-row-text style={{display:expanded.has(row.index)?"block":"-webkit-box",WebkitLineClamp:expanded.has(row.index)?undefined:2,WebkitBoxOrient:"vertical",maxHeight:expanded.has(row.index)?undefined:36,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"normal",overflowWrap:"anywhere",lineHeight:"18px"}}><table.FlexRender cell={cell}/></div> : <table.FlexRender cell={cell}/>;
             return <Table.Td key={cell.id} data-field={column.name} ta={column.type === "number" ? "right" : undefined} style={{ minWidth: columnWidth(column.name), ...(panel.viz === "log_patterns" ? { overflow: "hidden", ...(column.name === "count" ? { paddingLeft: 12, paddingRight: 12 } : {}) } : panel.viz === "traces" && column.type !== "time" ? { overflow: "hidden" } : {}) }}>
-              {expandable(column) ? <div data-row-text style={{display:expanded.has(row.index)?"block":"-webkit-box",WebkitLineClamp:expanded.has(row.index)?undefined:2,WebkitBoxOrient:"vertical",maxHeight:expanded.has(row.index)?undefined:36,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"normal",overflowWrap:"anywhere",lineHeight:"18px"}}><table.FlexRender cell={cell}/></div> : <table.FlexRender cell={cell}/>}
+              {controls?.details && expandable(column) ? <UnstyledButton style={{width:"100%", textAlign:"left"}} aria-label={expanded.has(row.index) ? "Hide log details" : "Show log details"} aria-expanded={expanded.has(row.index)} onClick={event => {event.stopPropagation(); toggle(row.index);}}>{content}</UnstyledButton> : content}
             </Table.Td>;
           })}
         </Table.Tr>
@@ -169,7 +173,7 @@ function FormattedCell({ format, value, max, panel, better, trend, traceHref, tr
   const dark=useComputedColorScheme("light")==="dark";
   const display = columnDisplay(format, value, max, panel, better, trend);
   switch (display.kind) {
-    case "unit": return <Text size="sm" ff="monospace">{display.text}</Text>;
+    case "unit": return <Text fz={12} ff="monospace">{display.text}</Text>;
     case "bar": return <Box style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:8}}>
       <Text fz={12} ff="monospace" style={{whiteSpace:"nowrap"}}>{typeof value==="number" ? formatLabel(format.unit,value) : display.text}</Text>
       <Box w={64} h={6} bg="var(--mantine-color-default-border)" style={{borderRadius:3,overflow:"hidden",flex:"none"}}><Box h={6} w={`${(display.fraction ?? 0) * 100}%`} bg={seriesSlot(0, dark)} /></Box>
@@ -177,20 +181,19 @@ function FormattedCell({ format, value, max, panel, better, trend, traceHref, tr
     case "status": {
       const bad = display.status === "bad" || display.text === "bad" || display.text === "unhealthy" || display.text.includes("ERROR");
       const warn = display.status === "warn" || display.text === "warn" || display.text === "degraded" || display.text === "WARN";
-      const theme=chartThemeFor(dark);
-      return <Badge variant="light" color={bad ? "bad" : warn ? "warn" : "gray"} style={{color:theme.text,background:tint(bad?theme.status.bad:warn?theme.status.warn:theme.muted,.14)}}><span style={{color:bad||warn?statusInk(bad?"bad":"warn",dark):theme.text}}>{bad ? "◆ " : warn ? "■ " : display.status === null || display.text === "—" || display.text === "unknown" ? "○ " : "● "}</span>{display.text}</Badge>;
+      return <StatusBadge tone={bad ? "danger" : warn ? "warning" : display.status === "ok" ? "success" : "neutral"}>{display.text.charAt(0).toUpperCase() + display.text.slice(1).toLowerCase()}</StatusBadge>;
     }
     case "sparkline": return display.unsupported
       ? <Text fz={12} c="dimmed" role="status">{display.unsupported}</Text>
       : <Box style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {(typeof value === "number" || value === null) && <Text size="sm" ff="monospace" style={{ flex: "none" }}>{display.text}</Text>}
+        {(typeof value === "number" || value === null) && <Text fz={12} ff="monospace" style={{ flex: "none" }}>{display.text}</Text>}
         {display.points && display.points.filter(p => p !== null).length >= 2 ? <Sparkline points={display.points} /> : <Text c="dimmed">No trend</Text>}
       </Box>;
-    case "trace_link": return traceButton ? <Anchor component="button" type="button" ff="monospace" fz={12} title={display.text} onClick={event => { event.stopPropagation(); onTrace(); }}>{display.text.slice(0,16)}</Anchor> : traceHref ? <Anchor ff="monospace" fz={12} title={display.text} href={traceHref} onClick={event => {
+    case "trace_link": return <TraceIdCopy value={display.text}>{traceButton ? <Anchor component="button" type="button" ff="monospace" fz={12} title={display.text} onClick={event => { event.stopPropagation(); onTrace(); }}>{(display.text.length > 16 ? `${display.text.slice(0,16)}…` : display.text)}</Anchor> : traceHref ? <Anchor ff="monospace" fz={12} title={display.text} href={traceHref} onClick={event => {
       if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
         event.preventDefault(); event.stopPropagation(); onTrace();
       }
-    }}>{display.text.slice(0,16)}</Anchor> : <Text fz={12} ff="monospace" title={display.text}>{display.text.slice(0,16)}</Text>;
+    }}>{(display.text.length > 16 ? `${display.text.slice(0,16)}…` : display.text)}</Anchor> : <Text fz={12} ff="monospace" title={display.text}>{(display.text.length > 16 ? `${display.text.slice(0,16)}…` : display.text)}</Text>}</TraceIdCopy>;
     case "service_link": return <Anchor title={display.text} className="dashboard-dimension-nowrap" style={{display:"block",maxWidth:"100%"}} component="button" type="button" onClick={event => {
       event.stopPropagation();
       if (display.variable && value !== null) onService(display.variable, display.text);

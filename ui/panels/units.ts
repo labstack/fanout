@@ -68,6 +68,7 @@ export function formatAxis(unit?: string, axis?: { min: number; max: number; int
     return (value: number) => Number.isFinite(value) ? `${number(value * factor / scale)}${suffix}` : "—";
   }
   return (value: number) => {
+    if ((!unit || unit === "count") && Math.abs(value) >= 1000) return number(value, compact);
     if (unit === "ms" || unit === "s" || unit === "ns") return formatValue(unit, value).replace(/(\.\d*?)0+([a-z]*)$/, "$1$2").replace(/\.([a-z]*)$/, "$1");
     return formatValue(unit, value);
   };

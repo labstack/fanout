@@ -3,7 +3,7 @@ import type { Column, Panel } from "./types";
 const abbreviations = new Set(["id", "http", "https", "rpc", "grpc", "cpu", "sql", "url", "uri", "ip", "io", "db", "gc", "tls", "api"]);
 const units: Record<string, string> = { ms: "ms", ns: "ns", s: "s", us: "µs", bytes: "bytes", percent: "%", ratio: "ratio", per_second: "/s", per_minute: "/min" };
 
-const productNames: Record<string, string> = { body_template: "message template", parquet_index: "traces" };
+const productNames: Record<string, string> = { body_template: "message template", calls: "requests", spans: "requests", parquet_index: "traces" };
 
 /** Display only: frame column names, row keys and selections stay unchanged. */
 export function displayLabel(column: Column | string, panel?: Panel): string {
@@ -20,6 +20,6 @@ export function displayLabel(column: Column | string, panel?: Panel): string {
   if (suffix) label = label.slice(0, -suffix[0].length);
   const unit = explicitUnit ?? suffix?.[1]?.toLowerCase();
   label = label.split("_").map((word, i) => (/^p\d+$/i.test(word) || abbreviations.has(word.toLowerCase()))
-    ? word.toUpperCase() : i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word).join(" ");
+    ? (/^p\d+$/i.test(word) ? word.toLowerCase() : word.toUpperCase()) : i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word).join(" ");
   return label + (unit && unit !== "none" && unit !== "count" ? ` (${units[unit] ?? unit})` : "");
 }

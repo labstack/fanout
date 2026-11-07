@@ -1,3 +1,4 @@
+import { WarningCircle } from "@phosphor-icons/react";
 import { Box, Table, Text } from "@mantine/core";
 import { useMemo } from "react";
 import type { TraceSpan } from "../../../../contracts";
@@ -56,7 +57,7 @@ export function Waterfall({ spans, dark, onSpan, selected }: { spans: TraceSpan[
       <Table.Tbody>
         {rows.map(({ span, depth, offset, width, color, failed }) => {
           const label = `${span.service} · ${span.operation} · ${duration(span.duration_ms)}`;
-          return <Table.Tr key={span.span_id} data-depth={depth} aria-selected={onSpan ? span.span_id === selected : undefined}
+          return <Table.Tr key={span.span_id} data-depth={depth} data-row-selected={span.span_id === selected || undefined} aria-selected={onSpan ? span.span_id === selected : undefined}
             bg={span.span_id === selected ? "var(--mantine-primary-color-light)" : undefined}
             tabIndex={onSpan ? 0 : undefined} onClick={onSpan ? () => onSpan(span) : undefined}
             onKeyDown={onSpan ? event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSpan(span); } } : undefined}
@@ -65,7 +66,7 @@ export function Waterfall({ spans, dark, onSpan, selected }: { spans: TraceSpan[
               <Box style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: Math.min(depth, 16) * 10, minWidth: 0 }}>
                 <Box w={8} h={8} bg={color} style={{ borderRadius: "50%", flex: "0 0 auto" }} />
                 <Box miw={0}>
-                  <Text fw={600} size="sm" truncate>{span.operation}</Text>
+                  <Text fw={600} size="sm" truncate>{failed && <WarningCircle size={14} aria-label="Error" color="var(--mantine-color-bad-text)" />}{span.operation}</Text>
                   <Text c="dimmed" size="xs" truncate>{span.service}</Text>
                 </Box>
               </Box>

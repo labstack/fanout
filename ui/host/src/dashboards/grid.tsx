@@ -1,4 +1,5 @@
-import { Alert, Button, Group, Loader, Modal, Text } from "@mantine/core";
+import { DataState, Notice } from "@labstack/ui";
+import { Box,  Button, Group, Modal, Text } from "@mantine/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Responsive, verticalCompactor, type Layout } from "react-grid-layout";
@@ -183,9 +184,9 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
         <Button size="compact-sm" disabled={!dirty || !canEdit} loading={save.isPending} onClick={() => save.mutate()}>Save layout</Button>
       </Group>
     </Group>}
-    {conflict && <Alert color="warn" mb="sm">Someone saved this dashboard since you opened it. Load the latest version, then redo your change. <Button size="compact-sm" onClick={loadLatest}>Load latest</Button></Alert>}
-    {mutationError && !conflict && <Alert color="bad" mb="sm">{mutationError.message}</Alert>}
-    {copyFeedback && <Alert role="status" mb="sm">{copyFeedback}</Alert>}
+    {conflict && <Box mb="sm"><Notice tone="warning">Someone saved this dashboard since you opened it. Load the latest version, then redo your change. <Button size="compact-sm" onClick={loadLatest}>Load latest</Button></Notice></Box>}
+    {mutationError && !conflict && <Box mb="sm"><Notice tone="danger">{mutationError.message}</Notice></Box>}
+    {copyFeedback && <Box role="status" mb="sm"><Notice tone="info">{copyFeedback}</Notice></Box>}
     {!gridReady && <div data-grid-placeholder style={{ height: pixels(Math.max(1, ...layout.map(l => l.y + l.h))) }} />}
     {gridReady && <Responsive width={width} className={`dashboard-grid${canEdit ? " dashboard-grid-editing" : ""}`} layouts={{ lg: layout, md: layout, sm: layout.map((l) => ({ ...l, x: 0, w: 12 })) }} breakpoints={{ lg: 1100, md: 800, sm: 0 }} cols={{ lg: 12, md: 12, sm: 12 }}
       rowHeight={rowHeight} margin={[margin, margin]} containerPadding={[0, 0]} compactor={verticalCompactor} dragConfig={{enabled:canEdit,handle:".panel-drag",cancel:"button"}} resizeConfig={{enabled:canEdit}}
@@ -193,9 +194,9 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
       {spec.panels.map((panel) => { const g = layout.find((l) => l.i === panel.id); return <div key={panel.id} data-panel={panel.id}>{card(panel, pixels(g?.h ?? 6))}</div>; })}
     </Responsive>}
     <PanelFullscreen shortcutScope={shortcutScope} onShortcuts={onShortcuts} escapeEnabled={!overlayOpen && !panelEdit} opened={Boolean(view)} onClose={() => onView(undefined)} title={viewed ? interpolate(viewed.title, vars) : "Missing panel"} returnFocusTo={() => returnViewFocus?.(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? "") ?? menus.current.values().next().value}>
-      {viewed ? <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, Math.max(40, windowHeight - 140), true)}</div> : <Alert color="warn">This panel is missing from the dashboard. The shared link may be out of date.</Alert>}
+      {viewed ? <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, Math.max(40, windowHeight - 140), true)}</div> : <Box ><Notice tone="warning">This panel is missing from the dashboard. The shared link may be out of date.</Notice></Box>}
     </PanelFullscreen>
-    {panelEdit && dashboardId && <Suspense fallback={<Modal opened onClose={closePanelEdit} title="Loading the panel editor"><Loader size="sm" role="status" aria-label="Loading the panel editor" /></Modal>}>
+    {panelEdit && dashboardId && <Suspense fallback={<Modal opened onClose={closePanelEdit} title="Loading the panel editor"><Box role="status" aria-label="Loading the panel editor"><DataState state="loading" loadingLabel="Loading the panel editor" rows={3} /></Box></Modal>}>
       <PanelEditor dashboardId={dashboardId} version={panelEdit.version} spec={withLayout(panelEdit.spec.panels)} layoutChanged={canEdit && dirty} panel={panelEdit.panel} time={time} vars={vars} onClose={closePanelEdit} />
     </Suspense>}
   </div>;

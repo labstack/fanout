@@ -194,7 +194,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue([...current, ...previousSeries].find(s => s.name === name || `${s.name} · previous` === name)?.unit ?? panel.unit, value), true) },
     legend: legendLayout.option,
     grid: { left: 8, right: 16 + (direct ? endWidth : 0) + Math.max(0, units.length - 2) * 56, top: legendLayout.top, bottom: visible.hidden ? 24 : 8, containLabel: true },
-    xAxis: { type: "time", min: result.from_ms, max: result.to_ms, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatTimeAxis } },
+    xAxis: { type: "time", min: current.some(s => s.points.length) ? Math.min(...current.flatMap(s => s.points.map(p => p[0]))) : result.from_ms, max: result.to_ms, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatTimeAxis } },
     yAxis: axes.length === 1 ? axes[0] : axes,
     series: [...lines, ...previous],
     graphic: hiddenSeriesNote(visible.hidden, theme.muted),
@@ -276,7 +276,7 @@ export function gaugeOption(panel: Panel, value: number | null, theme: ChartThem
   const text = formatValue(unit, value);
   const status = statusFor(value, panel.thresholds, panel.better);
   const cue = status === "bad" ? "◆ Bad" : status === "warn" ? "■ Warn" : status === "ok" ? "● OK" : value === null ? "○ Unknown" : undefined;
-  const mute = (hex: string) => `${hex}40`;
+  const mute = (hex: string) => `${hex}${theme.dark ? "99" : "66"}`;
   const valueWidth = size.measureText?.(text,`600 28px ${theme.font}`) ?? text.length * 28 * .6;
   const cueWidth = size.measureText?.(cue ?? "",`11px ${theme.font}`) ?? (cue?.length ?? 0) * 11 * .6;
   const stacked = size.width < valueWidth + cueWidth + 16;

@@ -200,9 +200,9 @@ it.each(["light", "dark"] as const)("uses the defined ok palette for success and
   scheme = theme; api.restoreVersion.mockResolvedValue({ ...record, version: 4 });
   await render(); await act(async () => button("Version 1").click()); await settle();
   await act(async () => button("Restore version 1").click()); await settle();
-  const alert = [...document.querySelectorAll<HTMLElement>(".mantine-Alert-root")].find(node => node.textContent?.includes("Restored v1 as v4"))!;
-  expect(alert.style.getPropertyValue("--alert-bg")).toBe("var(--mantine-color-ok-light)");
-  expect(alert.style.getPropertyValue("--alert-color")).toBe("var(--mantine-color-ok-light-color)");
+  const alert = [...document.querySelectorAll<HTMLElement>('[role="status"]')].find(node => node.textContent?.includes("Restored v1 as v4"))!;
+  expect(alert.style.background).toBe("var(--mantine-color-default-hover)");
+  expect(alert.querySelector("svg")).not.toBeNull();
   await render(false); await render(); expect(document.body.textContent).not.toContain("Restored v1 as v4");
 });
 

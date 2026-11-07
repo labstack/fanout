@@ -145,7 +145,7 @@ export function ChatPage() {
   const receipts = useDashboardReceipts(messages);
   const lastSent = messages.filter((message) => message.role === "user").at(-1)?.id;
   const { scrollRef, contentRef, turnRef, showJump, jumpToLatest } = useTurnAnchor<HTMLDivElement, HTMLDivElement>(lastSent);
-  if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1} fz={28}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
+  if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><PageHeader title="Chat" description="Chat is not configured" /><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
   const appViews = chatAppViews(messages);
   const failures = toolFailures(messages);
   const visibleMessages = messages.filter((message) => {
@@ -290,12 +290,12 @@ function CopyButton({ text, label }: { text: string; label: string }) {
    their own container instead of widening the column, code blocks carry a
    copy button, links open in a new tab. */
 const markdownComponents: Components = {
-  table: ({ children }) => <Box className="chat-table"><Table striped highlightOnHover withTableBorder verticalSpacing="xs" fz="sm">{children}</Table></Box>,
+  table: ({ children }) => <Box className="chat-table"><Table stickyHeader highlightOnHover withTableBorder verticalSpacing="xs" fz="sm">{children}</Table></Box>,
   thead: ({ children }) => <Table.Thead>{children}</Table.Thead>,
   tbody: ({ children }) => <Table.Tbody>{children}</Table.Tbody>,
   tr: ({ children }) => <Table.Tr>{children}</Table.Tr>,
   th: ({ children }) => <Table.Th>{children}</Table.Th>,
-  td: ({ children }) => <Table.Td>{children}</Table.Td>,
+  td: ({ children }) => <Table.Td ta={typeof children === "string" && /^[-+−]?\d[\d,.]*(?:%|\s?(?:ms|s|K|M))?$/.test(children.trim()) ? "right" : undefined} ff={typeof children === "string" && /^[-+−]?\d/.test(children.trim()) ? "monospace" : undefined}>{children}</Table.Td>,
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
 };

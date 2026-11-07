@@ -11,11 +11,12 @@ export function PanelData({ panel, result }: { panel: Panel; result?: PanelResul
       style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",userSelect:"text"}}>
       {result.error}
     </Text>}
-    {frame ? <Table fz={12} striped>
-    <Table.Thead><Table.Tr>{frame.columns.map(c => <Table.Th key={c.name} ff={fonts.display}>{c.name}</Table.Th>)}</Table.Tr></Table.Thead>
+    {result?.problems?.map((problem,i) => <Text key={i} size="sm"><code>{problem.path}</code>: {problem.message}{problem.hint && ` — ${problem.hint}`}</Text>)}
+    {frame ? <Table fz={12} stickyHeader highlightOnHover>
+    <Table.Thead><Table.Tr>{frame.columns.map(c => <Table.Th ta={c.type === "number" ? "right" : undefined} key={c.name} ff={fonts.display}>{c.name}</Table.Th>)}</Table.Tr></Table.Thead>
     <Table.Tbody>{Array.from({ length: Math.min(frame.rows, 500) }, (_, r) => <Table.Tr key={r}>{frame.columns.map((c, i) => {
       const v = frame.values[i][r];
-      return <Table.Td key={c.name} ff={fonts.display}>{v === null ? "—" : c.type === "time" ? new Date(Number(v)).toISOString() : c.role === "measure" ? formatValue(c.unit ?? panel.unit, Number(v)) : String(v)}</Table.Td>;
+      return <Table.Td ta={c.type === "number" ? "right" : undefined} key={c.name} ff={fonts.display}>{v === null ? "—" : c.type === "time" ? new Date(Number(v)).toISOString() : c.role === "measure" ? formatValue(c.unit ?? panel.unit, Number(v)) : String(v)}</Table.Td>;
     })}</Table.Tr>)}</Table.Tbody>
   </Table> : <Text c="dimmed" size="sm">No data.</Text>}
     {result && result.status !== "invalid" && result.elapsed_ms !== undefined && <Text c="dimmed" fz={12} mt={8}>Ran in {result.elapsed_ms} ms{result?.interval ? `, one point per ${result.interval}` : ""}{frame ? `, ${frame.rows} rows${frame.truncated ? " (truncated)" : ""}` : ""}.</Text>}

@@ -14,7 +14,7 @@ const noProblems: readonly Problem[] = [];
 const noNotices: readonly Notice[] = [];
 // The shared SQL theme sizes a multi-line editor; FanQL is one logical line that wraps on screen.
 const oneLine = EditorView.theme({
-  ".cm-scroller": { minHeight: "0", maxHeight: "none", overflow: "hidden", fontSize: "14px" },
+  ".cm-scroller": { minHeight: "0", maxHeight: "none", overflow: "hidden", fontSize: "13px" },
   ".cm-content": { padding: "8px 4px" },
   // The list stays clear of the screen edge, and on a phone its descriptions wrap instead of being cut.
   ".cm-tooltip.cm-tooltip-autocomplete > ul": { maxWidth: "min(700px, calc(100vw - 40px))" },

@@ -1,3 +1,4 @@
+import { formatTimestamp } from "../../panels/units";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
@@ -275,7 +276,7 @@ describe("connected agents", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("Claude Code"));
     expect(document.body.textContent).toContain("Connected agents");
     expect(document.body.textContent).toContain("Codex");
-    expect(document.body.textContent).toContain(`Connected ${new Date(codex.connected_at).toLocaleDateString()}`);
+    expect(document.body.textContent).toContain(`Connected ${formatTimestamp(Date.parse(codex.connected_at))}`);
     expect(document.querySelector("time")?.getAttribute("datetime")).toBe(codex.connected_at);
     expect(document.querySelectorAll("time")).toHaveLength(2);
     await act(async () => root.unmount());

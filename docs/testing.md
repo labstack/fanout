@@ -342,7 +342,8 @@ Vite builds reject any runtime import of `src/catalog`, `.storybook`, or a story
 file. Knip excludes those local review inputs from its production analysis.
 
 Known accessibility exceptions are recorded in `src/catalog/accessibility.ts`.
-The log-detail table retains its targeted `aria-conditional-attr` exception.
+The log-detail table now uses a row selection marker rather than `aria-expanded`
+on a non-treegrid row; its targeted exception has been removed.
 Nested main landmarks, panel loading labels, Settings links and unnamed alert
 actions headers no longer need exceptions. Chromium validation must run on a host
 that permits the browser's Mach port registration.

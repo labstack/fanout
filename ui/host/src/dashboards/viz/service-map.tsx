@@ -1,3 +1,5 @@
+import { StatusBadge } from "@labstack/ui";
+import { Group } from "@mantine/core";
 import { Text, VisuallyHidden } from "@mantine/core";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { chartThemeFor } from "../../../../panels/compile";
@@ -112,7 +114,7 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
       <svg aria-hidden="true" width={graph.contentWidth} height={graph.contentHeight} viewBox={`0 0 ${graph.contentWidth} ${graph.contentHeight}`} style={{ position: "absolute", inset: 0 }}>
         <defs>{[theme.muted, theme.status.warn, theme.status.bad].map((color, i) => <marker key={color} id={`${id}-arrow-${i}`} viewBox="0 0 6 6" refX={5} refY={3} markerWidth={5} markerHeight={5} orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L6,3 L0,6 Z" fill={color} /></marker>)}</defs>
         <g>
-          {graph.edges.map(e => <path key={e.id} {...(import.meta.env.DEV ? { "data-service-edge": true, "data-caller": e.caller, "data-callee": e.callee } : {})} d={e.path} fill="none" stroke={e.status ? theme.status[e.status] : theme.muted} strokeLinejoin="round" strokeWidth={1 + 3 * Math.log1p(e.request_rate ?? e.calls) / Math.log1p(maxRate)} opacity={active && e.caller !== active && e.callee !== active ? .25 : 1} markerEnd={`url(#${id}-arrow-${e.status === "bad" ? 2 : e.status === "warn" ? 1 : 0})`} style={{ pointerEvents: "stroke" }}><title>{`${e.caller} → ${e.callee}\n${e.edge_type} · ${formatValue("per_second", e.request_rate)} · ${formatValue("count", e.calls)} calls\n${formatValue("percent", e.error_rate)} errors · ${formatValue("ms", e.average_ms)} average`}</title></path>)}
+          {graph.edges.map(e => <path key={e.id} {...(import.meta.env.DEV ? { "data-service-edge": true, "data-caller": e.caller, "data-callee": e.callee } : {})} d={e.path} fill="none" stroke={e.status ? theme.status[e.status] : theme.muted} strokeLinejoin="round" strokeWidth={1 + 3 * Math.log1p(e.request_rate ?? e.calls) / Math.log1p(maxRate)} opacity={active && e.caller !== active && e.callee !== active ? .25 : 1} markerEnd={`url(#${id}-arrow-${e.status === "bad" ? 2 : e.status === "warn" ? 1 : 0})`} style={{ pointerEvents: "stroke" }}><title>{`${e.caller} → ${e.callee}\n${e.edge_type} · ${formatValue("per_second", e.request_rate)} · ${formatValue("count", e.calls)} requests\n${formatValue("percent", e.error_rate)} errors · ${formatValue("ms", e.average_ms)} average`}</title></path>)}
         </g>
       </svg>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
@@ -138,6 +140,12 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
         background: `linear-gradient(to ${edge}, transparent, var(--mantine-color-body))`,
       }} />)}
     </div>
+    <Group gap="xs" mt={4} aria-label="Service status legend" style={{flexShrink: 0}}>
+      <StatusBadge tone="success" icon={<span aria-hidden>●</span>}>Healthy</StatusBadge>
+      <StatusBadge tone="warning" icon={<span aria-hidden>■</span>}>Degraded</StatusBadge>
+      <StatusBadge tone="danger" icon={<span aria-hidden>◆</span>}>Unhealthy</StatusBadge>
+      <StatusBadge tone="neutral" icon={<span aria-hidden>○</span>}>Unknown</StatusBadge>
+    </Group>
     <Text c="dimmed" fz={12} mt={4} style={{ flexShrink: 0 }}>{model.nodes.length} services · {model.edges.length} {model.edges.length === 1 ? "route" : "routes"}</Text>
   </div>;
 }

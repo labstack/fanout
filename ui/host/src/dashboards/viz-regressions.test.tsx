@@ -55,16 +55,16 @@ describe("visualization regressions", () => {
   it.each(["stat", "gauge"] as const)("switches folded %s views through a checked menu radio group at 300 px", async viz => {
     const measure = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, right: 300, top: 0, bottom: 200, width: 300, height: 200, toJSON() {} });
     try {
-      const { host } = await render(<PanelCard panel={{ ...panel, viz }} title="Calls" result={result} loading={false} height={200} group="d" editing={false} agentAvailable onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+      const { host } = await render(<PanelCard panel={{ ...panel, viz }} title="Requests" result={result} loading={false} height={200} group="d" editing={false} agentAvailable onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
       const open = async () => {
-        await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Calls menu"]')!.click());
+        await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Requests menu"]')!.click());
         await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
       };
       await open();
       const choices = () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
       expect(choices().map(item => item.textContent)).toEqual(["Chart", "Data", "Spec"]);
       expect(choices().map(item => item.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
-      expect(document.querySelector('[role="group"][aria-label="Calls view"]')?.contains(choices()[0])).toBe(true);
+      expect(document.querySelector('[role="group"][aria-label="Requests view"]')?.contains(choices()[0])).toBe(true);
       const items = [...document.querySelectorAll('[data-menu-item]')].map(item => item.textContent);
       expect(items).toEqual(["Chart", "Data", "Spec", "View", "Explain in chat", "Copy link"]);
       await act(async () => choices()[1].click());
@@ -84,7 +84,7 @@ describe("visualization regressions", () => {
     const measure = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ width, height: 200 }));
     try {
       const { host } = await render(<PanelCard panel={{ ...panel, viz, content: "Text content" }} title="Panel" result={viz === "text" ? undefined : result} loading={false} height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
-      const content = viz === "text" ? "Content" : "Chart";
+      const content = viz === "text" ? "Content" : ["table", "logs", "traces", "log_patterns"].includes(viz) ? "Table" : "Chart";
       const modes = viz === "text" ? [content, "Spec"] : [content, "Data", "Spec"];
       const folded = width < 360 || viz === "text";
       const controls = async () => {
@@ -307,7 +307,7 @@ describe("visualization regressions", () => {
     expect(host.querySelector('[role="img"]')!.getAttribute("aria-label")).toBe("For cart: gauge");
     expect(host.querySelector('[aria-label="For cart description"]')!.tagName).toBe("BUTTON");
     expect(host.querySelector('[aria-label="Refreshing"]')).not.toBeNull();
-    expect(host.querySelector('[role="img"]')!.parentElement!.style.overflow).toBe("hidden");
+    expect(host.querySelector<HTMLElement>('[data-panel-body]')!.style.overflow).toBe("hidden");
   });
   it("limits retries to two and never retries client ApiErrors", () => {
     for (const status of [400, 401, 403, 404, 409, 422, 499]) expect(retryQuery(0, new ApiError("bad", status))).toBe(false);

@@ -138,6 +138,7 @@ describe("PanelGrid", () => {
     expect(values()).toEqual(["/quote40.0ms", "/cart900ms"]);
     await act(async () => { host.querySelector<HTMLTableRowElement>("tbody tr")!.click(); });
     expect(props.onVariable).toHaveBeenCalledWith("service", "/quote");
+    expect(host.querySelector("tbody tr")?.getAttribute("data-row-selected")).toBe("true");
   });
 
   it("opens Data and Spec within the card with query and timing", async () => {

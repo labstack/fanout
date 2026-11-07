@@ -1,8 +1,8 @@
-import { MantineProvider } from "@mantine/core";
+import { MantineProvider, defaultCssVariablesResolver, DEFAULT_THEME, mergeMantineTheme } from "@mantine/core";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fanoutTheme } from "../../../theme";
+import { fanoutTheme, fanoutCssVariables } from "../../../theme";
 import { chartThemeFor } from "../../../panels/compile";
 import { relativeLuminance } from "@labstack/ui";
 import type { Frame, Panel, PanelResult } from "../../../panels/types";
@@ -21,6 +21,12 @@ function composite(color:string,surface:string) {
  if(color.startsWith("#")) return color;
  const values=color.match(/[\d.]+/g)!.map(Number),alpha=values[3]??1;
  return "#"+[1,3,5].map((at,i)=>Math.round(values[i]*alpha+parseInt(surface.slice(at,at+2),16)*(1-alpha)).toString(16).padStart(2,"0")).join("");
+}
+function badgeColors(badge: HTMLElement, dark: boolean) {
+ const theme=mergeMantineTheme(DEFAULT_THEME,fanoutTheme),scheme=dark?"dark":"light",defaults=defaultCssVariablesResolver(theme);
+ const vars: Record<string,string>={...defaults.variables,...defaults[scheme],...fanoutCssVariables(theme)[scheme]};
+ const resolve=(value:string):string=>value.startsWith("var(")?resolve(vars[value.slice(4,-1)]):value;
+ return {ink:resolve(badge.style.getPropertyValue("--badge-color")), background:resolve(badge.style.getPropertyValue("--badge-bg"))};
 }
 vi.mock("./echart-canvas",()=>({EChartCanvas:()=>null}));
 let host: HTMLDivElement, root: Root;
@@ -67,7 +73,12 @@ it.each([false,true])("log body owns remaining width, clamps then expands; trace
  expect(host.querySelector<HTMLTableColElement>('col[data-field="time"]')?.style.width).toBe("146px");
  expect(host.querySelector<HTMLTableColElement>('col[data-field="severity"]')?.style.width).toBe("90px");
  expect(Number.parseFloat(host.querySelector<HTMLTableElement>("table")!.style.minWidth)).toBeGreaterThanOrEqual(656);
- const trace=row.querySelector<HTMLElement>("[data-trace-id]")!; expect(trace.textContent).toBe(id.slice(0,16));expect(trace.title).toBe(id);
+ const trace=row.querySelector<HTMLElement>("[data-trace-id]")!; expect(trace.textContent).toBe(`${id.slice(0,16)}…`);expect(trace.title).toBe(id);
+ expect(row.querySelector('[aria-label="Copy trace ID"]')?.getAttribute("title")).toBe(id);
+ const clipboard=Object.getOwnPropertyDescriptor(navigator,"clipboard"),writeText=vi.fn().mockResolvedValue(undefined);
+ Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText}});
+ try { await act(async()=>row.querySelector<HTMLButtonElement>('[aria-label="Copy trace ID"]')!.click()); expect(writeText).toHaveBeenCalledWith(id); expect(row.dataset.rowExpanded).toBe("false"); }
+ finally { if(clipboard)Object.defineProperty(navigator,"clipboard",clipboard); else Reflect.deleteProperty(navigator,"clipboard"); }
  await act(async()=>row.click()); expect(row.dataset.rowExpanded).toBe("true"); expect(text.style.maxHeight).toBe("");
  await act(async()=>row.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}))); expect(row.dataset.rowExpanded).toBe("false");
 });
@@ -83,7 +94,7 @@ it.each([false,true])("templates use five neutral chips, numeric dimensions alig
  expect(host.querySelector("mark")).toBeNull();
  const cells=host.querySelectorAll<HTMLElement>("tbody td"); expect(cells[1].textContent).toContain("1.45 s"); expect(cells[2].style.textAlign).toBe("right");
  expect(cells[2].querySelector<HTMLElement>("p")?.style.fontFamily).toContain("monospace");
- expect(cells[3].textContent).toBe(id.slice(0,16)); expect(cells[3].querySelector("[title]")?.getAttribute("title")).toBe(id);
+ expect(cells[3].textContent).toBe(`${id.slice(0,16)}…`); expect(cells[3].querySelector("[title]")?.getAttribute("title")).toBe(id);
 });
 it("empty/mixed/null constants are retained and severity is never hidden",async()=>{
  await mount(<RowPanel panel={panel} result={{...result,frame:{...frame,values:[...frame.values.slice(0,5),["otel-demo",null]]}}} height={350} dark={false}/>,false);
@@ -95,7 +106,7 @@ it.each([false,true])("pattern severity, chips, service, count and area trend in
  const f:Frame={columns:[{name:"body_template",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure",unit:"count"},{name:"trend",type:"json",role:"dimension"},{name:"severity",type:"string",role:"dimension"},{name:"service",type:"string",role:"dimension"}],values:[["failed <*> <num>","warning <str>","info <time>"],[12,8,3],["[1,3,8]","[1,2,5]","[1,1,1]"],["ERROR","WARN","INFO"],["payments","checkout","frontend"]],rows:3,trend:{start_ms:0,step_ms:60000}};
  await mount(<RowPanel panel={p} result={{...result,frame:f}} height={350} dark={dark}/>,dark);
  expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toEqual(["Severity","Message template","Service","Count","Trend"]);
- expect([...host.querySelectorAll("tbody tr")].map(r=>r.querySelector("td")?.textContent)).toEqual(["◆ ERROR","■ WARN","● INFO"]);
+ expect([...host.querySelectorAll("tbody tr")].map(r=>r.querySelector("td")?.textContent)).toEqual(["Error","Warn","Info"]);
  expect(host.querySelectorAll("[data-template-chip]")).toHaveLength(4);
  expect(host.querySelectorAll("[data-pattern-area]")).toHaveLength(3);
  expect(host.querySelector('svg[aria-label="Pattern count trend"] title')?.textContent).toBe("1970-01-01T00:00:00.000Z: 1");
@@ -105,9 +116,8 @@ it.each([false,true])("formatted status badges use readable text and soft backgr
  const p:Panel={id:"p",title:"Health",viz:"table",options:{columns:[{field:"health",format:"status"}]}};
  await mount(<TableViz panel={p} result={{...result,frame:{columns:[{name:"health",type:"string",role:"dimension"}],values:[["unhealthy","degraded"]],rows:2}}} height={200}/>,dark);
  for(const badge of host.querySelectorAll<HTMLElement>(".mantine-Badge-root")) {
-  expect(badge.style.color).toBe(chartThemeFor(dark).text);
-  expect(badge.style.background).toContain("0.14");
-  expect(contrastRatio(toHex(badge.style.color),composite(badge.style.background,chartThemeFor(dark).surface))).toBeGreaterThanOrEqual(4.5);
+  const {ink, background}=badgeColors(badge,dark);
+  expect(contrastRatio(toHex(ink),composite(background,chartThemeFor(dark).surface))).toBeGreaterThanOrEqual(4.5);
  }
 });
 
@@ -138,20 +148,20 @@ it.each([false,true])("semantic table ink reaches 4.5:1, severity badge uses tex
  expect(contrastRatio(hex,chartThemeFor(dark).surface)).toBeGreaterThanOrEqual(4.5);
  await mount(<RowPanel panel={panel} result={result} height={200} dark={dark}/>,dark);
  const badge=host.querySelector<HTMLElement>(".mantine-Badge-root")!;
- expect(badge.style.color).toBe(chartThemeFor(dark).text);
- expect(badge.style.background).toContain("0.14");
+ const colors=badgeColors(badge,dark);
+ expect(contrastRatio(toHex(colors.ink),composite(colors.background,chartThemeFor(dark).surface))).toBeGreaterThanOrEqual(4.5);
 });
 
 it.each([false,true])("short OTLP labels, full titles and isolated service/count columns (%s)",async dark=>{
  const severities=["TRACE4","DEBUG2","INFO3","WARN4","ERROR2","FATAL3","UNSPECIFIED","surprise","SEVERITY_NUMBER_INFO2","17"];
- const labels=["TRACE","DEBUG","INFO","WARN","ERROR","FATAL","—","—","INFO","ERROR"];
+ const labels=["Trace","Debug","Info","Warn","Error","Fatal","—","—","Info","Error"];
  const services=severities.map((_,i)=>"product-catalog-with-a-very-long-service-name-"+i);
  const p:Panel={id:"p",title:"Patterns",viz:"log_patterns",query:{from:"logs",by:["body_template"],measures:["count()"]}};
  const f:Frame={columns:[{name:"severity",type:"string",role:"dimension"},{name:"body_template",type:"string",role:"dimension"},{name:"service",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure",unit:"count"},{name:"trend",type:"json",role:"dimension"}],values:[severities,severities.map(()=>"failed <*>"),services,severities.map(()=>75900),severities.map(()=>"[1,3]")],rows:severities.length};
  await mount(<RowPanel panel={p} result={{...result,frame:f}} height={350} dark={dark} onSelect={()=>{}}/>,dark);
  const badges=[...host.querySelectorAll<HTMLElement>(".mantine-Badge-root")];
  expect(badges.map(b=>b.textContent?.replace(/^[◆■●] /,""))).toEqual(labels);
- expect(badges.map(b=>b.title)).toEqual(severities);
+ expect(badges.map(b=>b.closest<HTMLElement>("[title]")?.title)).toEqual(severities);
  const service=host.querySelector<HTMLElement>('tbody td[data-field="service"]')!;
  expect(parseFloat(service.style.minWidth)).toBeGreaterThanOrEqual(140);
  const value=service.querySelector<HTMLElement>("[title]")!;

@@ -308,7 +308,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   // Points open what makes makeDrill return a target; otherwise the chart offers no drill.
   const drills = run !== undefined && (run.panel.drill !== undefined || run.panel.viz === "service_map" || (run.result.frame?.columns.some(c => c.name === "trace_id") ?? false));
 
-  return <Stack gap="md" p="lg" maw={1400} data-explore>
+  return <Stack gap="md" px={{base:"md",sm:"xl"}} pt="lg" pb="xl" maw={1600} mx="auto" data-explore>
     {!context && <PageHeader title="Explore" description="Ask a question of your telemetry." meta={<LiveDataMeta time={time} updatedAt={run ? runAt : null} />} />}
     <RangeMenu time={time} onRange={range => pickWindow({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => pickWindow({ ...search, from, to })} />
     <Tabs value={search.tab} onChange={value => void openTab(value === "sql" || value === "builder" ? value : "query")} keepMounted={false}>

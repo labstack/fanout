@@ -1,4 +1,6 @@
-import { Alert, Badge, Box, CloseButton, Code, Group, Loader, Paper, Stack, Table, Text } from "@mantine/core";
+import { formatTimestamp } from "../../../../panels/units";
+import { DataState, Notice, StatusBadge } from "@labstack/ui";
+import { Badge, Box, CloseButton, Code, Group, Paper, Stack, Table, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import type { TraceSpan } from "../../../../contracts";
@@ -9,7 +11,7 @@ export type SpanEvent = { offset_ns: number; name: string; attributes: Record<st
 /** What the trace read leaves out of each span, read on demand for the selected one. */
 export type SpanExtras = { attributes: Record<string, unknown>; resource: Record<string, unknown>; events: SpanEvent[]; scope: string };
 
-const statuses: Record<string, string> = { STATUS_CODE_ERROR: "Error", STATUS_CODE_OK: "OK", STATUS_CODE_UNSET: "Unset" };
+const statuses: Record<string, string> = { STATUS_CODE_ERROR: "Error", STATUS_CODE_OK: "Ok", STATUS_CODE_UNSET: "Unset" };
 
 /** An event attribute as text: strings verbatim, other values as JSON. */
 const text = (value: unknown): string | undefined => value == null ? undefined : typeof value === "string" ? value : JSON.stringify(value);
@@ -40,23 +42,23 @@ export function SpanDetails({ traceId, span, load, onClose }: { traceId: string;
       <Group justify="space-between" wrap="nowrap" align="flex-start">
         <Box miw={0}>
           <Text fw={600} style={{ overflowWrap: "anywhere" }}>{span.operation}</Text>
-          <Text size="xs" c="dimmed">{span.service} · {span.kind.replace(/^SPAN_KIND_/, "").toLowerCase()} · {duration(span.duration_ms)} · {new Date(span.start).toISOString()}</Text>
+          <Text size="xs" c="dimmed">{span.service} · {span.kind.replace(/^SPAN_KIND_/, "").toLowerCase()} · {duration(span.duration_ms)} · <Text span ff="monospace" size="xs">{formatTimestamp(Date.parse(span.start))}</Text></Text>
         </Box>
         <CloseButton aria-label="Close span details" onClick={onClose} />
       </Group>
       <Group gap="xs">
-        <Badge variant="light" color={failed ? "bad" : "gray"}>{statuses[span.status] ?? span.status}</Badge>
+        <StatusBadge tone={failed ? "danger" : "neutral"}>{statuses[span.status] ?? span.status}</StatusBadge>
         <Text size="xs" ff="monospace" c="dimmed">span {span.span_id}{span.parent_span_id ? ` · parent ${span.parent_span_id}` : ""}</Text>
       </Group>
       {span.status_message && <Text size="sm" c={failed ? "bad" : undefined} style={{ overflowWrap: "anywhere" }}>{span.status_message}</Text>}
-      {extras.isFetching && <Loader size="xs" role="status" aria-label="Loading span details" />}
-      {extras.error && <Alert color="bad" p="xs">{extras.error.message}</Alert>}
+      {extras.isFetching && <Box role="status" aria-label="Loading span details"><DataState state="loading" loadingLabel="Loading span details" rows={3} /></Box>}
+      {extras.error && <Box p="xs"><Notice tone="danger" onRetry={() => void extras.refetch()}>{extras.error.message}</Notice></Box>}
       {exceptions.map((event, index) => {
         const message = text(event.attributes["exception.message"]), stack = text(event.attributes["exception.stacktrace"]);
-        return <Alert key={index} color="bad" p="xs" title={text(event.attributes["exception.type"]) ?? "Exception"}>
+        return <Box key={index} p="xs"><Notice tone="danger" title={text(event.attributes["exception.type"]) ?? "Exception"}>
           {message && <Text size="sm" style={{ overflowWrap: "anywhere" }}>{message}</Text>}
           {stack && <Code block mt={4} fz={12} style={{ maxHeight: 220, overflow: "auto" }}>{stack}</Code>}
-        </Alert>;
+        </Notice></Box>;
       })}
       {extras.data && <>
         <Attributes label="Attributes" values={extras.data.attributes} />

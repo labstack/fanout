@@ -31,7 +31,7 @@ export function HealthViz({ result, dark, onSelect, onVariable, vars }: Analysis
         })}
       </Metric>
       <Metric label="Error rate" value={empty ? "—" : `${data.error_rate.toFixed(2)}%`} color={!empty && data.error_rate >= 1 ? "bad" : undefined}
-        hint={empty ? undefined : `${integer.format(data.total_spans)} operations`}>
+        hint={empty ? undefined : `${integer.format(data.total_spans)} requests`}>
         {!empty && data.error_trend.length > 1 && <HealthTrend values={data.error_trend} color={status.bad} />}
       </Metric>
     </SimpleGrid>

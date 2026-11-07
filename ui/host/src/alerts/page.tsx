@@ -1,3 +1,4 @@
+import { formatTimestamp } from "../../../panels/units";
 import { LiveDataMeta } from "../live-data-meta";
 import { DataState, Notice, PageHeader, StatusBadge } from "@labstack/ui";
 import { ActionIcon, Badge, Button, Group, Menu, Modal, Stack, Switch, Table, Text, Title } from "@mantine/core";
@@ -14,7 +15,7 @@ import { formatValue, variables } from "./values";
 const stateTone: Record<string, "danger" | "warning" | "neutral"> = { firing: "danger", pending: "warning", resolved: "neutral" } as const;
 /** A badge whose label can shrink is cut to "FIR…" when a narrow screen squeezes the table. */
 const whole = { label: { overflow: "visible" } };
-const when = (value?: string) => value ? exactTimestamp(value) : "—";
+const when = (value?: string) => value ? formatTimestamp(Date.parse(value)) : "—";
 
 /** The rollup variables a rule reads, as the FanQL source and measure that chart them. */
 const charts: Record<string, string> = { error_rate: "spans | error_rate()", p95: "spans | p95(duration)", throughput: "spans | count()", log_count: "logs | count()" };
@@ -68,7 +69,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
   const active = (rule: Rule) => (alerts.data ?? []).filter(a => a.rule_id === rule.id && (a.state === "firing" || a.state === "pending"));
   const history = [...(alerts.data ?? [])].sort((a, b) => (b.fired_at ?? b.created_at).localeCompare(a.fired_at ?? a.created_at));
 
-  return <Stack gap="lg" p="lg" maw={1400} data-alerts>
+  return <Stack gap="lg" px={{base:"md",sm:"xl"}} pt="lg" pb="xl" maw={1600} mx="auto" data-alerts>
     <PageHeader title="Alerts" description="Evaluate service rules and deliver notifications when they fire." meta={<LiveDataMeta updatedAt={alerts.dataUpdatedAt} />} actions={canManage && <Button ref={newRule} leftSection={<Plus size={14} />} onClick={event => { opener.remember(event.currentTarget); setEditing({}); }}>New rule</Button>} />
 
     <Stack gap="xs">
@@ -87,7 +88,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
                 <Button size="compact-xs" variant="subtle" px={0} onClick={() => onExplore(ruleQuery(rule))}>Open in Explore</Button></Table.Td>
               <Table.Td>{!rule.enabled ? <StatusBadge tone="neutral">Disabled</StatusBadge> : !alerts.isSuccess ? <StatusBadge tone="neutral">Unknown</StatusBadge>
                 : now.length > 0 ? <Group gap={4}>{now.map(a => <StatusBadge key={a.id} tone={stateTone[a.state] ?? "neutral"}>{a.state.charAt(0).toUpperCase() + a.state.slice(1)} · {a.service}</StatusBadge>)}</Group> : <StatusBadge tone="success">Ok</StatusBadge>}</Table.Td>
-              <Table.Td><Text size="sm">{alerts.isSuccess ? when(lastFired(rule)) : "—"}</Text></Table.Td>
+              <Table.Td><Text size="sm" ff="monospace">{alerts.isSuccess ? when(lastFired(rule)) : "—"}</Text></Table.Td>
               <Table.Td><Switch aria-label={`Enable ${rule.name}`} checked={rule.enabled} disabled={!canManage || toggle.isPending} onChange={() => toggle.mutate(rule)} /></Table.Td>
               <Table.Td>{canManage && <Menu position="bottom-end"><Menu.Target><ActionIcon ref={node => { if (node) menus.current.set(rule.id, node); else menus.current.delete(rule.id); }} variant="subtle" color="gray" aria-label={`${rule.name} actions`}><DotsThree size={18} /></ActionIcon></Menu.Target>
                 <Menu.Dropdown>
@@ -106,14 +107,14 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
       {alerts.isLoading ? <DataState state="loading" rows={4} /> : alerts.error ? <Notice tone="danger">Alert history could not be loaded: {alerts.error.message}</Notice>
         : history.length === 0 ? <DataState state="empty" empty={{title: "Nothing has fired yet", description: "Connect telemetry to evaluate your alert rules.", action: <Button component="a" href="/settings" variant="default">Connect telemetry</Button>}} />
         : <Table.ScrollContainer minWidth={760} scrollAreaProps={{ viewportProps: { tabIndex: 0, role: "region", "aria-label": "Alert history" } }}><Table verticalSpacing="xs">
-          <Table.Thead><Table.Tr><Table.Th>State</Table.Th><Table.Th>Rule</Table.Th><Table.Th>Service</Table.Th><Table.Th>Value</Table.Th><Table.Th>Fired</Table.Th><Table.Th>Resolved</Table.Th><Table.Th>Delivery</Table.Th></Table.Tr></Table.Thead>
+          <Table.Thead><Table.Tr><Table.Th>State</Table.Th><Table.Th>Rule</Table.Th><Table.Th>Service</Table.Th><Table.Th ta="right">Value</Table.Th><Table.Th>Fired</Table.Th><Table.Th>Resolved</Table.Th><Table.Th>Delivery</Table.Th></Table.Tr></Table.Thead>
           <Table.Tbody>{history.map(a => <Table.Tr key={a.id}>
             <Table.Td><StatusBadge tone={stateTone[a.state] ?? "neutral"}>{a.state.charAt(0).toUpperCase() + a.state.slice(1)}</StatusBadge></Table.Td>
             <Table.Td><Text size="sm">{byId.get(a.rule_id)?.name ?? a.rule_id}</Text></Table.Td>
             <Table.Td><Text size="sm">{a.service}</Text></Table.Td>
-            <Table.Td><Text size="sm" ff="monospace">{a.value === undefined ? "—" : formatValue(variables(byId.get(a.rule_id)?.expression ?? "")[0], a.value)}</Text></Table.Td>
-            <Table.Td><Text size="sm">{when(a.fired_at)}</Text></Table.Td>
-            <Table.Td><Text size="sm">{when(a.resolved_at)}</Text></Table.Td>
+            <Table.Td ta="right"><Text size="sm" ff="monospace">{a.value === undefined ? "—" : formatValue(variables(byId.get(a.rule_id)?.expression ?? "")[0], a.value)}</Text></Table.Td>
+            <Table.Td><Text size="sm" ff="monospace">{when(a.fired_at)}</Text></Table.Td>
+            <Table.Td><Text size="sm" ff="monospace">{when(a.resolved_at)}</Text></Table.Td>
             <Table.Td><Text size="xs" c="dimmed">{a.last_delivery_status ? `${a.last_delivery_status} · ${when(a.last_delivery_at)}` : "—"}</Text></Table.Td>
           </Table.Tr>)}</Table.Tbody>
         </Table></Table.ScrollContainer>}

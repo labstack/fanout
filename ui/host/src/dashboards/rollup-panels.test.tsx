@@ -40,7 +40,7 @@ describe("rollup panels", () => {
     const host = await render({ id: "h", title: "Health", viz: "health" }, { id: "h", status: "ok", frame, elapsed_ms: 1 });
     expect(host.textContent).toContain("Unhealthy");
     expect(host.textContent).toContain("10.00%");
-    expect(host.textContent).toContain("1,234 operations");
+    expect(host.textContent).toContain("1,234 requests");
     expect(host.textContent).toContain("3 services");
     expect(host.querySelector('[aria-label="Service health distribution"]')).not.toBeNull();
     expect(host.querySelector('[aria-label="Error rate trend"]')).not.toBeNull();

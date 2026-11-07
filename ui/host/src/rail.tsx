@@ -151,7 +151,7 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
         {agentAvailable && query && onInvestigateService && (schema.isSuccess || schema.isError) && <Stack gap={4}>
           <SectionLabel>Services</SectionLabel>
           {schema.isError && <Text c="dimmed" size="sm" px="sm">Services could not be searched</Text>}
-          {schema.isSuccess && matchingServices.length === 0 && <Text c="dimmed" size="sm" px="sm">No matching services</Text>}
+          {schema.isSuccess && matchingServices.length === 0 && <DataState state="empty" variant="inline" empty={{title: "No matching services", description: "Try a different service name.", action: <Button variant="subtle" size="compact-xs" onClick={() => setSearch("")}>Clear search</Button>}} />}
           {matchingServices.map((service) => <UnstyledButton key={service} className="rail-row" p="sm" onClick={() => onInvestigateService(service)}>
             <Text size="sm" fw={500} truncate>{service}</Text>
           </UnstyledButton>)}
@@ -176,7 +176,7 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
           {/* A search that matches nothing here would otherwise leave the
               label sitting on top of the Create button with no word about
               why the list emptied. */}
-          {!dashboards.isLoading && !dashboards.isError && query && visibleDashboards.length === 0 && <Text c="dimmed" size="sm" px="sm" py="xs">No matching dashboards</Text>}
+          {!dashboards.isLoading && !dashboards.isError && query && visibleDashboards.length === 0 && <DataState state="empty" variant="inline" empty={{title: "No matching dashboards", description: "Try a different dashboard name.", action: <Button variant="subtle" size="compact-xs" onClick={() => setSearch("")}>Clear search</Button>}} />}
           {visibleDashboards.map((dashboard) => {
             const active = dashboard.id === activeDashboardID;
             return <Stack key={dashboard.id} gap={0}><UnstyledButton component="a" href={`/dashboards/${encodeURIComponent(dashboard.id)}`} className="rail-row" data-active={active || undefined} aria-current={active ? "page" : undefined} p="sm" onClick={(event) => {

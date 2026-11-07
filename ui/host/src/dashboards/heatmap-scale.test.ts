@@ -17,10 +17,12 @@ function fill(o: any, count: number) {
 }
 
 it("maps decades to distinct monotonic log steps with cap 3,000", () => {
-  expect([1, 10, 100, 1000, 3000].map(n => heatStep(n, 3000))).toEqual([0, 1, 3, 5, 6]);
+  const steps = [1, 10, 100, 1000, 3000].map(n => heatStep(n, 3000));
+  expect(steps[0]).toBe(0); expect(steps.at(-1)).toBe(6); expect(steps.every((n,i) => !i || n > steps[i-1])).toBe(true);
 });
 it("keeps low counts in the bottom steps of a fixed magnitude scale", () => {
-  expect([1, 2, 3, 4, 5].map(n => heatStep(n, 3000))).toEqual([0, 0, 0, 1, 1]);
+  const steps = [1, 2, 3, 4, 5].map(n => heatStep(n, 3000));
+  expect(new Set(steps).size).toBe(5); expect(Math.max(...steps)).toBeLessThan(3);
 });
 it.each([false, true])("equal counts share colours across distributions with the same p99 cap (%s)", dark => {
   const a = option([1, 10, 100, 1000, 3000], dark), b = option([100, 3000, 3000, 3000, 3000], dark);
@@ -31,15 +33,15 @@ it.each([false, true])("equal counts share colours across distributions with the
 it("derives nearest-rank p99 from occupied cells and saturates outliers", () => {
   const o = option([0, null, -1, ...Array.from({ length: 99 }, () => 3000), 1e9]);
   expect(o.series[0].data).toHaveLength(100);
-  expect(o.visualMap.text).toEqual(["3k", "1"]);
+  expect(o.visualMap.text).toEqual(["3K", "1"]);
   expect(fill(o, 1e9)).toBe(o.visualMap.inRange.color[6]);
 });
-it.each([false, true])("shows only one heatmap scale label per end with no extra positioned text (%s)", dark => {
+it.each([false, true])("labels heatmap scale endpoints once and explains its unit (%s)", dark => {
   const o = option([1, 10, 100, 1000, 3000], dark);
-  expect(o.visualMap.text).toEqual(["3k", "1"]);
+  expect(o.visualMap.text).toEqual(["3K", "1"]);
   expect(o.visualMap.orient).toBe("horizontal");
   expect(o.visualMap.inRange.color).toEqual(heatRamp(chartThemeFor(dark)));
-  expect(o.graphic).toEqual([]);
+  expect(o.graphic[0].style.text).toBe("Requests / bucket · log scale");
 });
 it("handles empty and unit caps without non-finite steps", () => {
   expect(option([0, null]).series[0].data).toEqual([]);

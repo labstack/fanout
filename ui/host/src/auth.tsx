@@ -64,7 +64,7 @@ function AuthSurface({ children, wide = false }: { children: ReactNode; wide?: b
   return <Box
     mih="100dvh"
     style={{
-      background: "var(--labstack-ground)",
+      background: "var(--mantine-color-body)",
     }}
   >
     <Center mih="100dvh" px="md" py={48}>

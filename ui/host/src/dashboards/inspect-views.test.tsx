@@ -48,8 +48,8 @@ it.each([false,true])('short narrow error cards expose Data through keyboard men
     const menu=h.querySelector<HTMLButtonElement>('[aria-label^="Requests menu"]')!;
     // DOM key dispatch does not synthesize native button activation.
     await act(async()=>{menu.focus();menu.click();});
-    await vi.waitFor(()=>expect(document.querySelector('[role="menuitemradio"][data-panel-view="Chart"]')).not.toBeNull());
-    await act(async()=>document.querySelector<HTMLElement>('[role="menuitemradio"][data-panel-view="Chart"]')!.focus());
+    await vi.waitFor(()=>expect(document.querySelector('[role="menuitemradio"][data-panel-view="Table"]')).not.toBeNull());
+    await act(async()=>document.querySelector<HTMLElement>('[role="menuitemradio"][data-panel-view="Table"]')!.focus());
     await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true})));
     expect(document.activeElement?.getAttribute('data-panel-view')).toBe('Data');
     await act(async()=>(document.activeElement as HTMLElement).click());

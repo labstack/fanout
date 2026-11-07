@@ -1,4 +1,5 @@
-import { Alert, Anchor, Group, Loader, Stack, Text } from "@mantine/core";
+import { DataState, Notice } from "@labstack/ui";
+import { Box,  Anchor, Group, Stack, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import type { Cell } from "../../../panels/types";
 import { queryPanels } from "../dashboards/api";
@@ -38,8 +39,8 @@ export function LogDetails({ row, onTrace }: { row: Record<string, Cell>; onTrac
       {onTrace ? <Anchor component="button" type="button" size="xs" ff="monospace" onClick={onTrace} style={{ overflowWrap: "anywhere" }}>{traceId}</Anchor> : <Text size="xs" ff="monospace">{traceId}</Text>}
       {extras.data?.span_id && <><Text size="xs" c="dimmed">Span</Text><Text size="xs" ff="monospace">{extras.data.span_id}</Text></>}
     </Group>}
-    {extras.isFetching && <Loader size="xs" role="status" aria-label="Loading log details" />}
-    {extras.error && <Alert color="bad" p="xs">{extras.error.message}</Alert>}
+    {extras.isFetching && <Box role="status" aria-label="Loading log details"><DataState state="loading" loadingLabel="Loading log details" rows={3} /></Box>}
+    {extras.error && <Box p="xs"><Notice tone="danger" onRetry={() => void extras.refetch()}>{extras.error.message}</Notice></Box>}
     {extras.data && <>
       <Attributes label="Attributes" values={extras.data.attributes} />
       <Attributes label="Resource" values={extras.data.resource} />
