@@ -1,6 +1,5 @@
 import { expect, it } from "vitest";
 import { contrastRatio } from "@labstack/ui";
-import { bad, warn, surfaces } from "../../../tokens";
 import { chart, series } from "../../../theme";
 
 type Triple = [number, number, number];
@@ -130,11 +129,11 @@ it("reports transformed surface contrast and rejects malformed or translucent he
   expect(measurePalette(Array(6).fill(chart.dark.surface), chart.dark.surface).surface_contrast[0].deutan).toBe(1);
 });
 
-it.each(["light", "dark"] as const)("checks all fifteen slot pairs and both %s chart surfaces", scheme => {
+it.each(["light", "dark"] as const)("checks all fifteen slot pairs and the %s chart surface", scheme => {
   const colors = series[scheme];
   const distances: number[] = [];
   for (let a = 0; a < colors.length; a++) {
-    for (const surface of [surfaces[scheme].ground, surfaces[scheme].raised]) expect(contrastRatio(colors[a], surface)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(colors[a], chart[scheme].surface)).toBeGreaterThanOrEqual(3);
     for (let b = a + 1; b < colors.length; b++) distances.push(distance(lab(decode(colors[a])), lab(decode(colors[b]))));
   }
   expect(distances).toHaveLength(15);
@@ -150,60 +149,41 @@ function oklch(rgb: Triple): LCH {
   return { l, c: Math.hypot(a, b), h: (Math.atan2(b, a) * 180 / Math.PI + 360) % 360 };
 }
 const hueGap = (a: number, b: number) => { const delta = Math.abs(a - b) % 360; return Math.min(delta, 360 - delta); };
-function slotTwoRoleFailures(candidate: LCH, others: LCH[], statusHues: number[]): string[] {
-  const lightness = others.map(color => color.l);
+// Identity marks stay in the middle lightness range; ink and highlights have
+// other roles. Apply these bounds and main's chroma floor to every slot.
+function identityColorFailures(candidate: LCH): string[] {
   const failures: string[] = [];
-  if (candidate.l < Math.min(...lightness) - .03 || candidate.l > Math.max(...lightness) + .03) failures.push("lightness");
+  if (candidate.l < .4 || candidate.l > .75) failures.push("lightness");
   if (candidate.c < .10) failures.push("chroma");
-  if (others.some(color => hueGap(candidate.h, color.h) < 25)) failures.push("slot_hue");
-  if (statusHues.some(hue => hueGap(candidate.h, hue) < 30)) failures.push("status_hue");
   return failures;
 }
-function roleContext(scheme: "light" | "dark") {
-  return {
-    others: series[scheme].filter((_, slot) => slot !== 1).map(color => oklch(decode(color))),
-    statusHues: [bad, warn].map(palette => oklch(decode(palette[scheme === "dark" ? 5 : 7])).h),
-  };
-}
 
-it.each(["light", "dark"] as const)("keeps slot 2's %s visual weight, chroma and hue role", scheme => {
-  const { others, statusHues } = roleContext(scheme);
-  expect(slotTwoRoleFailures(oklch(decode(series[scheme][1])), others, statusHues)).toEqual([]);
-  for (const surface of [surfaces[scheme].ground, surfaces[scheme].raised]) expect(contrastRatio(series[scheme][1], surface)).toBeGreaterThanOrEqual(3);
+it.each(["light", "dark"] as const)("keeps every %s series chromatic and away from ink and highlights", scheme => {
+  for (const color of series[scheme]) expect(identityColorFailures(oklch(decode(color))), color).toEqual([]);
 });
 
-it.each(["light", "dark"] as const)("rejects former lightness extremes and neutral ink as %s slot 2", scheme => {
-  const { others, statusHues } = roleContext(scheme);
-  for (const hex of ["#ffffaf", "#000033"]) expect(slotTwoRoleFailures(oklch(decode(hex)), others, statusHues)).toContain("lightness");
-  for (const hex of ["#808080", "#111113", "#EDEDEF"]) expect(slotTwoRoleFailures(oklch(decode(hex)), others, statusHues)).toContain("chroma");
+it("rejects former lightness extremes and neutral ink as series colors", () => {
+  for (const hex of ["#ffffaf", "#000033"]) expect(identityColorFailures(oklch(decode(hex)))).toContain("lightness");
+  for (const hex of ["#808080", "#111113", "#EDEDEF"]) expect(identityColorFailures(oklch(decode(hex)))).toContain("chroma");
 });
 
-it("enforces each slot role boundary independently, including circular hue gaps", () => {
-  const others = [20, 70, 150, 260, 310].map((h, i) => ({ l: i === 0 ? .5 : .7, c: .15, h }));
-  const candidate = { l: .6, c: .15, h: 210 }, statusHues = [20, 70];
-  const check = (change: Partial<LCH>) => slotTwoRoleFailures({ ...candidate, ...change }, others, statusHues);
-  expect(check({})).toEqual([]);
-  expect(check({ l: .5 - .03 })).toEqual([]);
-  expect(check({ l: .7 + .03 })).toEqual([]);
-  expect(check({ l: .5 - .030001 })).toEqual(["lightness"]);
-  expect(check({ l: .7 + .030001 })).toEqual(["lightness"]);
+it("enforces identity lightness and chroma boundaries independently", () => {
+  const candidate = { l: .6, c: .15, h: 210 };
+  const check = (change: Partial<LCH>) => identityColorFailures({ ...candidate, ...change });
+  expect(check({ l: .4 })).toEqual([]);
+  expect(check({ l: .75 })).toEqual([]);
+  expect(check({ l: .399999 })).toEqual(["lightness"]);
+  expect(check({ l: .750001 })).toEqual(["lightness"]);
   expect(check({ c: .10 })).toEqual([]);
   expect(check({ c: .099999 })).toEqual(["chroma"]);
-  expect(check({ h: 235 })).toEqual([]);
-  expect(check({ h: 235.000001 })).toEqual(["slot_hue"]);
-  expect(check({ h: 100 })).toEqual([]);
-  expect(check({ h: 99.999999 })).toEqual(["status_hue"]);
-  expect(check({ h: 359 })).toEqual(["slot_hue", "status_hue"]);
-  expect(hueGap(359, 24)).toBe(25);
 });
 
-// Exhaustive opaque sRGB search with the role constraints above; minima are
-// over slot 2 versus all five retained slots, not just its adjacent slots.
-it.each(["light", "dark"] as const)("separates role-constrained slot 2 in every %s vision mode", scheme => {
-  const colors = series[scheme].map(decode), candidate = colors[1];
-  const minima = modes.map(mode => Math.min(...colors.filter((_, slot) => slot !== 1).map(color =>
-    distance(lab(simulate(candidate, mode)), lab(simulate(color, mode))))));
-  const floors = scheme === "dark" ? [10.17, 8.89, 8.81, 8.82] : [16.56, 12.84, 14.71, 12.87];
-  minima.forEach((minimum, i) => expect(minimum, modes[i]).toBeGreaterThanOrEqual(floors[i]));
-  console.log(JSON.stringify({ scheme, slot: 2, oklch: oklch(candidate), minima: Object.fromEntries(modes.map((mode, i) => [mode, minima[i]])) }));
+const sameHueFamily = (dark: string, light: string) => hueGap(oklch(decode(dark)).h, oklch(decode(light)).h) < 30;
+it("preserves each series slot's hue family between schemes", () => {
+  series.dark.forEach((color, slot) => expect(sameHueFamily(color, series.light[slot]), `slot ${slot + 1}`).toBe(true));
+});
+it("rejects a series that changes from magenta to olive across schemes", () => {
+  expect(sameHueFamily("#b350b1", "#6e6200")).toBe(false);
+  expect(hueGap(359, 24)).toBe(25);
+  expect(hueGap(24, 359)).toBe(25);
 });

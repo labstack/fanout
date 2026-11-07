@@ -40,14 +40,12 @@ export const info = [
   "#33a7e6", "#1e86bd", "#146694", "#0d4a6d",
 ] as const;
 
-/** Six fixed identity slots. Slot 2 maximizes its worst OKLab separation
- * across normal vision and full-severity CVD within the other slots' OKLCH
- * lightness range (+/- .03), chroma >=.10, >=25 degrees from their hues,
- * >=30 degrees from error/warning hues and 3:1 on ground and raised.
+/** Six fixed identity slots preserve hue families across schemes. Series hues
+ * identify entities, never status; status uses icons, shapes and labels.
  * Labels, shapes and dashes remain necessary when hues converge under CVD. */
 export const chartSeries = {
-  dark: ["#3987e5", "#b350b1", "#199e70", "#9085e9", "#c98500", "#d55181"],
-  light: ["#2a78d6", "#6e6200", "#19a170", "#4a3aa7", "#bd8000", "#ce6d92"],
+  dark: ["#3987e5", "#d95926", "#199e70", "#9085e9", "#c98500", "#d55181"],
+  light: ["#2a78d6", "#eb6834", "#19a170", "#4a3aa7", "#bd8000", "#ce6d92"],
 } as const;
 
 export const typeScale = { micro: 11, small: 12, body: 14, title: 16, section: 20, page: 28 } as const;

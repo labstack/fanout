@@ -15,8 +15,8 @@ type Chart = { series: { name: string; itemStyle: { color: string }; data: unkno
 
 describe("validated categorical series", () => {
   it("pins the validator-approved palette in exact slot order", () => {
-    expect(series.dark).toEqual(["#3987e5", "#b350b1", "#199e70", "#9085e9", "#c98500", "#d55181"]);
-    expect(series.light).toEqual(["#2a78d6", "#6e6200", "#19a170", "#4a3aa7", "#bd8000", "#ce6d92"]);
+    expect(series.dark).toEqual(["#3987e5", "#d95926", "#199e70", "#9085e9", "#c98500", "#d55181"]);
+    expect(series.light).toEqual(["#2a78d6", "#eb6834", "#19a170", "#4a3aa7", "#bd8000", "#ce6d92"]);
   });
   it.each([false, true])("assigns six distinct slots in chart order (dark=%s)", dark => {
     const theme = chartThemeFor(dark);
