@@ -1,5 +1,5 @@
 import { DataState, Notice, StatusBadge } from "@labstack/ui";
-import { Badge, Box, Button, Group, Paper, Stack, Tabs, Text, VisuallyHidden } from "@mantine/core";
+import { Badge, Box, Button, Group, Paper, Stack, Switch, Tabs, Text, VisuallyHidden } from "@mantine/core";
 import { Tooltip } from "@mantine/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Result, TraceDetail, TraceSpan } from "../../../../contracts";
@@ -16,6 +16,7 @@ import type { PanelResult } from "../../../../panels/types";
 /** Spans open their details below the chart unless the caller handles span clicks itself. */
 export function TraceDetailView({ result, dark, onSpan, loadSpan }: { result: Result<TraceDetail>; dark: boolean; onSpan?: (span: TraceSpan) => void; loadSpan?: SpanLoader }) {
   const [view, setView] = useState("waterfall");
+  const [showCriticalPath, setShowCriticalPath] = useState(true);
   const [picked, setPicked] = useState<TraceSpan>();
   const select = onSpan ?? setPicked;
   const data = result.data;
@@ -27,10 +28,10 @@ export function TraceDetailView({ result, dark, onSpan, loadSpan }: { result: Re
   return <Stack gap="sm">
     <Group><Text fw={600} ff="monospace" size="sm">{data.trace_id}</Text><StatusBadge tone={data.has_error ? "danger" : "success"}>{data.has_error ? "Error" : "OK"}</StatusBadge></Group>
     {data.spans.length > 0 ? <>
-      <Tabs value={view} onChange={value => value && setView(value)} keepMounted={false}><Tabs.List aria-label="Trace view"><Tabs.Tab value="waterfall">Waterfall</Tabs.Tab><Tabs.Tab value="flame">Flame graph</Tabs.Tab></Tabs.List>
+      <Tabs value={view} onChange={value => value && setView(value)} keepMounted={false}><Group justify="space-between"><Tabs.List aria-label="Trace view"><Tabs.Tab value="waterfall">Waterfall</Tabs.Tab><Tabs.Tab value="flame">Flame graph</Tabs.Tab></Tabs.List>{view === "waterfall" && <Switch label="Critical path" checked={showCriticalPath} onChange={event => setShowCriticalPath(event.currentTarget.checked)} />}</Group>
       {/* Beside the chart it qualifies: a truncated trace draws only the spans that loaded. */}
       {data.truncated && <Box data-trace-truncated><Notice tone="warning">This trace is truncated: {data.spans.length} of {data.span_count} spans, {data.services.length} of {data.service_count} services.{loadedMs < data.duration_ms ? ` The timeline shows the loaded spans: ${duration(loadedMs)} of the trace's ${duration(data.duration_ms)}.` : ""}</Notice></Box>}
-      <Tabs.Panel value="waterfall" pt="sm"><Waterfall spans={data.spans} dark={dark} onSpan={select} selected={picked?.span_id} /></Tabs.Panel>
+      <Tabs.Panel value="waterfall" pt="sm"><Waterfall showCriticalPath={showCriticalPath} spans={data.spans} dark={dark} onSpan={select} selected={picked?.span_id} /></Tabs.Panel>
       <Tabs.Panel value="flame" pt="sm"><FlameGraph spans={data.spans} dark={dark} onSpan={select} traceMs={data.truncated ? data.duration_ms : undefined} /></Tabs.Panel>
       </Tabs>
       {picked && <SpanDetails key={picked.span_id} traceId={data.trace_id} span={picked} load={loadSpan} onClose={() => setPicked(undefined)} />}
