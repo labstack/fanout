@@ -61,6 +61,57 @@ func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 	}
 }
 
+// An owner created from FANOUT_OWNER_EMAIL never runs interactive setup, so
+// the first ingest token comes from the rotate action on an empty setting.
+func TestRotateIngestToken_IssuesFirstTokenForOwner(t *testing.T) {
+	s, store := newConfigServer(t, config.Config{Addr: ":7520"})
+	owner, _, err := s.users.DesignateOwner("owner@example.com")
+	if err != nil {
+		t.Fatalf("DesignateOwner: %v", err)
+	}
+	cookie := s.login(t, owner)
+	read := func() ingestResponse {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, sessionRequest(http.MethodGet, "/api/settings/ingest", nil, cookie))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET status = %d %s", rec.Code, rec.Body.String())
+		}
+		var resp ingestResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		return resp
+	}
+	if read().TokenRequired {
+		t.Fatal("owner database already has an ingest token")
+	}
+	rec := httptest.NewRecorder()
+	req := sessionRequest(http.MethodPost, "/api/settings/ingest/token/rotate", nil, cookie)
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rotate status = %d %s", rec.Code, rec.Body.String())
+	}
+	var resp ingestResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	current, err := store.GetIngest(req.Context())
+	if err != nil || !resp.TokenRequired || !settings.CheckIngestToken(resp.IngestToken, current.TokenHash) {
+		t.Fatalf("response=%+v current=%+v err=%v", resp, current, err)
+	}
+	if !read().TokenRequired {
+		t.Fatal("token_required is false after the first token was issued")
+	}
+	var events int
+	if err := s.db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'ingest_key.rotated' AND actor_user_id = ?`, owner.ID).Scan(&events); err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	if events != 1 {
+		t.Fatalf("ingest audit events = %d, want 1", events)
+	}
+}
+
 func TestIngestSettingsCapabilities(t *testing.T) {
 	s, _ := newConfigServer(t, config.Config{Addr: ":7520"})
 	viewer, _ := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})

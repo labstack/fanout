@@ -40,6 +40,23 @@ Setup credential behavior:
 > screen — can hold it until the credential is consumed or expires. Treat a
 > leaked banner as a compromised installation and rebuild the database.
 
+### Owner email instead of a setup URL
+
+Set `FANOUT_OWNER_EMAIL` to create the first administrator without a setup URL.
+When the user count is zero at startup, Fanout creates that address as an
+active `admin`, records a `setup.completed` audit event with
+`source: owner_email`, and prints no banner. The address is validated when
+configuration loads.
+
+- It creates an account only in an empty control database, under the same
+  transactional check as interactive setup.
+- With users present it creates nothing. A matching account is left as it is;
+  if that account is not an active administrator, Fanout logs a warning. A
+  different address is refused with a warning, and no account is created.
+- No ingest token is issued at startup. The owner issues the first one from
+  **Connect telemetry → Ingest token** or `POST /api/settings/ingest/token/rotate`.
+  Ingest stays closed until then.
+
 ### Before you complete setup
 
 Local mode requires only a 32-character `FANOUT_AUTH_CODE_SECRET`. SMTP is

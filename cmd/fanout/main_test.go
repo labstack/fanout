@@ -217,6 +217,85 @@ func TestCreateLoginLink(t *testing.T) {
 	}
 }
 
+func TestPrepareFirstAdministratorWithoutOwnerEmailKeepsSetup(t *testing.T) {
+	sqlite, err := store.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	defer sqlite.Close()
+	users := auth.NewUserStore(sqlite.DB)
+	setupRequired, err := prepareFirstAdministrator("", users)
+	if err != nil || !setupRequired {
+		t.Fatalf("prepareFirstAdministrator = (%v, %v), want (true, nil)", setupRequired, err)
+	}
+	if count, _ := users.CountUsers(); count != 0 {
+		t.Fatalf("users = %d, want 0", count)
+	}
+}
+
+func TestPrepareFirstAdministratorCreatesOwnerWhoCanUseLoginLink(t *testing.T) {
+	cfg := config.Config{
+		AuthMode:       "local",
+		AuthCodeSecret: "0123456789abcdef0123456789abcdef",
+		DataDir:        t.TempDir(),
+		Addr:           ":7520",
+		OwnerEmail:     "Owner@Example.com",
+	}
+	if err := os.MkdirAll(cfg.ControlDir(), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	sqlite, err := store.NewSQLite(cfg.ControlSQLitePath())
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	users := auth.NewUserStore(sqlite.DB)
+	setupRequired, err := prepareFirstAdministrator(cfg.OwnerEmail, users)
+	if err != nil || setupRequired {
+		t.Fatalf("prepareFirstAdministrator = (%v, %v), want (false, nil)", setupRequired, err)
+	}
+	owner, err := users.GetByEmail("owner@example.com")
+	if err != nil || owner.Role != auth.RoleAdmin || owner.Status != auth.UserStatusActive {
+		t.Fatalf("owner = %+v err = %v, want active admin", owner, err)
+	}
+	// A restart with the same setting is a no-op, and still issues no setup URL.
+	setupRequired, err = prepareFirstAdministrator(cfg.OwnerEmail, users)
+	if err != nil || setupRequired {
+		t.Fatalf("restart prepareFirstAdministrator = (%v, %v), want (false, nil)", setupRequired, err)
+	}
+	if count, _ := users.CountUsers(); count != 1 {
+		t.Fatalf("users = %d, want 1", count)
+	}
+	if err := sqlite.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	var output bytes.Buffer
+	if err := createLoginLink(cfg, "owner@example.com", &output); err != nil {
+		t.Fatalf("createLoginLink for owner: %v", err)
+	}
+	if !strings.Contains(output.String(), "login_token=") {
+		t.Fatalf("login link output = %q", output.String())
+	}
+}
+
+func TestPrepareFirstAdministratorRefusesSecondOwner(t *testing.T) {
+	sqlite, err := store.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	defer sqlite.Close()
+	users := auth.NewUserStore(sqlite.DB)
+	if _, err := users.CreateFirstAdminWithAudit("admin@example.com", "", auth.AuditEvent{EventType: "setup.completed", Outcome: "success"}); err != nil {
+		t.Fatalf("CreateFirstAdmin: %v", err)
+	}
+	setupRequired, err := prepareFirstAdministrator("owner@example.com", users)
+	if err != nil || setupRequired {
+		t.Fatalf("prepareFirstAdministrator = (%v, %v), want (false, nil)", setupRequired, err)
+	}
+	if _, err := users.GetByEmail("owner@example.com"); !errors.Is(err, auth.ErrUserNotFound) {
+		t.Fatalf("second owner lookup err = %v, want ErrUserNotFound", err)
+	}
+}
+
 func TestHealthcheckURL(t *testing.T) {
 	for _, tc := range []struct{ addr, cert, want string }{
 		{"", "", "http://127.0.0.1:7520/healthz"},

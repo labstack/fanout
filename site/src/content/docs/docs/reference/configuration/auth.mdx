@@ -31,6 +31,7 @@ Vendor credentials and endpoints keep the vendor's documented names.
 | `FANOUT_OIDC_EMAIL_VERIFICATION` | string | `required` |
 | `FANOUT_OIDC_ISSUER_URL` | string | — |
 | `FANOUT_OIDC_OPERATOR_GROUPS` | string | — |
+| `FANOUT_OWNER_EMAIL` | string | — |
 | `FANOUT_SELF_SIGNUP` | boolean | `false` |
 | `FANOUT_SESSION_ABSOLUTE_TTL` | duration | `168h` |
 | `FANOUT_SESSION_IDLE_TTL` | duration | `12h` |
@@ -88,6 +89,10 @@ Selects the identity provider issuer; required in OIDC mode.
 ### `FANOUT_OIDC_OPERATOR_GROUPS`
 
 Lists identity-provider groups mapped to operator, separated by commas.
+
+### `FANOUT_OWNER_EMAIL`
+
+Creates this address as the first active administrator when the control database has no users, instead of printing the one-time setup URL; ignored once users exist.
 
 ### `FANOUT_SELF_SIGNUP`
 

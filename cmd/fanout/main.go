@@ -195,12 +195,12 @@ func main() {
 	auditStore := auth.NewAuditStore(sqlite.DB)
 	setup := auth.NewSetup()
 
-	userCount, err := userStore.CountUsers()
+	setupRequired, err := prepareFirstAdministrator(cfg.OwnerEmail, userStore)
 	if err != nil {
 		slog.Error("auth status init failed", "err", err)
 		os.Exit(1)
 	}
-	if userCount == 0 {
+	if setupRequired {
 		token, _, err := setup.Rotate()
 		if err != nil {
 			slog.Error("setup token init failed", "err", err)
@@ -692,6 +692,34 @@ func browserLoginURL(cfg config.Config) *url.URL {
 	}
 	loginURL, _ := url.Parse(setupLoginURL(cfg.Addr))
 	return loginURL
+}
+
+// prepareFirstAdministrator applies FANOUT_OWNER_EMAIL and reports whether the
+// control database still has no users, in which case the caller opens the
+// one-time setup URL. The owner is created only in an empty database; once
+// any user exists the setting never creates, promotes or reactivates anyone.
+func prepareFirstAdministrator(ownerEmail string, users *auth.UserStore) (bool, error) {
+	if ownerEmail != "" {
+		owner, outcome, err := users.DesignateOwner(ownerEmail)
+		if err != nil {
+			return false, fmt.Errorf("designate owner from FANOUT_OWNER_EMAIL: %w", err)
+		}
+		switch outcome {
+		case auth.OwnerCreated:
+			slog.Info("auth: owner created as the first administrator from FANOUT_OWNER_EMAIL; no setup URL is issued", "email", owner.Email)
+		case auth.OwnerPresent:
+			if owner.Role != auth.RoleAdmin || owner.Status != auth.UserStatusActive {
+				slog.Warn("auth: FANOUT_OWNER_EMAIL names an existing account that is not an active administrator; it was left unchanged", "email", owner.Email, "role", owner.Role, "status", owner.Status)
+			}
+		case auth.OwnerRefused:
+			slog.Warn("auth: FANOUT_OWNER_EMAIL ignored; the control database already has users and none has this email, so no owner was created. Unset it, or have an administrator add the account", "email", strings.ToLower(strings.TrimSpace(ownerEmail)))
+		}
+	}
+	count, err := users.CountUsers()
+	if err != nil {
+		return false, err
+	}
+	return count == 0, nil
 }
 
 func printSetupBanner(httpAddr, token string) {

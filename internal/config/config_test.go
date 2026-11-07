@@ -58,6 +58,20 @@ func TestLoadTreatsEmptyEnvironmentValuesAsAbsent(t *testing.T) {
 	}
 }
 
+func TestLoadOwnerEmail(t *testing.T) {
+	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_OWNER_EMAIL=Owner@Example.com")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OwnerEmail != "Owner@Example.com" {
+		t.Fatalf("OwnerEmail = %q", cfg.OwnerEmail)
+	}
+	_, err = Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_OWNER_EMAIL=owner.example.com")})
+	if err == nil || !strings.Contains(err.Error(), "FANOUT_OWNER_EMAIL must be a valid email address") {
+		t.Fatalf("invalid owner email error = %v", err)
+	}
+}
+
 func TestConfigurationSchemaUsesUnitBearingDurations(t *testing.T) {
 	specs, err := configFieldSpecs()
 	if err != nil {
@@ -273,6 +287,9 @@ func TestValidate(t *testing.T) {
 		{"AI provider invalid", func(c *Config) { c.AIProvider = "unknown" }},
 		{"auth code secret empty", func(c *Config) { c.AuthCodeSecret = "" }},
 		{"auth code secret short", func(c *Config) { c.AuthCodeSecret = "short" }},
+		{"owner email invalid", func(c *Config) { c.OwnerEmail = "owner" }},
+		{"owner email blank", func(c *Config) { c.OwnerEmail = "   " }},
+		{"owner email with display name", func(c *Config) { c.OwnerEmail = "Owner <owner@example.com>" }},
 		{"self-signup without SMTP", func(c *Config) { c.SelfSignup = true; c.SMTPHost = "" }},
 		{"local self-signup in OIDC mode", func(c *Config) {
 			c.SelfSignup = true
