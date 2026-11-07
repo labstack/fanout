@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-mantine-color-scheme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fcfcfc" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0e14" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F5F5F6" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0B0B0C" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Fanout</title>
     <!-- Mantine's ColorSchemeScript, inlined. Rendered from React it runs at the
@@ -16,22 +16,25 @@
     <script>
       try {
         var stored = window.localStorage.getItem("mantine-color-scheme-value");
-        var scheme = stored === "light" || stored === "dark" || stored === "auto" ? stored : "auto";
+        var scheme = stored === "light" || stored === "dark" || stored === "auto" ? stored : "dark";
         var computed = scheme !== "auto" ? scheme : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
         document.documentElement.setAttribute("data-mantine-color-scheme", computed);
       } catch (e) {}
     </script>
-    <script type="module" crossorigin src="/assets/index-DbdNT-Ft.js"></script>
+    <script type="module" crossorigin src="/assets/index-D8p1ldCQ.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/useRouter-ByJ6_rwb.js">
-    <link rel="modulepreload" crossorigin href="/assets/brand-DUaZkIz1.js">
+    <link rel="modulepreload" crossorigin href="/assets/brand-CkRvkhG_.js">
     <link rel="modulepreload" crossorigin href="/assets/useNavigate-B1zgPEUp.js">
     <link rel="modulepreload" crossorigin href="/assets/preload-helper-DJZNfKNH.js">
-    <link rel="modulepreload" crossorigin href="/assets/OptionalPortal-BBiZInDe.js">
+    <link rel="modulepreload" crossorigin href="/assets/OptionalPortal-BKAa02jq.js">
+    <link rel="modulepreload" crossorigin href="/assets/auth-y7w-X_dr.js">
+    <link rel="modulepreload" crossorigin href="/assets/useQuery-CVfPyG9V.js">
+    <link rel="modulepreload" crossorigin href="/assets/theme-B3RwlByN.js">
+    <link rel="modulepreload" crossorigin href="/assets/lazyRouteComponent-CCXPOuSR.js">
     <link rel="modulepreload" crossorigin href="/assets/noop-mXPS5vjY.js">
-    <link rel="modulepreload" crossorigin href="/assets/auth-DRctLVsV.js">
-    <link rel="modulepreload" crossorigin href="/assets/useQuery-BbDFAhy1.js">
-    <link rel="modulepreload" crossorigin href="/assets/search-aESlgFJI.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-CN0hxdw3.css">
+    <link rel="modulepreload" crossorigin href="/assets/search-C7is4sZf.js">
+    <link rel="modulepreload" crossorigin href="/assets/search-B-7q7wvc.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-BOr1KK6C.css">
   </head>
   <body>
     <div id="root"></div>

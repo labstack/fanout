@@ -65,7 +65,7 @@ function AuthSurface({ children, wide = false }: { children: ReactNode; wide?: b
       // Tokens rather than literals: the old mint wash was left over from the
       // teal palette, and --mantine-color-white is white in both schemes, so
       // the sign-in page stayed light while the rest of the app went dark.
-      background: "radial-gradient(circle at 50% -12%, var(--mantine-color-brand-light), transparent 38%), linear-gradient(180deg, var(--mantine-color-default-hover), var(--mantine-color-body) 62%)",
+      background: "radial-gradient(circle at 50% -12%, var(--labstack-inset), transparent 38%), linear-gradient(180deg, var(--mantine-color-default-hover), var(--mantine-color-body) 62%)",
     }}
   >
     <Center mih="100dvh" px="md" py={48}>
@@ -210,7 +210,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   if (setupResult?.ingest_token) {
     return <AuthSurface wide><Stack gap="lg">
       <BrandLockup />
-      <div><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Setup complete</Text><Title order={1} mt="xs" fz={{ base: 28, sm: 32 }} lh={1.08}>Save your ingest token</Title></div>
+      <div><Text fw={700} size="xs" tt="uppercase" lts="0.12em">Setup complete</Text><Title order={1} mt="xs" fz={{ base: 28, sm: 32 }} lh={1.08}>Save your ingest token</Title></div>
       <Text c="dimmed">Fanout shows this token once. Store it with your collector secrets before continuing.</Text>
       <Stack gap="xs"><Text size="sm" fw={600}>OTLP endpoint</Text><Code block>{setupResult.suggested_endpoint ?? window.location.origin}</Code></Stack>
       <Stack gap="xs"><Text size="sm" fw={600}>Header</Text><Code block>{setupResult.ingest_header_name ?? "Authorization"}: Bearer {setupResult.ingest_token}</Code></Stack>
@@ -235,7 +235,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     return <AuthSurface><Stack gap={28}>
       <BrandLockup />
       <Stack gap={10}>
-        <Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Secure workspace</Text>
+        <Text fw={700} size="xs" tt="uppercase" lts="0.12em">Secure workspace</Text>
         <Title order={1} fz={{ base: 28, sm: 32 }} lh={1.08}>Sign in</Title>
         <Text c="dimmed" size="md" lh={1.6}>Use your organization&apos;s identity provider to continue.</Text>
       </Stack>
@@ -323,7 +323,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   return <AuthSurface><Stack gap={28}>
     <BrandLockup />
     <Stack gap={10}>
-      <Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">
+      <Text fw={700} size="xs" tt="uppercase" lts="0.12em">
         {status?.setup_required ? "One-time setup" : "Secure workspace"}
       </Text>
       <Title order={1} fz={{ base: 28, sm: 32 }} lh={1.08}>{heading}</Title>

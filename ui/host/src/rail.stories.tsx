@@ -1,4 +1,3 @@
-import { railRules } from "./catalog/accessibility";
 import { Box } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Meta, StoryObj } from "@storybook/react-vite";
@@ -14,7 +13,7 @@ function RailFrame({ children }: { children: ReactNode }) {
 const meta = {
   id: "layout-rail", title: "Layout/Rail", component: Rail,
   args: { agentAvailable: true, activeThreadID: "commerce-review", onNewChat: fn(), onSelectThread: fn(), onDeletedThread: fn(), onSelectDashboard: fn(), onCreateDashboard: fn(), onNewDashboard: fn(), onNavigate: fn() },
-  parameters: { layout: "fullscreen", a11y: { config: { rules: railRules } } },
+  parameters: { layout: "fullscreen" },
   decorators: [Story => <RailFrame><Story /></RailFrame>],
 } satisfies Meta<typeof Rail>;
 export default meta;

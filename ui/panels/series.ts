@@ -28,7 +28,7 @@ export function visibleSeries<T extends { name: string }>(items: T[], panel: Pan
 }
 
 export function hiddenSeriesNote(hidden: number, muted: string): Record<string, unknown>[] {
-  return hidden > 0 ? [{ type: "text", right: 8, bottom: 2, silent: true, style: { text: `${hidden} more series not shown`, fill: muted, fontSize: 11 } }] : [];
+  return hidden > 0 ? [{ type: "text", right: 8, bottom: 2, silent: true, style: { text: `${hidden} more series not shown`, fill: muted, fontSize: 12 } }] : [];
 }
 
 /** Match the legend's explicit icon, text and gap sizes, reserving each wrapped

@@ -9,7 +9,7 @@ const compactHeight = 20, fullHeight = 44;
 export const serviceMapLineHeight = 1.4;
 // Contain Geist Mono's ascent/descent as well as the two one-pixel borders.
 // A font-size-only floor lets text extend beyond the card's opaque background.
-const compactReadableScale = Math.ceil(typeScale.micro * serviceMapLineHeight + 2) / compactHeight;
+const compactReadableScale = Math.ceil(typeScale.small * serviceMapLineHeight + 2) / compactHeight;
 export type Point = { x: number; y: number };
 export type CardWidths = Record<string, {full:number;compact:number}>;
 export type Box = ServiceNode & Point & { width: number; height: number; entry: boolean; uncalled: boolean };
@@ -154,7 +154,7 @@ const protectedName=(name:string)=>Array.from(name).length>24?Array.from(name).s
 
 /** Identity owns its line. Compact cards keep all metrics in the tooltip/Data view. */
 export function serviceCardLabels(n: ServiceNode, { width, scale, compact=false, measureText }: { width: number; scale: number; compact?:boolean; measureText?: ChartSize["measureText"] }) {
-  const nameSize = Math.max(12, typeScale.micro / scale), metricSize = typeScale.micro / scale;
+  const nameSize = Math.max(12, typeScale.small / scale), metricSize = typeScale.small / scale;
   const measure = measureText ?? textMeasure;
   const available = Math.max(0, width - 12 / scale), glyph = measure(healthGlyph[n.health] ?? "○", `${nameSize}px ${fonts.display}`);
   const name = protectedName(n.id);
@@ -171,7 +171,7 @@ function serviceCardWidth(n: ServiceNode, compact:boolean, measureText?: ChartSi
   if (!slots) {slots=new Map();slotWidths.set(measure,slots);}
   // Reserve each name at the smallest scale that can contain micro text.
   // Full cards put metrics on a second line, so they never compete with names.
-  const nameSize=compact?typeScale.micro/compactReadableScale:12,font=`600 ${nameSize}px ${fonts.display}`;
+  const nameSize=compact?typeScale.small/compactReadableScale:12,font=`600 ${nameSize}px ${fonts.display}`;
   let glyph=slots.get(font);
   if(glyph===undefined){glyph=Math.max(...Object.values(healthGlyph).map(g=>measure(g,font)));slots.set(font,glyph);}
   const padding=compact?Math.ceil(16/compactReadableScale)+1:20;

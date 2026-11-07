@@ -21,7 +21,13 @@
     "jsx": "react-jsx",
     "types": [
       "vite/client"
-    ]
+    ],
+    "paths": {
+      "@labstack/ui": [
+        "./node_modules/@labstack/ui/dist/types/index.d.ts"
+      ]
+    },
+    "allowImportingTsExtensions": true
   },
   "include": [
     "src",

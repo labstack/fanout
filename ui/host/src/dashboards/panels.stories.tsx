@@ -4,7 +4,7 @@ import { expect, fn } from "storybook/test";
 import { panels, results, invalidResult } from "../catalog/fixtures";
 import { PanelCard } from "./panel-card";
 
-import { healthRules, loadingRules } from "../catalog/accessibility";
+import { loadingRules } from "../catalog/accessibility";
 
 const meta = {
   id: "components-dashboard-panels", title: "Components/Dashboard panels", component: PanelCard,
@@ -17,7 +17,7 @@ type Story = StoryObj<typeof meta>;
 const panel = (id: string): Story => { const p = panels.find(p => p.id === id)!; return { args: { panel: p, title: p.title, result: results.find(r => r.id === id) } }; };
 export const Requests: Story = panel("requests");
 export const Latency: Story = panel("latency");
-export const Health: Story = { ...panel("health"), parameters: { a11y: { config: { rules: healthRules } } }, play: async ({ canvas, userEvent, args }) => {
+export const Health: Story = { ...panel("health"), play: async ({ canvas, userEvent, args }) => {
   const checkout = await canvas.findByRole("button", { name: /checkout/ });
   await userEvent.click(checkout);
   await expect(args.onSelect).toHaveBeenCalledWith("checkout");

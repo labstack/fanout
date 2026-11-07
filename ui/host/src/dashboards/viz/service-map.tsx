@@ -56,9 +56,9 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
     const xs = [...graph.nodes.flatMap(node => [node.x, node.x + node.width]), ...points.map(point => point.x)];
     const ys = [...graph.nodes.flatMap(node => [node.y, node.y + node.height]), ...points.map(point => point.y)];
     if (graph.uncalledLabel) {
-      const labelWidth = measureText?.("No traced calls in this window", `${typeScale.micro}px ${fonts.display}`) ?? 29 * typeScale.micro * .6;
+      const labelWidth = measureText?.("No traced calls in this window", `${typeScale.small}px ${fonts.display}`) ?? 29 * typeScale.small * .6;
       xs.push((graph.contentWidth - labelWidth / textZoom) / 2, (graph.contentWidth + labelWidth / textZoom) / 2);
-      ys.push(graph.uncalledLabel.y, graph.uncalledLabel.y + (typeScale.micro * serviceMapLineHeight + 2) / textZoom);
+      ys.push(graph.uncalledLabel.y, graph.uncalledLabel.y + (typeScale.small * serviceMapLineHeight + 2) / textZoom);
     }
     return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
   }, [graph, measureText, textZoom]);
@@ -116,13 +116,13 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
         </g>
       </svg>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-        {graph.uncalledLabel && <span {...(import.meta.env.DEV ? { "data-service-uncalled-label": true } : {})} style={{ position: "absolute", left: "50%", top: graph.uncalledLabel.y, transform: "translateX(-50%)", color: theme.muted, background: theme.surface, fontSize: typeScale.micro / textZoom, lineHeight: serviceMapLineHeight, padding: `${1 / textZoom}px 0`, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
+        {graph.uncalledLabel && <span {...(import.meta.env.DEV ? { "data-service-uncalled-label": true } : {})} style={{ position: "absolute", left: "50%", top: graph.uncalledLabel.y, transform: "translateX(-50%)", color: theme.muted, background: theme.surface, fontSize: typeScale.small / textZoom, lineHeight: serviceMapLineHeight, padding: `${1 / textZoom}px 0`, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
         {graph.nodes.map(n => {
           const color = n.health === "unhealthy" ? theme.status.bad : n.health === "degraded" ? theme.status.warn : n.health === "healthy" ? theme.status.ok : theme.muted;
           const label = serviceCardLabels(n, { width: n.width / graph.scale, scale: graph.scale * textZoom, compact:graph.compact, measureText });
           return <button type="button" key={n.id} {...(import.meta.env.DEV ? { "data-service-node": n.id, "data-service-entry": n.entry } : {})} title={`${n.id} · ${n.health}\n${nodeMetrics(n)}`} onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(undefined)} onFocus={() => setFocused(n.id)} onBlur={() => setFocused(undefined)} onClick={() => select(n.id)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); suppressClick.current = false; select(n.id); } }}
             style={{ position: "absolute", left: n.x, top: n.y, width: n.width, height: n.height, display: "flex", flexDirection:"column", justifyContent:"center", gap: 3 / textZoom, boxSizing: "border-box", border: `${1 / textZoom}px solid ${n.health === "unhealthy" || n.health === "degraded" ? color : theme.border}`, borderRadius: 6, padding: `0 ${5 / textZoom}px`, background: theme.surface, color: theme.text, textAlign: "left", opacity: 1, outline: focused === n.id ? `2px solid ${ring}` : undefined, outlineOffset: -2, pointerEvents: "auto", cursor: "pointer", fontFamily: fonts.display }}>
-            <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{ display: "flex", alignItems: "center", gap: 4 / textZoom, width: "100%", minWidth: 0, fontSize: Math.max(typeScale.micro / textZoom, 12 * graph.scale), lineHeight: serviceMapLineHeight, whiteSpace: "nowrap" }}>
+            <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{ display: "flex", alignItems: "center", gap: 4 / textZoom, width: "100%", minWidth: 0, fontSize: Math.max(typeScale.small / textZoom, 12 * graph.scale), lineHeight: serviceMapLineHeight, whiteSpace: "nowrap" }}>
               <span aria-hidden="true" style={{ color, flex: "none" }}>{healthGlyph[n.health] ?? "○"}</span>
               <span {...(import.meta.env.DEV ? { "data-service-name": true } : {})} style={{ flex: "none", fontWeight: 600, whiteSpace: "nowrap" }}>{label.name}</span>
               <VisuallyHidden component="span">, {n.health}</VisuallyHidden>

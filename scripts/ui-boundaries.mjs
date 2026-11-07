@@ -27,7 +27,8 @@ function check(file, specifier, offset, source, bindings = []) {
   const destination = target ? workspace(target) : null;
   const outsideShared = target && (relative(ui, target).startsWith("..") ||
     destination !== "shared" || relative(ui, target).split(sep).includes("node_modules"));
-  if (owner === "shared" && (!local || outsideShared)) {
+  const sharedTheme = specifier === "@labstack/ui" && ["theme.ts", "panels/style.ts"].includes(relative(ui, file).split(sep).join("/"));
+  if (owner === "shared" && !sharedTheme && (!local || outsideShared)) {
     const line = source.slice(0, offset).split("\n").length;
     console.error(`${relative(root, file)}:${line}: forbidden ${owner} import ${JSON.stringify(specifier)}`);
     failures++;

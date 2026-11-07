@@ -3,9 +3,8 @@ import { Tooltip } from "@mantine/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Result, TraceDetail, TraceSpan } from "../../../../contracts";
 import { chartTheme, seriesSlot, statusHex } from "../../../../chart";
-import { series } from "../../../../tokens";
+import { series } from "../../../../theme";
 import { duration } from "../../../../format";
-import { filledTextOn } from "../../../../theme";
 import { EmptyState } from "./components";
 import { ListBullets } from "@phosphor-icons/react";
 import { Waterfall } from "./waterfall";
@@ -78,7 +77,7 @@ function FlameGraph({ spans, dark, onSpan, traceMs }: { spans: TraceSpan[]; dark
           const content = <Text component="span" size="xs" fw={700} truncate>{compact ? "" : span.operation}{width >= 12 ? ` · ${duration(span.duration_ms)}` : ""}</Text>;
           const geometry = { position: "absolute" as const, left: `${left}%`, top: lane * 36 + 6, width: `${Math.max(width, .35)}%`, height: 30, overflow: "hidden", minWidth: 3 };
           return <Tooltip key={span.span_id} label={`${span.service} · ${span.operation} · ${duration(span.duration_ms)}`} withArrow events={{ hover: true, focus: true, touch: false }}>
-            <Button variant="filled" color={color} c={filledTextOn(color)} aria-label={label} px={compact ? 2 : "xs"} size="compact-xs" onClick={() => onSpan(span)} style={geometry}>{content}</Button>
+            <Button variant="filled" color={color} aria-label={label} px={compact ? 2 : "xs"} size="compact-xs" onClick={() => onSpan(span)} style={geometry}>{content}</Button>
           </Tooltip>;
         })}
       </Box>

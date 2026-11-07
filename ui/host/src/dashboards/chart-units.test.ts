@@ -2,7 +2,8 @@ import { expect, it } from "vitest";
 import { analysisOption } from "../../../panels/analysis";
 import { barOption, chartThemeFor, gaugeOption, timeseriesOption } from "../../../panels/compile";
 import { typeScale, fonts } from "../../../tokens";
-import { relativeLuminance } from "../../../theme";
+
+import { relativeLuminance } from "@labstack/ui";
 import { withAnnotations } from "../../../panels/annotations";
 import { seriesSlot } from "../../../chart";
 import { formatBucket } from "../../../panels/units";

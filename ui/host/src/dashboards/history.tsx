@@ -99,7 +99,7 @@ function HistoryContent({ id, opened, currentVersion, currentSpec, selected, onS
       {list.data?.length === 0 && <Text c="dimmed">No versions available.</Text>}
       {!!list.data?.length && <ScrollArea h={200} type="auto">
         <Stack gap="xs" pr="sm" role="list" aria-label="Saved versions">
-          {list.data.map(item => <Paper key={item.version} role="listitem" withBorder p="xs" radius="sm" style={{ borderColor: version === item.version ? "var(--mantine-color-brand-filled)" : undefined }}>
+          {list.data.map(item => <Paper key={item.version} role="listitem" withBorder p="xs" radius="sm" style={{ borderColor: version === item.version ? "var(--mantine-color-iris-filled)" : undefined }}>
             <Group justify="space-between" gap="xs">
               <Button variant={version === item.version ? "light" : "subtle"} size="compact-sm" aria-pressed={version === item.version} onClick={() => onSelect(item.version)}>Version {item.version}</Button>
               {item.version === currentVersion && <Badge color="gray" variant="light" tt="none">Current</Badge>}

@@ -321,7 +321,12 @@ describe("DashboardPage", () => {
     },{interval:5,timeout:3000});
     const viewport = host.querySelector<HTMLElement>("[data-service-viewport]")!;
     expect(viewport).not.toBeNull();
-    for (const node of host.querySelectorAll<HTMLElement>("[data-service-node]")) expect(parseFloat(node.style.top)+parseFloat(node.style.height)).toBeLessThanOrEqual(180);
+    // The 12px text floor can require a taller pan canvas at this width.
+    const content = viewport.querySelector<HTMLElement>("[data-service-content]")!;
+    for (const node of host.querySelectorAll<HTMLElement>("[data-service-node]")) {
+      expect(parseFloat(node.style.top)+parseFloat(node.style.height)).toBeLessThanOrEqual(parseFloat(content.style.height));
+      expect(parseFloat(node.querySelector<HTMLElement>("[data-service-text]")!.style.fontSize)).toBeGreaterThanOrEqual(12);
+    }
     await act(async () => {
       viewport.dispatchEvent(new PointerEvent("pointerdown", {button:0,clientX:0,clientY:0,bubbles:true}));
       for (const y of [45,90]) viewport.dispatchEvent(new PointerEvent("pointermove", {clientX:30,clientY:y,bubbles:true}));

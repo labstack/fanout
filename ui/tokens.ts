@@ -1,56 +1,15 @@
-/* Fanout design tokens.
- *
- * The palette is the documentation site's, restated for the browser app so the
- * product and the pages that document it are recognizably the same thing. The
- * source of the values is site/src/styles/fanout.css; anything changed here has
- * to change there too.
- *
- * Surfaces are Ayu Dark. The slight blue cast is the point — a "corrected"
- * neutral grey would undo what makes these read as Ayu rather than as any dark
- * theme.
- *
- * The accent is violet, and that is the decision this file exists to hold.
- * Green, amber and red are load-bearing in an observability product: they mean
- * healthy, degraded and unhealthy, and they appear next to the thing being
- * described. An interactive color that borrows one of those hues puts "green
- * means healthy" in conflict with "green means clickable" on the same screen,
- * which is exactly what teal-as-primary did here. Violet carries no status, so
- * it is the hue free to mean "you can click this".
- *
- * Ramps run light to dark, which is Mantine's convention: index 0 is the
- * lightest tint and index 9 the darkest shade. The site's own tokens are marked
- * on the stop that carries them.
- */
-
-/** Ayu Dark surfaces. Mantine reads `dark` for every dark-scheme surface:
- *  0 text, 2 dimmed, 4 border, 5 hover, 6 elevated surface, 7 body. */
-export const ayu = [
-  "#fafafa", // --sl-color-white
-  "#e6e4de", // --sl-color-gray-1
-  "#bfbdb6", // --sl-color-gray-2
-  "#8b8e99", // --sl-color-gray-3
-  "#565b69", // --sl-color-gray-4
-  "#1d2433", // --sl-color-gray-5
-  "#131721", // --sl-color-gray-6
-  "#0b0e14", // --sl-color-black
-  "#080a10",
-  "#05070b",
-] as const;
-
-/** The interactive accent. Shade 7 is the site's light-scheme link color and
- *  shade 5 its dark-scheme one, which is why primaryShade names those two. */
+/** Console inputs shared by the host and embedded views. Status and interaction
+ * hues stay separate: iris never conveys health. The library owns component
+ * styling, contrast resolution and chart chrome in ./theme.ts. */
 export const brand = [
-  "#f3ecfd",
-  "#ece3fb", // --sl-color-accent-low (light)
-  "#dcc9f7",
-  "#d2a6ff", // --sl-color-accent-high (dark)
-  "#bf94ec",
-  "#a97ce0", // --sl-color-accent (dark)
-  "#9163d6",
-  "#7c4dcc", // --sl-color-accent (light)
-  "#5b32a3", // --sl-color-accent-high (light)
-  "#40236f",
+  "#F1F0FF", "#E4E2FF", "#CDC9FF", "#B5B0FF", "#A29CFF",
+  "#8F8CFF", "#756DEB", "#5A50D8", "#463DAE", "#332B81",
 ] as const;
+
+export const surfaces = {
+  dark: { ground: "#0B0B0C", raised: "#121214", inset: "#08080A", hover: "#1A1A1D", border: "#232327", borderSoft: "#1A1A1E", controlBorder: "#34343A", text: "#EDEDEF", muted: "#8E8E96" },
+  light: { ground: "#F5F5F6", raised: "#FFFFFF", inset: "#EFEFF1", hover: "#EDEDEF", border: "#E3E3E6", borderSoft: "#ECECEE", controlBorder: "#C8C8CE", text: "#111113", muted: "#63636B" },
+} as const;
 
 /** Healthy. Ayu's green, the hue the landing page's service table already uses. */
 export const ok = [
@@ -81,48 +40,17 @@ export const info = [
   "#33a7e6", "#1e86bd", "#146694", "#0d4a6d",
 ] as const;
 
-/** Chart chrome. Charts are drawn by ECharts into a canvas, so they cannot read
- *  CSS custom properties and need the resolved values. These are the same Ayu
- *  and light-scheme stops the rest of the app gets from Mantine. */
-export const chart = {
-  dark: { text: "#bfbdb6", muted: "#8b8e99", grid: "#1d2433", surface: "#131721", border: "#626777" },
-  light: { text: "#4a5058", muted: "#6b7280", grid: "#eceef0", surface: "#fcfcfc", border: "#8c939d" },
+/** Six fixed identity slots. Slot 2 is magenta, away from error red and warn
+ * amber. WCAG relative luminance checks every mark against ground and raised;
+ * failing light slots are darkened without changing hue. Palette tests use
+ * OKLab distance and Machado full-severity CVD simulation for distinctness;
+ * labels, shapes and dashes remain necessary when hues converge under CVD. */
+export const chartSeries = {
+  dark: ["#3987e5", "#ed83fb", "#199e70", "#9085e9", "#c98500", "#d55181"],
+  light: ["#2a78d6", "#9719a7", "#19a170", "#4a3aa7", "#bd8000", "#ce6d92"],
 } as const;
 
-/** Categorical identity comes from fixed-order slots, never a name hash or a
- *  cycling palette. Status keeps its own icons, shapes and labels, so a series
- *  hue is never read as health. These six slots are dataviz-validator approved. */
-export const series = {
-  dark: ["#3987e5", "#d95926", "#199e70", "#9085e9", "#c98500", "#d55181"],
-  light: ["#2a78d6", "#eb6834", "#1baf7a", "#4a3aa7", "#eda100", "#e87ba4"],
-} as const;
-
-/** The small-text sizes this product sets by hand, in pixels.
- *
- *  A survey of one screen found fifteen size-and-weight pairs, including a 9px
- *  badge and 10px chart labels — under the size at which this face stays
- *  legible, and on the axis labels a reader is expected to actually read.
- *  micro is the floor: nothing sets text smaller, and Mantine's own sub-11px
- *  badge sizes are raised to it in ./theme.ts.
- *
- *  This is not the whole type ramp. Headings and display sizes come from
- *  Mantine's own scale; these are the sizes a component or a chart sets
- *  directly, and charts draw into a canvas that cannot inherit CSS, so they
- *  read the same numbers from here. */
-export const typeScale = {
-  /** Axis ticks, chart legends, badges: the smallest text the product sets. */
-  micro: 11,
-  /** Dense table cells and secondary labels. */
-  small: 12,
-  /** Body, controls, most cells. */
-  body: 14,
-  /** Card titles and tile values. */
-  title: 16,
-  /** Section headings, and the step a page title steps down to. */
-  section: 22,
-  /** Page titles. */
-  page: 32,
-} as const;
+export const typeScale = { micro: 11, small: 12, body: 14, title: 16, section: 18, page: 24 } as const;
 
 export const fonts = {
   /** Mono is for data: code, ids, timestamps, numeric cells, and the chart

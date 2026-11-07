@@ -14,7 +14,8 @@ export type ChartTheme = { dark: boolean; text: string; muted: string; grid: str
 export function chartThemeFor(dark: boolean): ChartTheme {
   const base = chartTheme(dark);
   const status = statusHex(dark);
-  return { dark, text: base.text, muted: base.muted, grid: base.grid, surface: base.surface, border: base.border, status: { ok: status.ok, warn: status.warn, bad: status.bad }, font: fonts.display };
+  // Library border is decorative; pointers and node edges need 3:1 ink.
+  return { dark, text: base.text, muted: base.muted, grid: base.grid, surface: base.surface, border: base.muted, status: { ok: status.ok, warn: status.warn, bad: status.bad }, font: fonts.display };
 }
 
 type Option = Record<string, unknown>;
@@ -79,7 +80,7 @@ function chartSeries(frame: Frame, panel: Panel) {
 function baseOption(theme: ChartTheme, unit?: string): Option {
   return {
     animationDuration: 200,
-    textStyle: { fontFamily: theme.font, color: theme.muted, fontSize: 11 },
+    textStyle: { fontFamily: theme.font, color: theme.muted, fontSize: 12 },
     grid: { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
     tooltip: {
       trigger: "axis",
@@ -259,7 +260,7 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: C
       barMaxWidth: split && s.name === "Before deploy" ? 7 : 14,
       barGap: "20%",
       itemStyle: { ...markStyle(split ? s.name === "Before deploy" ? theme.muted : seriesSlot(0,theme.dark) : colorFor(s.name, i, theme),theme), borderRadius: [0, 4, 4, 0] },
-      label: { show: split ? s.name === "Since deploy" : !multi || i === 0, position: "right", color: theme.text, fontFamily: theme.font, fontSize: 11, formatter: ({ value }: { value: number }) => formatAxis(s.unit ?? panel.unit)(value) },
+      label: { show: split ? s.name === "Since deploy" : !multi || i === 0, position: "right", color: theme.text, fontFamily: theme.font, fontSize: 12, formatter: ({ value }: { value: number }) => formatAxis(s.unit ?? panel.unit)(value) },
     })),
     graphic: hiddenSeriesNote(hidden, theme.muted),
   };
@@ -286,7 +287,7 @@ export function gaugeOption(panel: Panel, value: number | null, theme: ChartThem
     animation: false, textStyle: { fontFamily: theme.font, color: theme.text }, series: [],
     graphic: [
       { id: "gauge-value", type: "text", left: 4, top, style: { text, fill: theme.text, fontSize: 28, fontWeight: 600, fontFamily: theme.font } },
-      ...(cue ? [{ type: "text", right: 4, top: top + (stacked ? 30 : 10), style: { text: cue, fill: theme.text, fontSize: 11, fontFamily: theme.font } }] : []),
+      ...(cue ? [{ type: "text", right: 4, top: top + (stacked ? 30 : 10), style: { text: cue, fill: theme.text, fontSize: 12, fontFamily: theme.font } }] : []),
       { id: "gauge-track", type: "rect", shape: { x: 4, y: trackY, width: trackWidth, height: 10, r: 5 }, style: { fill: theme.grid } },
       ...bands.map(([end, color],i) => { const x = start; start = end; return { type: "rect", shape: { x: 4 + x * trackWidth, y: trackY, width: (end - x) * trackWidth, height: 10, r: [i===0?5:0,i===bands.length-1?5:0,i===bands.length-1?5:0,i===0?5:0] }, style: { fill: mute(color) } }; }),
       { id: "gauge-fill", type: "rect", shape: { x: 4, y: trackY, width: fraction * trackWidth, height: 10, r: 5 }, style: { fill: status ? theme.status[status] : seriesSlot(0, theme.dark) } },

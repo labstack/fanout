@@ -1,7 +1,7 @@
-/* Chart and status helpers shared by the browser host and the embedded views.
- * Pure functions over ./tokens only: this directory has no node_modules, so
- * nothing here may import a package. */
-import { bad, chart, info, ok, series, warn } from "./tokens";
+/* Chart and status helpers shared by the browser host and embedded views.
+ * Canvas and SVG use the same resolved library chart scheme as Mantine. */
+import { bad, info, ok, warn } from "./tokens";
+import { chart, series } from "./theme";
 
 /* "unknown" is neutral, not alarming: an empty window has nothing to grade, and
    painting it red claims a failure as confidently as green claimed health. */

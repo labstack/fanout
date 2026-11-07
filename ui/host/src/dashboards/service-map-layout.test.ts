@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { analysisOption } from "../../../panels/analysis";
 import { chartThemeFor } from "../../../panels/compile";
-import { relativeLuminance } from "../../../theme";
+import { relativeLuminance } from "@labstack/ui";
 import { seriesSlot } from "../../../chart";
 
 it.each([false, true])("heat counts use distinct monotonic quantile colours and omit zero (%s)", dark => {

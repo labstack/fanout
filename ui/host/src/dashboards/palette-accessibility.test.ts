@@ -1,5 +1,7 @@
 import { expect, it } from "vitest";
-import { chart, series } from "../../../tokens";
+import { contrastRatio } from "@labstack/ui";
+import { surfaces } from "../../../tokens";
+import { chart, series } from "../../../theme";
 
 type Triple = [number, number, number];
 type Mode = "normal" | "protan" | "deutan" | "tritan";
@@ -126,4 +128,18 @@ it("reports transformed surface contrast and rejects malformed or translucent he
   expect(measured.surface_contrast).toHaveLength(6);
   expect(measured.surface_contrast[0].normal).toBeCloseTo(21);
   expect(measurePalette(Array(6).fill(chart.dark.surface), chart.dark.surface).surface_contrast[0].deutan).toBe(1);
+});
+
+it.each(["light", "dark"] as const)("checks all fifteen slot pairs and both %s chart surfaces", scheme => {
+  const colors = series[scheme];
+  const distances: number[] = [];
+  for (let a = 0; a < colors.length; a++) {
+    for (const surface of [surfaces[scheme].ground, surfaces[scheme].raised]) expect(contrastRatio(colors[a], surface)).toBeGreaterThanOrEqual(3);
+    for (let b = a + 1; b < colors.length; b++) distances.push(distance(lab(decode(colors[a])), lab(decode(colors[b]))));
+  }
+  expect(distances).toHaveLength(15);
+  // The retained dark blue/violet pair is the closest, at 9.76. Adjacent
+  // slots retain the stricter 15 normal / 6 CVD thresholds above.
+  expect(Math.min(...distances)).toBeGreaterThanOrEqual(9);
+  console.log(`${scheme} minimum all-pairs OKLab distance: ${Math.min(...distances).toFixed(2)}`);
 });

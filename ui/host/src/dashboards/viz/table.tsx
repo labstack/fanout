@@ -1,3 +1,4 @@
+import { seriesSlot } from "../../../../chart";
 import { Anchor, Badge, Box, Button, Group, Table, Text, UnstyledButton, useComputedColorScheme } from "@mantine/core";
 import { CaretDown, CaretUp } from "@phosphor-icons/react";
 import { createSortedRowModel, rowSortingFeature, sortFn_alphanumeric, sortFn_basic, tableFeatures, useTable, type ColumnDef, type SortingState } from "@tanstack/react-table";
@@ -81,7 +82,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
         const status = index === firstMeasure ? statusFor(value, panel.thresholds, panel.better ?? result.better) : null;
         return <Box style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
           <Text fz={12} ff="monospace" style={{color:status === "warn" || status === "bad" ? statusInk(status,dark) : undefined}}>{formatValue(unit, value)}</Text>
-          {index === firstMeasure && maxima[index] > 0 && <Box w={56} h={6} bg="var(--mantine-color-default-border)" style={{ borderRadius: 3, overflow: "hidden", flex: "none" }}><Box h="100%" w={`${(value / maxima[index]) * 100}%`} bg="var(--mantine-primary-color-filled)" /></Box>}
+          {index === firstMeasure && maxima[index] > 0 && <Box w={56} h={6} bg="var(--mantine-color-default-border)" style={{ borderRadius: 3, overflow: "hidden", flex: "none" }}><Box h="100%" w={`${(value / maxima[index]) * 100}%`} bg={seriesSlot(0, dark)} /></Box>}
         </Box>;
       }
       if (column.type === "time" && typeof value === "number") return <Text size="sm" ff="monospace" style={{ whiteSpace: "nowrap" }} title={new Date(value).toISOString()}>{formatTimestamp(value)}</Text>;
@@ -171,7 +172,7 @@ function FormattedCell({ format, value, max, panel, better, trend, traceHref, tr
     case "unit": return <Text size="sm" ff="monospace">{display.text}</Text>;
     case "bar": return <Box style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:8}}>
       <Text fz={12} ff="monospace" style={{whiteSpace:"nowrap"}}>{typeof value==="number" ? formatLabel(format.unit,value) : display.text}</Text>
-      <Box w={64} h={6} bg="var(--mantine-color-default-border)" style={{borderRadius:3,overflow:"hidden",flex:"none"}}><Box h={6} w={`${(display.fraction ?? 0) * 100}%`} bg="var(--mantine-primary-color-filled)" /></Box>
+      <Box w={64} h={6} bg="var(--mantine-color-default-border)" style={{borderRadius:3,overflow:"hidden",flex:"none"}}><Box h={6} w={`${(display.fraction ?? 0) * 100}%`} bg={seriesSlot(0, dark)} /></Box>
     </Box>;
     case "status": {
       const bad = display.status === "bad" || display.text === "bad" || display.text === "unhealthy" || display.text.includes("ERROR");

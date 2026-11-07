@@ -1,95 +1,60 @@
+import { DEFAULT_THEME, defaultCssVariablesResolver, mergeMantineTheme } from "@mantine/core";
+import { contrastRatio } from "@labstack/ui";
 import { describe, expect, it } from "vitest";
-import { fanoutCssVariables, fanoutThemeConfig, relativeLuminance } from "../../theme";
-import { bad, brand, chart, fonts, info, ok, typeScale, warn } from "../../tokens";
-import { fanoutTheme } from "./theme";
+import { fanoutCssVariables, fanoutTheme, chart } from "../../theme";
+import { brand, fonts, surfaces, typeScale } from "../../tokens";
 
-/* WCAG contrast between two hex colours, so a claim about a filled control is
-   a number this suite computes rather than a variable name it recognises. */
-function contrast(foreground: string, background: string) {
-  const [light, dark] = [relativeLuminance(foreground), relativeLuminance(background)].sort((a, b) => b - a);
-  return (light + 0.05) / (dark + 0.05);
+const theme = mergeMantineTheme(DEFAULT_THEME, fanoutTheme);
+function variables(scheme: "light" | "dark") {
+  const base = defaultCssVariablesResolver(theme), custom = fanoutCssVariables(theme);
+  const values: Record<string, string> = { ...base.variables, ...base[scheme], ...custom.variables, ...custom[scheme] };
+  const resolve = (value: string): string => value.startsWith("var(") ? resolve(values[value.slice(4, -1)]) : value;
+  return (name: string) => resolve(values[name]);
 }
 
-const black = "#000000";
-const white = "#ffffff";
-
-function filledText(color: string, scheme: "light" | "dark") {
-  const variables = scheme === "light" ? fanoutCssVariables().light : fanoutCssVariables().dark;
-  const value = (variables as Record<string, string>)[`--fanout-color-${color}-contrast`];
-  return value === "var(--mantine-color-black)" ? black : white;
-}
-
-describe("typeface", () => {
-  it("sets one grotesk for UI and headings and mono for data", () => {
-    expect(fonts.body).toMatch(/^"Geist Variable"/);
-    expect(fonts.display).toMatch(/^"Geist Mono Variable"/);
-    expect(fanoutThemeConfig.fontFamily).toBe(fonts.body);
-    expect(fanoutThemeConfig.headings.fontFamily).toBe(fonts.body);
-    expect(fanoutThemeConfig.headings.fontWeight).toBe("600");
-    expect(fanoutThemeConfig.fontFamilyMonospace).toBe(fonts.display);
-  });
+it("uses Geist for UI and headings and Geist Mono for data", () => {
+  expect(theme.fontFamily).toBe(fonts.body);
+  expect(theme.headings.fontFamily).toBe(fonts.body);
+  expect(theme.headings.fontWeight).toBe("600");
+  expect(theme.fontFamilyMonospace).toBe(fonts.display);
 });
-
-describe("light scheme", () => {
-  it("reads dimmed text at the chart palette's muted grey rather than Mantine's", () => {
-    expect(fanoutCssVariables().light["--mantine-color-dimmed"]).toBe(chart.light.muted);
-  });
+it("sets the Console scale, soft radii and compact controls", () => {
+  expect(typeScale).toEqual({ micro: 11, small: 12, body: 14, title: 16, section: 18, page: 24 });
+  expect(theme.headings.sizes.h1.fontSize).toBe("1.5rem");
+  expect(theme.headings.sizes.h2.fontSize).toBe("1.125rem");
+  expect(theme.radius).toMatchObject({ sm: "4px", md: "8px", lg: "12px" });
+  expect(theme.components.Button.defaultProps).toMatchObject({ size: "sm", radius: 4 });
 });
-
-describe("filled surfaces", () => {
-  // Mantine decides filled text from the light-scheme shade whatever scheme is
-  // rendering, which put white on the dark scheme's #a97ce0 at 3.16:1 and on
-  // #f26d78 at 2.90:1 — under WCAG AA, on the button that removes a panel and
-  // on the most-used control in the product.
-  const ramps: Record<string, readonly string[]> = { brand, ok, warn, bad, info };
-
-  it("clears AA on every semantic filled surface, in both schemes", () => {
-    for (const [color, ramp] of Object.entries(ramps)) {
-      for (const scheme of ["light", "dark"] as const) {
-        const background = ramp[scheme === "dark" ? 5 : 7];
-        const ratio = contrast(filledText(color, scheme), background);
-        expect(`${color} ${scheme} ${ratio.toFixed(2)}`).toBe(`${color} ${scheme} ${Math.max(ratio, 4.5).toFixed(2)}`);
+describe.each(["light", "dark"] as const)("%s scheme", scheme => {
+  const value = variables(scheme);
+  it("keeps the specified surfaces and chart chrome in sync", () => {
+    expect(value("--mantine-color-body")).toBe(surfaces[scheme].ground);
+    expect(value("--mantine-color-default")).toBe(chart[scheme].surface);
+    expect(value("--mantine-color-dimmed")).toBe(surfaces[scheme].muted);
+    expect(value("--labstack-control-border")).toBe(surfaces[scheme].controlBorder);
+  });
+  it("reads iris text at 4.5:1 and selected edges at 3:1", () => {
+    const accent = brand[scheme === "dark" ? 5 : 7];
+    for (const background of Object.values(surfaces[scheme]).slice(0, 4)) {
+      expect(contrastRatio(accent, background)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(accent, background)).toBeGreaterThanOrEqual(3);
+    }
+    expect(value("--mantine-color-anchor")).toBe(accent);
+    expect(value("--mantine-primary-color-filled")).toBe(accent);
+    expect(contrastRatio(surfaces[scheme].muted, value("--mantine-color-iris-light"))).toBeGreaterThanOrEqual(4.5);
+  });
+  it("reads ink and every semantic filled surface at AA at rest and hover", () => {
+    for (const color of ["brand", "ok", "warn", "bad", "info"]) {
+      const text = value(`--labstack-color-${color}-contrast`);
+      for (const suffix of ["filled", "filled-hover"]) expect(contrastRatio(text, value(`--mantine-color-${color}-${suffix}`))).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(value("--mantine-color-brand-filled")).toBe(surfaces[scheme].text);
+  });
+  it("reads Degraded and all status labels at AA", () => {
+    for (const color of ["ok", "warn", "bad", "info"]) {
+      for (const background of [surfaces[scheme].ground, surfaces[scheme].raised, value(`--mantine-color-${color}-light`), value(`--mantine-color-${color}-light-hover`)]) {
+        expect(contrastRatio(value(`--mantine-color-${color}-text`), background)).toBeGreaterThanOrEqual(4.5);
       }
     }
   });
-
-  it("routes a semantic filled surface to its own per-scheme variable", () => {
-    expect(fanoutTheme.variantColorResolver!({ color: "brand", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-brand-contrast)");
-    expect(fanoutTheme.variantColorResolver!({ color: "bad", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-bad-contrast)");
-    // A component that names no colour is asking for the accent.
-    expect(fanoutTheme.variantColorResolver!({ variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-brand-contrast)");
-    // A shade named explicitly is still the same hue and still needs the same
-    // text colour.
-    expect(fanoutTheme.variantColorResolver!({ color: "ok", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-ok-contrast)");
-  });
-
-  it("leaves other colours, other variants and an opted-out component to Mantine", () => {
-    const gray = fanoutTheme.variantColorResolver!({ color: "gray", variant: "filled", theme: fanoutTheme } as never);
-    expect(gray.color).toBe("var(--mantine-color-white)");
-
-    const light = fanoutTheme.variantColorResolver!({ color: "brand", variant: "light", theme: fanoutTheme } as never);
-    expect(light.color).toBe("var(--mantine-color-brand-light-color)");
-
-    // autoContrast={false} is a component saying it wants Mantine's white.
-    const optedOut = fanoutTheme.variantColorResolver!({ color: "brand", variant: "filled", autoContrast: false, theme: fanoutTheme } as never);
-    expect(optedOut.color).toBe("var(--mantine-color-white)");
-  });
-
-  it("points the active tab and page control at the accent's contrast, and only the accent's", () => {
-    const tabs = fanoutThemeConfig.components.Tabs.styles(fanoutTheme, {});
-    expect(tabs.tab["--tabs-text-color"]).toBe("var(--fanout-color-brand-contrast)");
-    expect(fanoutThemeConfig.components.Tabs.styles(fanoutTheme, { color: "warn" }).tab).toEqual({});
-
-    const pagination = fanoutThemeConfig.components.Pagination.styles(fanoutTheme, {});
-    expect(pagination.control["--pagination-active-color"]).toBe("var(--fanout-color-brand-contrast)");
-  });
-});
-
-describe("type scale", () => {
-  // A survey of one screen found a 9px badge and 10px axis labels.
-  it("sets a floor no smaller than 11px", () => {
-    expect(Math.min(...Object.values(typeScale))).toBe(11);
-    expect(new Set(Object.values(typeScale)).size).toBe(Object.values(typeScale).length);
-  });
-
 });

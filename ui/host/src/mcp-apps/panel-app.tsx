@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Alert, Center, Loader, MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fanoutTheme } from "../theme";
-import { fanoutCssVariables } from "../../../theme";
+import { fanoutTheme, fanoutCssVariables } from "../../../theme";
 import { FragmentView } from "../dashboards/fragment-view";
 import { appTransport } from "./transport";
 import { usePanelApp } from "./use-panel-app";
@@ -15,7 +14,7 @@ export function PanelApp() {
     if (app && wrapper.current) return observeContentSize(wrapper.current, size => app.sendSizeChanged(size));
   }, [app]);
   const transport = useMemo(() => app ? appTransport(app) : undefined, [app]);
-  const dark = host?.theme === "dark";
+  const dark = host?.theme !== "light";
   const failure = toolError ?? (error ? "This view could not be loaded. Please try again." : null);
   return <MantineProvider theme={fanoutTheme} cssVariablesResolver={fanoutCssVariables} forceColorScheme={dark ? "dark" : "light"}>
     <QueryClientProvider client={queryClient}><div ref={wrapper} role="main" aria-label="Fanout analysis view" data-app-content>

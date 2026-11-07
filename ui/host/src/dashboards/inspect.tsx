@@ -1,7 +1,8 @@
 import { Code, Table, Text } from "@mantine/core";
 import type { Panel, PanelResult } from "../../../panels/types";
 import { formatValue } from "../../../panels/units";
-import { brand, info, ok, chart, fonts } from "../../../tokens";
+import { info, ok, fonts } from "../../../tokens";
+import { chart } from "../../../theme";
 
 export function PanelData({ panel, result }: { panel: Panel; result?: PanelResult }) {
   const frame = result?.frame;
@@ -28,7 +29,7 @@ export function PanelSpec({ panel, dark }: { panel: Panel; dark: boolean }) {
   return <pre data-panel-spec style={{ margin: 0, fontFamily: fonts.display, fontSize: 12, color: chart[dark ? "dark" : "light"].text }}>{parts.map((part, i) => {
     const key = part.startsWith('"') && /^\s*:/.test(parts[i + 1] ?? "");
     const kind = key ? "key" : part.startsWith('"') ? "string" : /^(true|false|null)$/.test(part) ? "literal" : /^-?\d/.test(part) ? "number" : "punctuation";
-    const color = kind === "key" ? brand[dark ? 4 : 7] : kind === "string" ? ok[dark ? 4 : 8] : kind === "number" || kind === "literal" ? info[dark ? 4 : 8] : undefined;
+    const color = kind === "key" ? chart[dark ? "dark" : "light"].text : kind === "string" ? ok[dark ? 4 : 8] : kind === "number" || kind === "literal" ? info[dark ? 4 : 8] : undefined;
     // Punctuation takes the block's own colour, so it stays plain text: a span
     // around a multi-line run of braces leaves contrast checks no line box to measure.
     if (kind === "punctuation") return part;

@@ -1,4 +1,4 @@
-import { nestedMainRules, healthAndRailRules } from "./accessibility";
+import { nestedMainRules } from "./accessibility";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect } from "storybook/test";
 import { Product, pageParameters } from "./product";
@@ -6,7 +6,7 @@ import { dashboardInRail, dashboardRows, sendQuestion, threadInRail } from "./in
 import { dashboardQuestion } from "./fixtures";
 const meta = {
   id: "flows-ask-chat-for-a-dashboard", title: "Flows/Ask chat for a dashboard", component: Product,
-  parameters: { ...pageParameters, a11y: { config: { rules: [...nestedMainRules, ...healthAndRailRules] } }, scenario: { empty: true, run: "dashboard" }, docs: { ...pageParameters.docs, description: { component: "Create a saved commerce dashboard from a streamed tool receipt, then open it through the real local router. Primary recording size: 1280 × 800." } } },
+  parameters: { ...pageParameters, a11y: { config: { rules: [...nestedMainRules] } }, scenario: { empty: true, run: "dashboard" }, docs: { ...pageParameters.docs, description: { component: "Create a saved commerce dashboard from a streamed tool receipt, then open it through the real local router. Primary recording size: 1280 × 800." } } },
 } satisfies Meta<typeof Product>;
 export default meta;
 type Story = StoryObj<typeof meta>;

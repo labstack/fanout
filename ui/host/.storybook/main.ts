@@ -1,3 +1,4 @@
+import { themeAlias } from "../build/theme.ts";
 import type { StorybookConfig } from "@storybook/react-vite";
 
 // Local review only, never published.
@@ -10,6 +11,7 @@ const config: StorybookConfig = {
   addons: ["@storybook/addon-docs", "@storybook/addon-a11y", "@storybook/addon-vitest"],
   viteFinal: vite => ({
     ...vite,
+    resolve: { ...vite.resolve, alias: [...themeAlias, ...(Array.isArray(vite.resolve?.alias) ? vite.resolve.alias : Object.entries(vite.resolve?.alias ?? {}).map(([find, replacement]) => ({ find, replacement })))] },
     base: "/",
     plugins: (vite.plugins ?? []).filter(plugin => !plugin || typeof plugin !== "object" || !("name" in plugin) || !/tanstack|exclude-product-catalog/.test(String(plugin.name))),
     server: { ...vite.server, proxy: {}, fs: { allow: ["../.."] } },

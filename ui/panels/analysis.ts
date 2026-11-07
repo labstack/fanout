@@ -179,10 +179,10 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, width: 140, overflow: "truncate", ...(heat ? { interval: (size.height-60)/Math.max(1,names.length)<12 ? 1 : 0, hideOverlap: true } : { interval: 0 }) } },
       visualMap: heat ? {
         type: "continuous", show: true, orient: "horizontal", right: 16, bottom: 0, padding: 0,
-        itemWidth: 8, itemHeight: 96, text: [capLabel, counts.length ? "1" : "0"], textGap: 10, textStyle: { color: theme.muted,fontFamily:theme.font,fontSize:11 },
+        itemWidth: 8, itemHeight: 96, text: [capLabel, counts.length ? "1" : "0"], textGap: 10, textStyle: { color: theme.muted,fontFamily:theme.font,fontSize:12 },
         min: 0, max: 6, dimension: 5, inRange: { color: ramp },
       } : undefined,
-      graphic: !heat && hiddenRows.length ? [{type:"text",right:0,bottom:0,style:{text:`+${hiddenRows.length} rows`,fill:theme.muted,fontSize:11,fontFamily:theme.font},tooltip:{formatter:()=>hiddenRows.map(escapeHTML).join("<br/>")}}] : [],
+      graphic: !heat && hiddenRows.length ? [{type:"text",right:0,bottom:0,style:{text:`+${hiddenRows.length} rows`,fill:theme.muted,fontSize:12,fontFamily:theme.font},tooltip:{formatter:()=>hiddenRows.map(escapeHTML).join("<br/>")}}] : [],
       series: [{
         type: "custom", clip: true, name: panel.title, interactive: true, keyboard_unit: heat ? "count" : panel.unit ?? measures[0]?.unit, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
         renderItem: (_params: unknown, api: { value: (index: number) => number; coord: (value: number[]) => number[]; size: (value: number[]) => number[]; visual: (key: "color") => string }) => {

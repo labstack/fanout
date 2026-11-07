@@ -70,6 +70,6 @@ export function Sparkline({ points, area = false, dark = false, height = 32 }: {
   });
   return <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" width="100%" height={h} role="img" aria-label="Value over this panel's time range">
     {area && runs.filter(run => run.end > run.start).map(run => <path key={run.start} data-sparkline-area d={`${run.path}L${x(run.end)},${h}L${x(run.start)},${h}Z`} fill={seriesSlot(0, dark)} opacity={0.18} />)}
-    <path data-sparkline-line d={line} fill="none" stroke={area ? seriesSlot(0, dark) : "var(--mantine-primary-color-filled)"} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+    <path data-sparkline-line d={line} fill="none" stroke={seriesSlot(0, dark)} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
   </svg>;
 }

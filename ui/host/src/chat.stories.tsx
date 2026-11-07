@@ -1,4 +1,3 @@
-import { railRules } from "./catalog/accessibility";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect } from "storybook/test";
 import { Product, pageParameters } from "./catalog/product";
@@ -7,7 +6,7 @@ import { question } from "./catalog/fixtures";
 
 const meta = {
   id: "pages-chat", title: "Pages/Chat", component: Product,
-  parameters: { ...pageParameters, a11y: { config: { rules: railRules } }, docs: { ...pageParameters.docs, description: { component: "The shipping chat screen and navigation, with fictional API and streamed telemetry responses." } } },
+  parameters: { ...pageParameters, docs: { ...pageParameters.docs, description: { component: "The shipping chat screen and navigation, with fictional API and streamed telemetry responses." } } },
 } satisfies Meta<typeof Product>;
 export default meta;
 type Story = StoryObj<typeof meta>;

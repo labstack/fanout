@@ -113,7 +113,7 @@ function AccountMenu({ onError }: { onError: (message: string) => void }) {
   return <Menu position="bottom-end" withinPortal shadow="md">
     <Menu.Target>
       <ActionIcon variant="subtle" color="gray" size="lg" radius="xl" aria-label={`${initial} account menu`}>
-        <Avatar size={26} radius="xl" color="brand">{initial}</Avatar>
+        <Avatar size={26} radius="xl" color="gray">{initial}</Avatar>
       </ActionIcon>
     </Menu.Target>
     <Menu.Dropdown>

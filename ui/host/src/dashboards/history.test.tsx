@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ApiError, type DashboardRecord, type VersionRecord } from "./api";
 import { HistoryDrawer } from "./history";
-import { fanoutTheme } from "../theme";
+import { fanoutTheme } from "../../../theme";
 import { panelResultsKey, variableOptionsKey } from "./query-keys";
 
 const api = vi.hoisted(() => ({ listVersions: vi.fn(), getVersion: vi.fn(), restoreVersion: vi.fn() }));

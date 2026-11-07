@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { chartThemeFor, barOption, gaugeOption, timeseriesOption } from "../../../panels/compile";
 import { analysisOption } from "../../../panels/analysis";
-import { series } from "../../../tokens";
+import { series } from "../../../theme";
 import type { Frame, Panel, PanelResult } from "../../../panels/types";
 
 const names = Array.from({ length: 8 }, (_, i) => `svc${i}`);
@@ -15,8 +15,8 @@ type Chart = { series: { name: string; itemStyle: { color: string }; data: unkno
 
 describe("validated categorical series", () => {
   it("pins the validator-approved palette in exact slot order", () => {
-    expect(series.dark).toEqual(["#3987e5", "#d95926", "#199e70", "#9085e9", "#c98500", "#d55181"]);
-    expect(series.light).toEqual(["#2a78d6", "#eb6834", "#1baf7a", "#4a3aa7", "#eda100", "#e87ba4"]);
+    expect(series.dark).toEqual(["#3987e5", "#ed83fb", "#199e70", "#9085e9", "#c98500", "#d55181"]);
+    expect(series.light).toEqual(["#2a78d6", "#9719a7", "#19a170", "#4a3aa7", "#bd8000", "#ce6d92"]);
   });
   it.each([false, true])("assigns six distinct slots in chart order (dark=%s)", dark => {
     const theme = chartThemeFor(dark);

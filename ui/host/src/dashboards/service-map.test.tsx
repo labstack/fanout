@@ -8,8 +8,9 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serviceMapModel } from "../../../panels/rollups";
 import { chartThemeFor } from "../../../panels/compile";
-import { relativeLuminance } from "../../../theme";
+import { relativeLuminance } from "@labstack/ui";
 import { typeScale } from "../../../tokens";
+
 import { ServiceMapViz } from "./viz/service-map";
 import { fitServiceMap, layoutServiceMapRaw, serviceCardLabels, serviceMapStructure } from "./viz/service-map-layout";
 import { PanelCard } from "./panel-card";
@@ -261,7 +262,6 @@ it("reveals floor-sized labels that fit their boxes when zooming a dense fitted 
   expect(parseFloat(text.style.fontSize)*zoom).toBeGreaterThanOrEqual(11);
   expect(parseFloat(text.style.fontSize)*zoom+2).toBeLessThanOrEqual(parseFloat(card.style.height)*zoom);
 });
-
 
 it("accepts worker geometry, retains it during topology changes and ignores cancelled results",async()=>{
   const workers: {onmessage?: (event:{data:ReturnType<typeof layoutServiceMapRaw>})=>void;postMessage:ReturnType<typeof vi.fn>;terminate:ReturnType<typeof vi.fn>}[]=[];

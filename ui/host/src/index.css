@@ -12,11 +12,11 @@
    defined until MantineProvider runs — so the function would resolve to its
    light argument every time. */
 html {
-  background: #fcfcfc;
+  background: #F5F5F6;
 }
 
 html[data-mantine-color-scheme="dark"] {
-  background: #0b0e14;
+  background: #0B0B0C;
 }
 
 /* Headings share the body grotesk; a touch of negative tracking at display
@@ -43,8 +43,8 @@ body,
 }
 
 .chat-composer-field:focus-within {
-  border-color: var(--mantine-primary-color-filled);
-  box-shadow: 0 0 0 2px var(--mantine-primary-color-light);
+  border-color: var(--mantine-color-iris-filled);
+  box-shadow: 0 0 0 2px var(--mantine-color-iris-light);
 }
 
 .rail-row {
@@ -57,7 +57,7 @@ body,
 }
 
 .rail-row[data-active] {
-  background: var(--mantine-primary-color-light);
+  background: var(--mantine-color-iris-light);
 }
 
 .rail-row-actions {
@@ -190,7 +190,7 @@ body,
 .chat-app-chevron { display: flex; align-items: center; flex: none; }
 .chat-app-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-app-toggle:hover { background: var(--mantine-color-default-hover); }
-.chat-app-toggle:focus-visible { outline: 2px solid var(--mantine-primary-color-filled); outline-offset: -2px; }
+.chat-app-toggle:focus-visible { outline: 2px solid var(--mantine-color-iris-filled); outline-offset: -2px; }
 
 /* Keyboard users can jump past the header and navigation; the link shows
    only while focused. */

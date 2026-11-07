@@ -7,7 +7,7 @@ import { gaugeOption, chartThemeFor, timeseriesOption } from "../../../panels/co
 import { analysisOption } from "../../../panels/analysis";
 import { heatRamp } from "../../../panels/heat-scale";
 import { withAnnotations } from "../../../panels/annotations";
-import { relativeLuminance } from "../../../theme";
+import { relativeLuminance } from "@labstack/ui";
 import { PanelCard } from "./panel-card";
 import { PanelFullscreen } from "./panel-fullscreen";
 import type { PanelDisplayResult } from "./panel-result";

@@ -55,7 +55,7 @@ export function SpanDetails({ traceId, span, load, onClose }: { traceId: string;
         const message = text(event.attributes["exception.message"]), stack = text(event.attributes["exception.stacktrace"]);
         return <Alert key={index} color="bad" p="xs" title={text(event.attributes["exception.type"]) ?? "Exception"}>
           {message && <Text size="sm" style={{ overflowWrap: "anywhere" }}>{message}</Text>}
-          {stack && <Code block mt={4} fz={11} style={{ maxHeight: 220, overflow: "auto" }}>{stack}</Code>}
+          {stack && <Code block mt={4} fz={12} style={{ maxHeight: 220, overflow: "auto" }}>{stack}</Code>}
         </Alert>;
       })}
       {extras.data && <>
