@@ -1,4 +1,4 @@
-import { StatusBadge } from "@labstack/ui";
+import { DataState, StatusBadge } from "@labstack/ui";
 import { Group } from "@mantine/core";
 import { Text, VisuallyHidden } from "@mantine/core";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -6,7 +6,7 @@ import { chartThemeFor } from "../../../../panels/compile";
 import { analysisSummary } from "../../../../panels/analysis";
 import { healthGlyph, serviceMapModel } from "../../../../panels/rollups";
 import { formatValue } from "../../../../panels/units";
-import { brand, fonts, typeScale } from "../../../../tokens";
+import { accent, fonts, typeScale } from "../../../../tokens";
 import type { AnalysisProps } from "./analysis-chart";
 import ServiceMapWorker from "./service-map.worker?worker&inline";
 import { fitServiceMap, layoutServiceMapRaw, nodeMetrics, serviceCardLabels, serviceMapLineHeight, serviceMapStructure, type MapLayout } from "./service-map-layout";
@@ -48,7 +48,7 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
     return () => { active = false; worker.terminate(); };
   }, [structure.key, measured]);
   const graph = useMemo(() => cached ? fitServiceMap(cached.layout, cached.key === structure.key ? model : cached.model, size) : { nodes: [], edges: [], scale: 1, compact:true, contentWidth: size.width, contentHeight: size.height, uncalledLabel: undefined,initialView:{x:0,y:0} }, [cached, model, size, structure.key]);
-  const theme = chartThemeFor(dark), ring = brand[dark ? 4 : 7], id = useId().replaceAll(":", "");
+  const theme = chartThemeFor(dark), ring = accent[dark ? 4 : 7], id = useId().replaceAll(":", "");
   const active = hover ?? focused;
   const maxZoom = Math.max(12, 1 / graph.scale);
   const maxRate = Math.max(1e-9, ...model.edges.map(e => e.request_rate ?? e.calls));
@@ -109,7 +109,7 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
       onPointerDown={e => { if (e.button !== 0) return; suppressClick.current = false; dragging.current = { x: e.clientX, y: e.clientY, initial: view, moved: false }; }}
       onPointerMove={e => { const drag = dragging.current; if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.hypot(dx, dy) > 3) drag.moved = true; if (drag.moved) { e.currentTarget.setPointerCapture?.(e.pointerId); setView({ ...drag.initial, x: drag.initial.x + dx, y: drag.initial.y + dy }); } }}
       onPointerUp={() => { suppressClick.current = dragging.current?.moved ?? false; dragging.current = null; }} onPointerCancel={() => { dragging.current = null; suppressClick.current = false; }}>
-      {(layoutError || !cached) && <Text role="status" c="dimmed">{layoutError ?? "Laying out services…"}</Text>}
+      {(layoutError || !cached) && <DataState state={layoutError ? "error" : "loading"} loadingLabel="Laying out services…" rows={0} error={{ message: layoutError }} />}
       <div {...(import.meta.env.DEV ? { "data-service-content": true } : {})} style={{ position: "relative", width: graph.contentWidth, height: graph.contentHeight, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`, transformOrigin: "0 0" }}>
       <svg aria-hidden="true" width={graph.contentWidth} height={graph.contentHeight} viewBox={`0 0 ${graph.contentWidth} ${graph.contentHeight}`} style={{ position: "absolute", inset: 0 }}>
         <defs>{[theme.muted, theme.status.warn, theme.status.bad].map((color, i) => <marker key={color} id={`${id}-arrow-${i}`} viewBox="0 0 6 6" refX={5} refY={3} markerWidth={5} markerHeight={5} orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L6,3 L0,6 Z" fill={color} /></marker>)}</defs>

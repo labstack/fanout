@@ -4,7 +4,6 @@ import { createPortal } from "react-dom";
 import { useEffect, useState } from "react";
 import type { DashboardTime } from "../../../panels/types";
 import { exactTimestamp } from "../../../format";
-import { ShortcutButton } from "./shortcut-button";
 import { ranges, refreshes } from "./search";
 
 const rangeLabel: Record<string, string> = { "5m": "Last 5 minutes", "15m": "Last 15 minutes", "1h": "Last hour", "3h": "Last 3 hours", "6h": "Last 6 hours", "12h": "Last 12 hours", "24h": "Last 24 hours", "2d": "Last 2 days", "7d": "Last 7 days", "30d": "Last 30 days" };
@@ -31,33 +30,32 @@ export function RangeMenu({ time, onRange, onAbsolute }: { time: DashboardTime; 
       <Menu.Divider />
       <Menu.Label>Absolute (your time zone)</Menu.Label>
       <Group gap={6} px="xs" pb="xs" wrap="nowrap">
-        <TextInput type="datetime-local" size="xs" aria-label="From" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
-        <TextInput type="datetime-local" size="xs" aria-label="To" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
+        <TextInput type="datetime-local" size="sm" aria-label="From" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
+        <TextInput type="datetime-local" size="sm" aria-label="To" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
       </Group>
       <Group px="xs" pb="xs" justify="flex-end">
-        <Button size="compact-sm" disabled={!from || !to || from >= to} onClick={() => { onAbsolute(new Date(from).toISOString(), new Date(to).toISOString()); setOpened(false); }}>Apply range</Button>
+        <Button size="sm" disabled={!from || !to || from >= to} onClick={() => { onAbsolute(new Date(from).toISOString(), new Date(to).toISOString()); setOpened(false); }}>Apply range</Button>
       </Group>
     </Menu.Dropdown>
   </Menu>;
   return host ? createPortal(menu, host) : menu;
 }
 
-export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, onRange, onAbsolute, onZoomOut, onRefresh, onRefreshNow, onCompare, onEdit, onHistory, onShortcuts, selecting = false }: {
+export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, onRange, onAbsolute, onZoomOut, onRefresh, onRefreshNow, onCompare, onEdit, onHistory, selecting = false }: {
   time: DashboardTime; refresh: string; compare: boolean; editing: boolean; fetching: boolean; updatedAt: number | null;
   onRange(range: string): void; onAbsolute(from: string, to: string): void; onZoomOut(): void; onRefresh(refresh: string): void; onRefreshNow(): void; onCompare(on: boolean): void; onEdit(): void; onHistory(): void;
-  onShortcuts?(): void; selecting?: boolean;
+  selecting?: boolean;
 }) {
   return <Group gap="xs" wrap="wrap" role="group" aria-label="Dashboard controls">
     <RangeMenu time={time} onRange={onRange} onAbsolute={onAbsolute} />
     <Tooltip label="Zoom out"><Button variant="default" size="sm" px={10} aria-label="Zoom out" onClick={onZoomOut}><MagnifyingGlassMinus size={15} /></Button></Tooltip>
     <Group data-refresh-controls gap={4} wrap="nowrap">
       <Tooltip label={updatedAt ? `Updated ${exactTimestamp(updatedAt)}` : "Refresh now"}><Button variant="default" size="sm" px={10} aria-label="Refresh now" loading={fetching} onClick={onRefreshNow}><ArrowClockwise size={15} /></Button></Tooltip>
-      <SegmentedControl size="xs" aria-label="Auto refresh" value={refresh} onChange={onRefresh} data={refreshes.map((r) => ({ value: r, label: r === "off" ? "Off" : r }))} />
+      <SegmentedControl size="sm" aria-label="Auto refresh" value={refresh} onChange={onRefresh} data={refreshes.map((r) => ({ value: r, label: r === "off" ? "Off" : r }))} />
     </Group>
     <Switch size="sm" label="Compare with previous period" checked={compare} onChange={(e) => onCompare(e.currentTarget.checked)} />
     <Button variant={editing ? "filled" : "default"} size="sm" leftSection={<PencilSimple size={15} />} onClick={onEdit}>{editing ? "Done" : "Edit layout"}</Button>
     <Button variant="default" size="sm" leftSection={<ClockCounterClockwise size={15} />} onClick={onHistory}>History</Button>
-    {onShortcuts && <ShortcutButton onClick={onShortcuts}/>}
-    {selecting && <Text data-range-paused size="xs" c="dimmed" role="status">Paused while selecting</Text>}
+    {selecting && <Text data-range-paused size="sm" c="dimmed" role="status">Paused while selecting</Text>}
   </Group>;
 }

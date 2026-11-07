@@ -1,5 +1,5 @@
 import { TraceIdCopy } from "../../trace-id-copy";
-import { StatusBadge } from "@labstack/ui";
+import { Notice, StatusBadge } from "@labstack/ui";
 import { seriesSlot } from "../../../../chart";
 import { Anchor, Box, Button, Group, Table, Text, UnstyledButton, useComputedColorScheme } from "@mantine/core";
 import { CaretDown, CaretUp } from "@phosphor-icons/react";
@@ -141,7 +141,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
         </Table.Tr>)}
       </Table.Thead>
       <Table.Tbody>
-        {table.getRowModel().rows.slice(0, shown).map((row) => <Fragment key={row.id}><Table.Tr data-row-selected={selected === row.index || expanded.has(row.index) || undefined} data-row-expanded={expanded.has(row.index)} tabIndex={rowInteractive(row.index) || canExpand ? 0 : undefined} style={{ cursor: rowInteractive(row.index) || canExpand ? "pointer" : undefined }}
+        {table.getRowModel().rows.slice(0, shown).map((row) => <Fragment key={row.id}><Table.Tr data-selected={selected === row.index || expanded.has(row.index) || undefined} data-row-expanded={expanded.has(row.index)} tabIndex={rowInteractive(row.index) || canExpand ? 0 : undefined} style={{ cursor: rowInteractive(row.index) || canExpand ? "pointer" : undefined }}
           onClick={event => { if ((event.target as Element).closest("a,button")) return; if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); }}
           onKeyDown={event => { if ((!rowInteractive(row.index)&&!canExpand) || (event.target as Element).closest("a,button")) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); } }}>
           {row.getAllCells().map(cell => {
@@ -162,7 +162,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
       <Text fz={12} c="dimmed">Showing {shown.toLocaleString()} of {frame.rows.toLocaleString()} rows</Text>
       <Button size="compact-sm" variant="default" onClick={() => setShown(shown + (controls?.page ?? frame.rows))}>Show {Math.min(controls?.page ?? frame.rows, frame.rows - shown).toLocaleString()} more</Button>
     </Group>}
-    {(panel.options?.columns??[]).some(c=>!frame.columns.some(column=>column.name===c.field))&&<Text fz={12} c="dimmed" role="status">Column formats unavailable: {(panel.options?.columns??[]).filter(c=>!frame.columns.some(column=>column.name===c.field)).map(c=>displayLabel(c.field, panel)).join(", ")}</Text>}
+    {(panel.options?.columns??[]).some(c=>!frame.columns.some(column=>column.name===c.field))&&<Notice tone="warning">Column formats unavailable: {(panel.options?.columns??[]).filter(c=>!frame.columns.some(column=>column.name===c.field)).map(c=>displayLabel(c.field, panel)).join(", ")}</Notice>}
   </Box>;
 }
 

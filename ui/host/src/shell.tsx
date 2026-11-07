@@ -1,8 +1,8 @@
 import { Notice } from "@labstack/ui";
 import { ColorSchemeToggle } from "./color-scheme-toggle";
-import { ActionIcon, AppShell, Avatar, Burger, Button, Drawer, Group, Menu, Tooltip } from "@mantine/core";
+import { ActionIcon, AppShell, Avatar, Burger, Button, Drawer, Group, Kbd, Menu, Tooltip } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { BookOpen, MagnifyingGlass, SidebarSimple, PlugsConnected, SignOut } from "@phosphor-icons/react";
+import { BookOpen, Keyboard, MagnifyingGlass, Question, SidebarSimple, PlugsConnected, SignOut } from "@phosphor-icons/react";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { createDashboardPrompt, useFanoutApp } from "./app-context";
@@ -10,6 +10,7 @@ import { logout, useViewer } from "./auth";
 import { BrandLockup } from "./brand";
 import { docs } from "../../links";
 import { useOpener } from "./opener";
+import { shortcutsEvent } from "./shortcuts-event";
 
 import Rail, { type RailHandle, type RailProps } from "./rail";
 
@@ -83,14 +84,11 @@ export default function Shell({ children }: { children: ReactNode }) {
         <Button variant="default" color="gray" leftSection={<MagnifyingGlass size={16} />} onClick={() => { if (mobile) { setKeyboardOpen(true); drawer.open(); } else { setCollapsed(false); requestAnimationFrame(() => railRef.current?.focusSearch()); } }}>Search · ⌘K</Button>
         <div id="shell-time-range" />
         <Group gap="xs" wrap="nowrap">
-          {/* Documentation sits in the chrome, not in the account menu: it is
-              a question someone has while working, on any page, and the menu is
-              for acting on your own account. */}
-          <Tooltip label="Documentation">
-            <ActionIcon component="a" href={docs.home} target="_blank" rel="noopener noreferrer" variant="subtle" color="gray" aria-label="Documentation">
-              <BookOpen size={17} weight="bold" />
-            </ActionIcon>
-          </Tooltip>
+          {/* Help sits in the chrome, not in the account menu: it answers a
+              question someone has while working, and the account menu is for
+              acting on your own account. Keyboard shortcuts live here, as in
+              most consoles, rather than as a button in each page's toolbar. */}
+          <HelpMenu shortcuts={Boolean(dashboardId)} />
           <ColorSchemeToggle />
           <AccountMenu onError={setSignOutError} />
         </Group>
@@ -106,6 +104,18 @@ export default function Shell({ children }: { children: ReactNode }) {
     </AppShell.Main>
     {creating && <Suspense fallback={null}><NewDashboard onClose={closeNew} onCreated={id => { setCreating(false); void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: {} }); }} /></Suspense>}
   </AppShell>;
+}
+
+function HelpMenu({ shortcuts }: { shortcuts: boolean }) {
+  return <Menu position="bottom-end" withinPortal shadow="md">
+    <Menu.Target>
+      <Tooltip label="Help"><ActionIcon variant="subtle" color="gray" aria-label="Help"><Question size={18} weight="bold" /></ActionIcon></Tooltip>
+    </Menu.Target>
+    <Menu.Dropdown>
+      <Menu.Item component="a" href={docs.home} target="_blank" rel="noopener noreferrer" leftSection={<BookOpen size={15} />}>Documentation</Menu.Item>
+      {shortcuts && <Menu.Item leftSection={<Keyboard size={15} />} rightSection={<Kbd size="xs">?</Kbd>} onClick={() => window.dispatchEvent(new Event(shortcutsEvent))}>Keyboard shortcuts</Menu.Item>}
+    </Menu.Dropdown>
+  </Menu>;
 }
 
 /* Exported for shell.test.tsx: reaching it through Shell would drag in the

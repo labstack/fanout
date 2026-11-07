@@ -37,19 +37,14 @@ body,
   min-height: 100%;
 }
 
-.mantine-focus-auto:focus-visible,
-.mantine-focus-always:focus {
-  outline-color: var(--fanout-focus);
-}
-
 .chat-composer-field {
-  background: var(--mantine-color-body);
+  background: var(--labstack-raised);
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .chat-composer-field:focus-within {
-  --composer-border: var(--fanout-focus);
-  box-shadow: 0 0 0 2px var(--fanout-focus);
+  --composer-border: var(--labstack-focus);
+  box-shadow: 0 0 0 2px var(--labstack-focus);
 }
 
 .rail-row {
@@ -61,9 +56,12 @@ body,
   background: var(--mantine-color-default-hover);
 }
 
-.rail-row[data-active] {
-  color: var(--mantine-color-iris-text);
-  box-shadow: inset 2px 0 var(--mantine-color-iris-text);
+/* Current page: tinted fill and accent text, as in most consoles. A left bar on
+   a rounded row curves into a bracket, so the row carries no edge mark. */
+.rail-row[data-active],
+.rail-row[data-active]:hover {
+  color: var(--mantine-color-accent-text);
+  background: var(--mantine-color-accent-light);
 }
 
 .rail-row-actions {
@@ -196,7 +194,7 @@ body,
 .chat-app-chevron { display: flex; align-items: center; flex: none; }
 .chat-app-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-app-toggle:hover { background: var(--mantine-color-default-hover); }
-.chat-app-toggle:focus-visible { outline: 2px solid var(--mantine-color-iris-filled); outline-offset: -2px; }
+.chat-app-toggle:focus-visible { outline: 2px solid var(--mantine-color-accent-filled); outline-offset: -2px; }
 
 /* Keyboard users can jump past the header and navigation; the link shows
    only while focused. */
@@ -216,18 +214,11 @@ body,
   transform: none;
 }
 
-.mantine-AppShell-header, .mantine-AppShell-navbar { background: var(--labstack-raised); }
 .mantine-AppShell-main { background: var(--mantine-color-body); }
-.rail-row:focus-within { outline: 2px solid var(--fanout-focus); outline-offset: -2px; }
-.rail-row:focus-within .mantine-UnstyledButton-root { outline: none; }
+/* Keyboard focus only (:focus-visible); a mouse click leaves no ring behind. */
+.rail-row:has(:focus-visible) { outline: 2px solid var(--labstack-focus); outline-offset: -2px; }
+.rail-row .mantine-UnstyledButton-root:focus-visible { outline: none; }
 
-.mantine-Table-table { --table-border-color: var(--labstack-border-soft); --table-highlight-on-hover-color: var(--mantine-color-default-hover); }
-.mantine-Table-thead { position: sticky; top: 0; z-index: 2; background: var(--labstack-raised); }
-.mantine-Table-th { font-size: 12px; font-weight: 500; color: var(--mantine-color-dimmed); }
-.mantine-Table-tr { height: 32px; }
-.mantine-Table-td { padding-block: 4px; border-color: var(--labstack-border-soft); }
-.mantine-Table-tr[data-row-selected] > td:first-child { box-shadow: inset 2px 0 var(--fanout-focus); }
-.mantine-Table-tbody .mantine-Table-tr:hover { background: var(--mantine-color-default-hover); }
 .mantine-Table-td:is([data-field$="_id"], [data-field="time"], [data-field="start"]) { font-family: var(--mantine-font-family-monospace); font-size: inherit; }
 .chat-table td[align="right"], .panel-markdown td[align="right"] { font-family: var(--mantine-font-family-monospace); text-align: right; }
 
@@ -240,3 +231,4 @@ body,
   box-shadow: none;
   padding: 6px 8px;
 }
+

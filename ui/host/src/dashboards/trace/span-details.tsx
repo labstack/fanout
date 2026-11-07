@@ -1,7 +1,7 @@
 import { LoadingSkeleton } from "../../loading-skeleton";
 import { formatTimestamp } from "../../../../panels/units";
-import { DataState, Notice, StatusBadge } from "@labstack/ui";
-import { Badge, Box, CloseButton, Code, Group, Paper, Stack, Table, Text } from "@mantine/core";
+import { DataState, KeyValueList, Notice, StatusBadge, useToneColor } from "@labstack/ui";
+import { Box, CloseButton, Code, Group, Paper, Stack, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import type { TraceSpan } from "../../../../contracts";
@@ -17,16 +17,13 @@ const statuses: Record<string, string> = { STATUS_CODE_ERROR: "Error", STATUS_CO
 /** An event attribute as text: strings verbatim, other values as JSON. */
 const text = (value: unknown): string | undefined => value == null ? undefined : typeof value === "string" ? value : JSON.stringify(value);
 
-/** Attributes as a key/value table; nested values print as JSON. */
+/** Untyped attributes as description lists; nested values print as JSON. */
 export function Attributes({ label, values }: { label: string; values: Record<string, unknown> }) {
   const keys = Object.keys(values).sort();
   return <Box>
     <Text size="xs" fw={600} c="dimmed" mb={4}>{label}</Text>
     {keys.length === 0 ? <Text size="xs" c="dimmed">None</Text>
-      : <Table fz={12} verticalSpacing={2} layout="fixed" aria-label={label}><Table.Tbody>{keys.map(key => <Table.Tr key={key}>
-        <Table.Td w="38%" ff="monospace" c="dimmed" style={{ overflowWrap: "anywhere" }}>{key}</Table.Td>
-        <Table.Td ff="monospace" style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{typeof values[key] === "string" ? String(values[key]) : JSON.stringify(values[key])}</Table.Td>
-      </Table.Tr>)}</Table.Tbody></Table>}
+      : <KeyValueList label={label} items={keys.map(key => ({ label: <Text span inherit ff="monospace">{key}</Text>, value: <Text span inherit ff="monospace" style={{ whiteSpace: "pre-wrap" }}>{typeof values[key] === "string" ? String(values[key]) : JSON.stringify(values[key])}</Text> }))} />}
   </Box>;
 }
 
@@ -36,6 +33,7 @@ export function SpanDetails({ traceId, span, load, onClose }: { traceId: string;
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => { box.current?.scrollIntoView?.({ block: "nearest" }); }, [span]);
   const extras = useQuery({ queryKey: ["span-extras", traceId, span.span_id, span.start], queryFn: ({ signal }) => load!(traceId, span, signal), enabled: Boolean(load), retry: false, staleTime: Infinity });
+  const danger = useToneColor("danger");
   const failed = span.status === "STATUS_CODE_ERROR";
   const exceptions = extras.data?.events.filter(event => event.name === "exception") ?? [];
   return <Paper ref={box} withBorder p="sm" radius="md" data-span-details aria-label={`Span ${span.operation}`} role="region">
@@ -47,13 +45,14 @@ export function SpanDetails({ traceId, span, load, onClose }: { traceId: string;
         </Box>
         <CloseButton aria-label="Close span details" onClick={onClose} />
       </Group>
-      <Group gap="xs">
-        <StatusBadge tone={failed ? "danger" : "neutral"}>{statuses[span.status] ?? span.status}</StatusBadge>
-        <Text size="xs" ff="monospace" c="dimmed">span {span.span_id}{span.parent_span_id ? ` · parent ${span.parent_span_id}` : ""}</Text>
-      </Group>
-      {span.status_message && <Text size="sm" c={failed ? "bad" : undefined} style={{ overflowWrap: "anywhere" }}>{span.status_message}</Text>}
+      <Box><KeyValueList label="Span metadata" items={[
+        { label: "Status", value: <StatusBadge tone={failed ? "danger" : "neutral"}>{statuses[span.status] ?? span.status}</StatusBadge> },
+        { label: "Span", value: <Text span inherit ff="monospace">{span.span_id}</Text> },
+        ...(span.parent_span_id ? [{ label: "Parent", value: <Text span inherit ff="monospace">{span.parent_span_id}</Text> }] : []),
+      ]} /></Box>
+      {span.status_message && <Text size="sm" c={failed ? danger : undefined} style={{ overflowWrap: "anywhere" }}>{span.status_message}</Text>}
       {extras.isLoading && <DataState state="loading" loadingLabel="Loading span details" skeleton={<LoadingSkeleton shape="key_value" rows={3} />} />}
-      {extras.error && <Box p="xs"><Notice tone="danger" onRetry={() => void extras.refetch()}>{extras.error.message}</Notice></Box>}
+      {extras.error && <Box p="xs"><DataState state="error" error={{ message: extras.error.message, onRetry: () => void extras.refetch() }} /></Box>}
       {exceptions.map((event, index) => {
         const message = text(event.attributes["exception.message"]), stack = text(event.attributes["exception.stacktrace"]);
         return <Box key={index} p="xs"><Notice tone="danger" title={text(event.attributes["exception.type"]) ?? "Exception"}>
@@ -71,7 +70,7 @@ export function SpanDetails({ traceId, span, load, onClose }: { traceId: string;
           </Box>)}</Stack>
         </Box>}
         <Attributes label="Resource" values={extras.data.resource} />
-        {extras.data.scope && <Text size="xs" c="dimmed">Instrumentation scope: {extras.data.scope}</Text>}
+        {extras.data.scope && <Box><KeyValueList items={[{ label: "Instrumentation scope", value: <Text span inherit ff="monospace">{extras.data.scope}</Text> }]} /></Box>}
       </>}
     </Stack>
   </Paper>;

@@ -50,7 +50,12 @@ it.each([false, true].flatMap(dark => [false, true].map(external => ({dark, exte
     await act(async () => frame.click());
     // Without a caller's handler a span opens its details below the chart.
     if (onSpan) { expect(onSpan).toHaveBeenCalledWith(span); expect(node.querySelector("[data-span-details]")).toBeNull(); }
-    else expect(node.querySelector("[data-span-details]")?.textContent).toContain("Error");
+    else {
+      const metadata = node.querySelector('dl[aria-label="Span metadata"]');
+      expect(metadata?.querySelector("dt")?.textContent).toBe("Status");
+      expect(metadata?.querySelector("dd")?.textContent).toContain("Error");
+      expect([...metadata!.querySelectorAll("dd")].some(value => value.textContent === span.span_id)).toBe(true);
+    }
     expect([...node.querySelectorAll("button")].find(b => b.textContent === "Flame graph")?.getAttribute("aria-selected")).toBe("true");
     expect(node.textContent).not.toMatch(/Explain|Investigate|fix it/);
   } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }

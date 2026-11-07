@@ -2,7 +2,7 @@ import { LoadingSkeleton } from "../loading-skeleton";
 import { DataState, Notice } from "@labstack/ui";
 import { logConstants } from "../../../panels/rows";
 import { useMergedRef } from "@mantine/hooks";
-import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
+import { ActionIcon, Box, Button, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
 import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, Trash, WarningCircle } from "@phosphor-icons/react";
 import type { Panel, Selection, VarValue } from "../../../panels/types";
 import type { PanelDisplayResult } from "./panel-result";
@@ -154,9 +154,9 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         {loading && result && <Loader size={12} aria-label="Refreshing" />}
       </Group>
       <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
-      {!compactViews && panel.viz !== "text" && <Group gap={0} wrap="nowrap" role="group" aria-label={`${title} view`} style={{ border: "1px solid var(--mantine-color-default-border)", borderRadius: 5, overflow: "hidden" }}>
-        {modes.map((mode, index) => <button key={mode} type="button" data-panel-view={mode} aria-pressed={view === mode} onClick={() => setView(mode)} style={{ border: 0, borderLeft: index === 0 ? undefined : "1px solid var(--mantine-color-default-border)", padding: "2px 6px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", background: view === mode ? "var(--mantine-color-default)" : "transparent", color: view === mode ? "var(--mantine-primary-color-filled)" : "var(--mantine-color-dimmed)", fontWeight: view === mode ? 600 : 400, boxShadow: view === mode ? "inset 0 -2px var(--mantine-primary-color-filled)" : undefined }}>{mode}</button>)}
-      </Group>}
+      {!compactViews && panel.viz !== "text" && <Button.Group aria-label={`${title} view`}>
+        {modes.map(mode => <Button key={mode} size="compact-xs" variant="default" fw={view === mode ? 600 : 400} bg={view === mode ? "var(--mantine-color-accent-light)" : undefined} c={view === mode ? "var(--mantine-color-accent-text)" : undefined} data-panel-view={mode} aria-pressed={view === mode} onClick={() => setView(mode)}>{mode}</Button>)}
+      </Button.Group>}
       {panel.viz === "service_map" && mapView?.canFit && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={mapView.overview ? `Return to readable ${title} view` : `Show whole ${title} graph`} onClick={mapView.fit}><ArrowsOut size={16} /></ActionIcon>}
       {zoomed && onZoomReset && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Reset ${title} zoom`} onClick={onZoomReset}><ArrowCounterClockwise size={16} /></ActionIcon>}
       <Menu position="bottom-end" withinPortal onChange={opened => {if (opened) closeTooltip();}}>
@@ -195,7 +195,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         an opaque backdrop that spans it, which contrast checks need, and keeps
         the card's rounded bottom corners so that ground does not square them. */}
     <Box ref={body} data-panel-body data-panel-loading={loadingBody || undefined} className="dashboard-panel-padding" tabIndex={view !== "Chart" ? 0 : undefined} style={{ flex: "1 1 0px", isolation: "isolate", contain: rows || view === "Data" ? "paint" : undefined, minHeight: 0, minWidth: 0, padding: "16px", overflow: !loadingBody && scrolls ? "auto" : "hidden", display: !loadingBody && (rows || view !== "Chart") ? "block" : "flex", flexDirection: "column", backgroundColor: "inherit", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>
-      {suspended ? <Center h="100%"><Text size="sm" c="dimmed">Shown in full-screen</Text></Center> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <DataState state="loading" loadingLabel={`Loading panel ${title || panel.id}`} skeleton={<LoadingSkeleton viz={panel.viz} />} />
+      {suspended ? <DataState state="empty" empty={{ title: "Shown in full-screen" }} /> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <DataState state="loading" loadingLabel={`Loading panel ${title || panel.id}`} skeleton={<LoadingSkeleton viz={panel.viz} />} />
         : (result?.status === "error" || result?.status === "invalid") ? <Box data-panel-error={result.reason !== "busy" || undefined} data-panel-busy={result.reason === "busy" || undefined} style={{minWidth: 0, maxHeight: "100%", overflow: "auto", overflowWrap: "anywhere"}}>
           <Notice tone={result.reason === "busy" ? "info" : "danger"} title={result.reason === "busy" ? "Not run yet" : result.status === "invalid" ? "This panel is invalid" : "This panel failed"} retryLabel="Retry" onRetry={retryable || result.reason === "busy" ? onRetry : undefined}>
             <Text data-panel-error-message={result.reason !== "busy" || undefined} title={result.error} size="xs" style={{overflowWrap: "anywhere"}}>{result.error || "The query could not run."}</Text>

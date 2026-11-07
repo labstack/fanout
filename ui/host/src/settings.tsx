@@ -1,7 +1,7 @@
 import { LoadingSkeleton } from "./loading-skeleton";
 import { formatTimestamp } from "../../panels/units";
-import { DataState, Notice, PageHeader } from "@labstack/ui";
-import { Anchor, Box, Button, Code, CopyButton, Group, Modal, Paper, Stack, Text, TextInput, Title, Tooltip } from "@mantine/core";
+import { ConfirmDialog, DataState, KeyValueList, Notice, PageHeader } from "@labstack/ui";
+import { Anchor, Box, Button, Code, CopyButton, Group, Paper, Stack, Text, TextInput, Title, Tooltip } from "@mantine/core";
 import { ArrowsClockwise, Check, Copy, WarningCircle } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -55,7 +55,7 @@ function ConnectedAgents() {
       <Title order={2} fz={22} lts="-0.02em">Connected agents</Title>
       <Text c="dimmed" size="sm" mt={2}>Agents you have authorized to access Fanout through MCP.</Text>
     </Box>
-    <Paper withBorder radius="lg" p="lg">
+    <Paper withBorder radius="md" p="lg">
       {!agents.data
         ? agents.isLoading
           ? <DataState state="loading" loadingLabel="Loading connected agents" skeleton={<LoadingSkeleton shape="agents" rows={3} />} />
@@ -69,23 +69,16 @@ function ConnectedAgents() {
               {agents.data.connections.map((agent) => <Group key={agent.client_id} justify="space-between" align="center">
                 <Box style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                   <Text size="sm" fw={600}>{agent.client_name}</Text>
-                  <Text size="xs" c="dimmed">Connected <time style={{fontFamily: "var(--mantine-font-family-monospace)"}} dateTime={agent.connected_at}>{formatTimestamp(Date.parse(agent.connected_at))}</time></Text>
+                  <KeyValueList items={[{ label: "Connected", value: <time style={{fontFamily: "var(--mantine-font-family-monospace)"}} dateTime={agent.connected_at}>{formatTimestamp(Date.parse(agent.connected_at))}</time> }]} />
                 </Box>
                 <Button variant="default" size="sm" onClick={() => { disconnect.reset(); setSelected(agent); }} disabled={disconnect.isPending}>Disconnect</Button>
               </Group>)}
             </Stack>}
     </Paper>
     <Text size="sm" c="dimmed" role="status" aria-live="polite">{announcement}</Text>
-    <Modal opened={selected !== null} onClose={() => !disconnect.isPending && setSelected(null)} title={`Disconnect ${selected?.client_name ?? "agent"}?`} centered radius="md">
-      <Stack gap="md">
-        <Text size="sm" c="dimmed">This agent loses access immediately. Your other agents and browser session stay connected. You can authorize the agent again to reconnect.</Text>
-        {disconnect.isError && <Notice tone="danger">Fanout could not disconnect this agent. Try again.</Notice>}
-        <Group justify="flex-end" gap="sm">
-          <Button variant="default" size="sm" onClick={() => { disconnect.reset(); setSelected(null); }} disabled={disconnect.isPending}>Cancel</Button>
-          <Button color="bad" size="sm" loading={disconnect.isPending} onClick={() => selected && disconnect.mutate(selected)}>Disconnect</Button>
-        </Group>
-      </Stack>
-    </Modal>
+    <ConfirmDialog opened={selected !== null} onClose={() => { disconnect.reset(); setSelected(null); }} title={`Disconnect ${selected?.client_name ?? "agent"}?`} confirmLabel="Disconnect agent" tone="danger" pending={disconnect.isPending ? "confirm" : null} error={disconnect.isError ? "Fanout could not disconnect this agent. Try again." : undefined} onConfirm={() => selected && disconnect.mutate(selected)}>
+      <Text span ff="monospace">{selected?.client_name}</Text> loses access immediately. Your other agents and browser session stay connected. You can authorize the agent again to reconnect.
+    </ConfirmDialog>
   </Stack>;
 }
 
@@ -140,20 +133,16 @@ service:
 }
 
 function Field({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return <Stack gap={4}>
-    <Text size="sm" fw={600}>{label}</Text>
-    <Group gap="xs" wrap="nowrap" align="center">
+  return <KeyValueList layout="stacked" items={[{ label, hint, value: <Group gap="xs" wrap="nowrap" align="center">
       <Code style={{ flex: 1, overflowX: "auto" }}>{value}</Code>
       <CopyButton value={value} timeout={1500}>
         {({ copied, copy }) => <Tooltip label={copied ? "Copied" : `Copy ${label.toLowerCase()}`} withArrow>
-          <Button variant="subtle" color="gray" size="compact-sm" onClick={copy} aria-label={`Copy ${label.toLowerCase()}`}>
+          <Button variant="subtle" color="gray" size="sm" onClick={copy} aria-label={`Copy ${label.toLowerCase()}`}>
             {copied ? <Check size={15} weight="bold" /> : <Copy size={15} />}
           </Button>
         </Tooltip>}
       </CopyButton>
-    </Group>
-    {hint && <Text c="dimmed" size="xs">{hint}</Text>}
-  </Stack>;
+    </Group> }]} />;
 }
 
 export default function Settings() {
@@ -225,7 +214,7 @@ export default function Settings() {
       <Title order={2} fz={18}>Connect telemetry</Title>
       <Text c="dimmed" size="sm">Point an OpenTelemetry collector or SDK at this workspace.</Text>
 
-      <Paper withBorder radius="lg" p="lg">
+      <Paper withBorder radius="md" p="lg">
         <Stack gap="lg">
           <Stack gap={4}>
             <Text size="sm" fw={600}>Endpoint</Text>
@@ -233,7 +222,7 @@ export default function Settings() {
               <TextInput aria-label="Endpoint" value={endpointInput} onChange={(event) => setEndpointOverride(event.currentTarget.value)} style={{ flex: 1 }} styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }} />
               <CopyButton value={endpoint} timeout={1500}>
                 {({ copied, copy }) => <Tooltip label={copied ? "Copied" : "Copy endpoint"} withArrow>
-                  <Button variant="subtle" color="gray" size="compact-sm" onClick={copy} aria-label="Copy endpoint">
+                  <Button variant="subtle" color="gray" size="sm" onClick={copy} aria-label="Copy endpoint">
                     {copied ? <Check size={15} weight="bold" /> : <Copy size={15} />}
                   </Button>
                 </Tooltip>}
@@ -250,7 +239,7 @@ export default function Settings() {
           <Title order={2} fz={22} lts="-0.02em">Collector configuration</Title>
           <Text c="dimmed" size="sm" mt={2}>Merge these blocks into your collector configuration, alongside the receivers it already has, and set INGEST_TOKEN in its environment.</Text>
         </Box>
-        <Paper withBorder radius="lg" p="md">
+        <Paper withBorder radius="md" p="md">
           <Stack gap="sm">
             <Code block style={{ fontSize: 12 }}>{collectorConfig(endpoint, header, tlsConfigured)}</Code>
             <Group justify="flex-end">
@@ -273,7 +262,7 @@ export default function Settings() {
               : "This workspace has no token yet, so it is rejecting telemetry. Issue one to start accepting data."}
           </Text>
         </Box>
-        <Paper withBorder radius="lg" p="lg">
+        <Paper withBorder radius="md" p="lg">
           {issued
             ? <Stack gap="sm">
                 <Text size="sm" fw={600}>Your new token</Text>
@@ -301,7 +290,7 @@ export default function Settings() {
       </Text>
       {!agentAvailable && <Stack gap="sm">
         <Title order={2} fz={22} lts="-0.02em">Chat is disabled</Title>
-        <Paper withBorder radius="lg" p="lg">
+        <Paper withBorder radius="md" p="lg">
           <Stack gap="sm">
             <Text size="sm">To enable chat on a self-hosted instance, set <Code>FANOUT_AI_PROVIDER</Code> to <Code>anthropic</Code> with <Code>ANTHROPIC_API_KEY</Code>, or <Code>openai</Code> with <Code>OPENAI_API_KEY</Code>, then restart Fanout.</Text>
             <Text size="sm">You can also <Anchor href={docs.connect} target="_blank" rel="noopener noreferrer" underline="always">connect an MCP client</Anchor> such as Claude, Codex, or ChatGPT to use your own AI.</Text>
@@ -311,22 +300,11 @@ export default function Settings() {
       <ConnectedAgents />
     </Stack>
 
-    <Modal opened={confirming} onClose={() => !rotate.isPending && setConfirming(false)} title={hasToken ? "Rotate the ingest token?" : "Issue an ingest token?"} centered radius="md">
-      <Stack gap="md">
-        <Text size="sm" c="dimmed">
-          {hasToken
-            ? "The current token stops working the moment the new one is issued. Any collector still sending with it will be rejected until you update it. Fanout shows the new token once and stores only its hash."
-            : "Fanout will show the new token once, and store only its hash."}
-        </Text>
-        {rotate.isError && <Notice tone="danger">{rotate.error instanceof Error ? rotate.error.message : "Fanout could not issue a new token."}</Notice>}
-        <Group justify="flex-end" gap="sm">
-          <Button variant="default" size="sm" onClick={() => { rotate.reset(); setConfirming(false); }} disabled={rotate.isPending}>Cancel</Button>
-          <Button color={hasToken ? "bad" : undefined} size="sm" loading={rotate.isPending} onClick={() => rotate.mutate()}>
-            {hasToken ? "Rotate token" : "Issue token"}
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
+    <ConfirmDialog opened={confirming} onClose={() => { rotate.reset(); setConfirming(false); }} title={hasToken ? "Rotate the ingest token?" : "Issue an ingest token?"} confirmLabel={hasToken ? "Rotate token" : "Issue token"} tone={hasToken ? "danger" : "primary"} pending={rotate.isPending ? "confirm" : null} error={rotate.error?.message} onConfirm={() => rotate.mutate()}>
+      {hasToken
+        ? "The current token stops working the moment the new one is issued. Any collector still sending with it will be rejected until you update it. Fanout shows the new token once and stores only its hash."
+        : "Fanout will show the new token once, and store only its hash."}
+    </ConfirmDialog>
   </Box>;
 }
 

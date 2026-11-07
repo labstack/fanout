@@ -1,8 +1,8 @@
 import { LoadingSkeleton } from "../loading-skeleton";
 import { formatTimestamp } from "../../../panels/units";
 import { LiveDataMeta } from "../live-data-meta";
-import { DataState, Notice, PageHeader, StatusBadge } from "@labstack/ui";
-import { ActionIcon, Badge, Button, Group, Menu, Modal, Stack, Switch, Table, Text, Title } from "@mantine/core";
+import { ConfirmDialog, DataState, Notice, PageHeader, StatusBadge } from "@labstack/ui";
+import { ActionIcon, Button, Group, Menu, Modal, Stack, Switch, Table, Text, Title } from "@mantine/core";
 import { DotsThree, Plus } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
@@ -76,7 +76,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
     <Stack gap="xs">
       <Title order={2} fz={18}>Rules</Title>
       {rules.data && rules.data.length > 0 && <Text size="xs" c="dimmed">{exploreNote}</Text>}
-      {rules.isLoading ? <DataState state="loading" loadingLabel="Loading alert rules" skeleton={<LoadingSkeleton shape="table" columns={7} rows={4} />} /> : rules.error ? <Notice tone="danger">Rules could not be loaded: {rules.error.message}</Notice>
+      {rules.isLoading ? <DataState state="loading" loadingLabel="Loading alert rules" skeleton={<LoadingSkeleton shape="table" columns={7} rows={4} />} /> : rules.error ? <DataState state="error" error={{ message: `Rules could not be loaded: ${rules.error.message}`, onRetry: () => void rules.refetch() }} />
         : rules.data?.length === 0 ? <DataState state="empty" empty={{title: "No rules yet", description: "Create a rule to get notified when a service misbehaves.", action: canManage && <Button onClick={() => setEditing({})}>New rule</Button>}} />
         : <Table.ScrollContainer minWidth={760}><Table verticalSpacing="sm">
           <Table.Thead><Table.Tr><Table.Th>Rule</Table.Th><Table.Th>Service</Table.Th><Table.Th>Expression</Table.Th><Table.Th>State</Table.Th><Table.Th>Last fired</Table.Th><Table.Th>Enabled</Table.Th><Table.Th w={48}><Text size="xs" c="dimmed">Actions</Text></Table.Th></Table.Tr></Table.Thead>
@@ -122,23 +122,19 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
     </Stack>
 
     {editing && <RuleForm rule={editing.rule} onClose={closeForm} onSave={save} />}
-    {deleting && <Modal opened onClose={() => { if (!remove.isPending) closeDelete(); }} title={`Delete ${deleting.name}?`}>
-      <Stack gap="md">
-        <Text size="sm">The rule and its alert history are removed. This cannot be undone.</Text>
-        {remove.error && <Notice tone="danger">{remove.error.message}</Notice>}
-        <Group justify="flex-end" gap="xs"><Button variant="default" disabled={remove.isPending} onClick={closeDelete}>Cancel</Button><Button color="bad" loading={remove.isPending} onClick={() => remove.mutate(deleting)}>Delete rule</Button></Group>
-      </Stack>
-    </Modal>}
+    {deleting && <ConfirmDialog opened onClose={closeDelete} title={`Delete ${deleting.name}?`} confirmLabel="Delete rule" tone="danger" pending={remove.isPending ? "confirm" : null} error={remove.error?.message} onConfirm={() => remove.mutate(deleting)}>
+      The rule <Text span ff="monospace">{deleting.name}</Text> and its alert history are removed. This cannot be undone.
+    </ConfirmDialog>}
     {tested && <Modal opened onClose={closeTest} closeButtonProps={{ "aria-label": "Close test" }} title={`Test · ${tested.rule.name}`}>
       {tested.error ? <Notice tone="danger">{tested.error}</Notice>
         : !tested.result ? <DataState state="loading" loadingLabel="Testing the rule" rows={3} />
-        : !tested.result.results?.length ? <Text size="sm" c="dimmed">No services have data in the current window.</Text>
+        : !tested.result.results?.length ? <DataState state="empty" empty={{ title: "No services have data in the current window." }} />
         : <Stack gap="xs">{tested.result.results.map(r => <Stack key={r.service} gap={2}>
           <Group justify="space-between">
             <Text size="sm">{r.service}</Text>
             {r.error ? <Text size="xs" c="bad">{r.error}</Text>
-              : r.no_data ? <Badge color="warn" variant="light">No recent data</Badge>
-              : <Badge color={r.triggered ? "bad" : "ok"} variant="light">{r.triggered ? "Would fire" : "Quiet"}</Badge>}
+              : r.no_data ? <StatusBadge tone="warning">No recent data</StatusBadge>
+              : <StatusBadge tone={r.triggered ? "danger" : "success"}>{r.triggered ? "Would fire" : "Quiet"}</StatusBadge>}
           </Group>
           {r.no_data ? <Text size="xs" c="dimmed">This service has sent no telemetry recently. Check its name.</Text>
             : <Text size="xs" c="dimmed" ff="monospace">{variables(tested.rule.expression).filter(name => typeof r.env?.[name] === "number").map(name => `${name} ${formatValue(name, r.env![name] as number)}`).join(" · ")}</Text>}

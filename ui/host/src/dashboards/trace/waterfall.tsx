@@ -68,7 +68,7 @@ export function Waterfall({ spans, dark, onSpan, selected, showCriticalPath = tr
           const share = segments.reduce((sum, segment) => sum + segment.end - segment.start, 0);
           const criticalLabel = segments.length ? ` · on critical path · ${duration(share)} (${(share / span.duration_ms * 100).toFixed(1)}% of span)` : "";
           const label = `${span.service} · ${span.operation} · ${duration(span.duration_ms)}${criticalLabel}`;
-          return <Table.Tr key={span.span_id} data-depth={depth} data-row-selected={span.span_id === selected || undefined} aria-selected={onSpan ? span.span_id === selected : undefined}
+          return <Table.Tr key={span.span_id} data-depth={depth} data-selected={span.span_id === selected || undefined} aria-selected={onSpan ? span.span_id === selected : undefined}
             bg={span.span_id === selected ? "var(--mantine-primary-color-light)" : undefined}
             tabIndex={onSpan ? 0 : undefined} onClick={onSpan ? () => onSpan(span) : undefined}
             onKeyDown={onSpan ? event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSpan(span); } } : undefined}

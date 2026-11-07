@@ -1,4 +1,4 @@
-import { DataState, Notice } from "@labstack/ui";
+import { ConfirmDialog, DataState, Notice } from "@labstack/ui";
 import { ActionIcon, Box, Button, Center, Group, Kbd, Loader, Menu, Modal, ScrollArea, Stack, Text, TextInput, ThemeIcon, Tooltip, UnstyledButton } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { Bell, ChatCircle, SquaresFour, Gear, Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Star, Trash } from "@phosphor-icons/react";
@@ -140,7 +140,7 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
         {agentAvailable && <Stack gap={4}>
           <SectionLabel>Chats</SectionLabel>
           {history.isLoading && <DataState state="loading" rows={3} />}
-          {history.isError && <Notice tone="danger">Chats could not be loaded.</Notice>}
+          {history.isError && <DataState state="error" error={{ message: "Chats could not be loaded.", onRetry: () => void history.refetch() }} />}
           {!history.isLoading && !history.isError && threads.length === 0 && <Text size="xs" c="dimmed" px="sm">{query ? "No matching chats. Try another name." : "No chats yet. Start one above."}</Text>}
           {groups.map((group) => <Stack key={group.label} gap={2}>
             {groups.length > 1 && <Text c="dimmed" size="xs" px="sm" pt={4}>{group.label}</Text>}
@@ -216,16 +216,9 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
         </Stack>
       </form>
     </Modal>
-    <Modal opened={deleting !== null} onClose={() => !busy && setDeleting(null)} title="Delete chat?" centered>
-      <Stack>
-        <Text size="sm">This permanently removes <Text span fw={650}>{deleting?.title}</Text> and its saved messages.</Text>
-        {mutationError && <Notice tone="danger">{mutationError}</Notice>}
-        <Group justify="flex-end">
-          <Button variant="default" onClick={() => setDeleting(null)} disabled={busy}>Cancel</Button>
-          <Button color="bad" loading={busy} onClick={() => void deleteThread()}>Delete</Button>
-        </Group>
-      </Stack>
-    </Modal>
+    <ConfirmDialog opened={deleting !== null} onClose={() => setDeleting(null)} title="Delete chat?" confirmLabel="Delete chat" tone="danger" pending={busy ? "confirm" : null} error={mutationError || undefined} onConfirm={() => void deleteThread()}>
+      This permanently removes <Text span ff="monospace">{deleting?.title}</Text> and its saved messages.
+    </ConfirmDialog>
   </Stack>;
 }
 

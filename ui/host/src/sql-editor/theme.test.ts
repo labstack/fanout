@@ -22,7 +22,7 @@ it.each(["light", "dark"] as const)("keeps all SQL token colors at 4.5:1 on norm
   const placeholder = rules.join("\n").match(/\.cm-placeholder\s*\{[^}]*color:\s*(var\([^)]*\))/)?.[1] ?? "unset";
   const body = parse("var(--mantine-color-body)");
   const active = color.flattenColors(parse("var(--mantine-primary-color-light)"), body);
-  const selected = color.flattenColors(parse("var(--mantine-color-iris-light-hover)"), body);
+  const selected = color.flattenColors(parse("var(--mantine-color-accent-light-hover)"), body);
   for (const background of [body, active, selected]) {
     for (const foreground of ["var(--mantine-color-text)", ...sqlHighlight.specs.map(style => style.color!)]) {
       expect(color.getContrast(background, parse(foreground)), `${scheme}: ${foreground}`).toBeGreaterThanOrEqual(4.5);

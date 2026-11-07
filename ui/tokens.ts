@@ -1,7 +1,8 @@
-/** Console inputs shared by the host and embedded views. Status and interaction
- * hues stay separate: iris never conveys health. The library owns component
- * styling, contrast resolution and chart chrome in ./theme.ts. */
-export const brand = [
+/** Raw values for package-free code (shared panels, embedded views, canvas
+ * charts) that cannot import the UI library. They mirror the library's default
+ * brand, which ./theme.ts uses; host/src/theme.test.ts keeps them in sync.
+ * Status and interaction hues stay separate: the accent never conveys health. */
+export const accent = [
   "#F1F0FF", "#E4E2FF", "#CDC9FF", "#B5B0FF", "#A29CFF",
   "#8F8CFF", "#756DEB", "#5A50D8", "#463DAE", "#332B81",
 ] as const;
@@ -40,21 +41,13 @@ export const info = [
   "#33a7e6", "#1e86bd", "#146694", "#0d4a6d",
 ] as const;
 
-/** Six fixed identity slots preserve hue families across schemes. Series hues
- * identify entities, never status; status uses icons, shapes and labels.
- * Labels, shapes and dashes remain necessary when hues converge under CVD. */
-export const chartSeries = {
-  dark: ["#3987e5", "#d95926", "#199e70", "#9085e9", "#c98500", "#d55181"],
-  light: ["#2a78d6", "#eb6834", "#19a170", "#4a3aa7", "#bd8000", "#ce6d92"],
-} as const;
-
 export const typeScale = { micro: 11, small: 12, body: 14, title: 16, section: 20, page: 28 } as const;
 
 export const fonts = {
   /** Mono is for data: code, ids, timestamps, numeric cells, and the chart
    *  axes that borrow it. It no longer sets headings. */
-  display: '"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+  display: '"Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   /** One grotesk for everything a person reads: UI, prose, headings, the
    *  brand lockup. Headings differ by weight and size, not by family. */
-  body: '"Geist Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  body: '"Geist Variable", "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
 } as const;

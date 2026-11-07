@@ -217,7 +217,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
     <Group justify="space-between">
       <Group gap="xs">
         <Button loading={running} onClick={() => void execute(text, sort)}>Search</Button>
-        <SegmentedControl size="xs" aria-label="Order" value={sort} data={[...preset.sorts]} onChange={value => onSearch({ ...search, sort: value })} />
+        <SegmentedControl size="sm" aria-label="Order" value={sort} data={[...preset.sorts]} onChange={value => onSearch({ ...search, sort: value })} />
         {preset.viz === "traces" && onExplore && <Tooltip label="Error rate of the matching spans in each service, in Explore. Status and excluded terms are left out.">
           <Button variant="subtle" size="xs" disabled={!ran} onClick={() => {
             // The last search's spans, one row per service, in Explore where the query stays visible.

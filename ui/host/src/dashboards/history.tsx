@@ -1,5 +1,5 @@
-import { DataState, Notice } from "@labstack/ui";
-import { Accordion, Badge, Box, Button, Code, Drawer, Group, Paper, ScrollArea, Stack, Text, Title, VisuallyHidden } from "@mantine/core";
+import { DataState, Notice, StatusBadge } from "@labstack/ui";
+import { Accordion, Box, Button, Code, Drawer, Group, Paper, ScrollArea, Stack, Text, Title, VisuallyHidden } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { exactTimestamp } from "../../../format";
@@ -95,15 +95,15 @@ function HistoryContent({ id, opened, currentVersion, currentSpec, selected, onS
     {success && <Box ref={confirmation} tabIndex={-1} role="note"><Notice tone="success">{success.text}</Notice></Box>}
     {error && failedVersion === version && <RestoreError error={error} version={version!} />}
     <Box mih={160}>
-      {list.isPending && <Group gap="xs" role="status"><Box role="status" aria-label="Loading…"><DataState state="loading" loadingLabel="Loading…" rows={3} /></Box><Text size="sm">Loading history…</Text></Group>}
+      {list.isPending && <DataState state="loading" loadingLabel="Loading history…" rows={3} />}
       {list.error && <Box ><Notice tone="danger" title="History unavailable">{list.error.message}<Button mt="xs" variant="default" size="xs" onClick={() => void list.refetch()}>Retry history</Button></Notice></Box>}
       {list.data?.length === 0 && <DataState state="empty" empty={{title: "No versions available.", description: "Version history appears after a dashboard is saved.", action: <Button variant="default" onClick={() => void list.refetch()}>Retry history</Button>}} />}
       {!!list.data?.length && <ScrollArea h={200} type="auto">
         <Stack gap="xs" pr="sm" role="list" aria-label="Saved versions">
-          {list.data.map(item => <Paper key={item.version} role="listitem" withBorder p="xs" radius="sm" style={{ borderColor: version === item.version ? "var(--mantine-color-iris-filled)" : undefined }}>
+          {list.data.map(item => <Paper key={item.version} role="listitem" withBorder p="xs" radius="sm" style={{ borderColor: version === item.version ? "var(--mantine-color-accent-filled)" : undefined }}>
             <Group justify="space-between" gap="xs">
-              <Button color="iris" variant={version === item.version ? "light" : "subtle"} size="compact-sm" aria-pressed={version === item.version} onClick={() => onSelect(item.version)}>Version {item.version}</Button>
-              {item.version === currentVersion && <Badge color="gray" variant="light" tt="none">Current</Badge>}
+              <Button color="accent" variant={version === item.version ? "light" : "subtle"} size="compact-sm" aria-pressed={version === item.version} onClick={() => onSelect(item.version)}>Version {item.version}</Button>
+              {item.version === currentVersion && <StatusBadge tone="neutral">Current</StatusBadge>}
               <VersionTime at={item.created_at} />
             </Group>
             <Text size="xs" c="dimmed" mt={4}>{authorLabel(item)} · {item.message || "No edit message"}</Text>
@@ -113,7 +113,7 @@ function HistoryContent({ id, opened, currentVersion, currentSpec, selected, onS
     </Box>
     <VisuallyHidden role="status" aria-live="polite">{version === undefined ? "Select a version." : detail.isFetching ? `Loading version ${version}…` : detail.error ? `Version ${version} unavailable.` : `Version ${version} ready.`}</VisuallyHidden>
     <Box mih={280} aria-busy={detail.isFetching}>
-      {version !== undefined && detail.isPending && <Group gap="xs" role="status"><Box role="status" aria-label="Loading…"><DataState state="loading" loadingLabel="Loading…" rows={3} /></Box><Text size="sm">Loading version…</Text></Group>}
+      {version !== undefined && detail.isPending && <DataState state="loading" loadingLabel="Loading version…" rows={3} />}
       {detail.error && <Box ><Notice tone="danger" title={detail.error instanceof ApiError && detail.error.code === "dashboard_version_not_found" ? "This version is no longer available" : "Version unavailable"}>
         {detail.error.message}<Button mt="xs" variant="default" size="xs" onClick={() => void detail.refetch()}>Retry version</Button>
       </Notice></Box>}
@@ -144,7 +144,7 @@ function VersionDetails({ record, currentVersion, current, pending, onRestore }:
     {dashboard.description && <Text size="sm">{dashboard.description}</Text>}
     {record.changes_available ? <>
       <DashboardChangeChips labels={labels} />
-      {!labels.length && !record.layout_changed && <Text size="sm" c="dimmed">No authored changes.</Text>}
+      {!labels.length && !record.layout_changed && <DataState state="empty" empty={{ title: "No authored changes." }} />}
     </> : <Box ><Notice tone="warning" title="Changes unavailable">The preceding version is no longer retained. This saved spec is still available.</Notice></Box>}
     <Text size="sm" c="dimmed">Read-only · {dashboard.spec.panels.length} panels. Historical data is not queried.</Text>
     <Accordion variant="contained">

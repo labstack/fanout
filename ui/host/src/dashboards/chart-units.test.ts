@@ -3,7 +3,7 @@ import { analysisOption } from "../../../panels/analysis";
 import { barOption, chartThemeFor, gaugeOption, timeseriesOption } from "../../../panels/compile";
 import { typeScale, fonts } from "../../../tokens";
 
-import { relativeLuminance } from "@labstack/ui";
+import { contrastRatio } from "@labstack/ui";
 import { withAnnotations } from "../../../panels/annotations";
 import { seriesSlot } from "../../../chart";
 import { formatBucket } from "../../../panels/units";
@@ -74,7 +74,7 @@ it.each([false,true])("every axis is muted mono 11–12, gauges respect the micr
  for(const item of option.graphic.filter((g:any)=>g.type==="text")) expect(item.style.fontSize).toBeGreaterThanOrEqual(typeScale.micro);
 });
 
-const contrast=(a:string,b:string)=>{const x=relativeLuminance(a),y=relativeLuminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
+const contrast = contrastRatio;
 it.each([false,true])("all categorical marks have 3:1 fill or outline without changing palette, dark=%s",dark=>{
  const theme=chartThemeFor(dark);
  expect(contrast(theme.muted,theme.surface)).toBeGreaterThanOrEqual(4.5);expect(contrast(theme.text,theme.surface)).toBeGreaterThanOrEqual(4.5);

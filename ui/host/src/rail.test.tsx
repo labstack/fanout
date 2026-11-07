@@ -403,7 +403,7 @@ describe("Rail", () => {
     const before=fetchMock.mock.calls.filter(([input])=>String(input)==='/api/dashboards').length;
     await act(async()=>document.querySelector<HTMLButtonElement>('button[aria-label="Actions for Checkout latency"]')!.click());
     await act(async()=>[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(el=>el.textContent?.includes('Delete'))!.click());
-    await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(el=>el.textContent?.trim()==='Delete')!.click());
+    await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(el=>el.textContent?.trim()==='Delete chat')!.click());
     await vi.waitFor(()=>expect(document.querySelector('[data-request-provenance]')).toBeNull());expect(fetchMock.mock.calls.filter(([input])=>String(input)==='/api/dashboards').length).toBeGreaterThan(before);expect(document.body.textContent).not.toContain('Private request');
     }finally{await act(async()=>root.unmount());}
   });
@@ -426,7 +426,7 @@ describe("Rail", () => {
     await act(async () => openActions().click());
     const remove = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((item) => item.textContent?.includes("Delete"));
     await act(async () => remove?.click());
-    const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find((button) => button.textContent?.trim() === "Delete");
+    const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find((button) => button.textContent?.trim() === "Delete chat");
     await act(async () => confirm?.click());
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true));
     expect(handlers.onDeletedThread).toHaveBeenCalledWith("thread-checkout");

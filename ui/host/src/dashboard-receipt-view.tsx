@@ -1,5 +1,5 @@
-import { StatusBadge } from "@labstack/ui";
-import { Button, Collapse, Group, Loader, Paper, Stack, Text } from "@mantine/core";
+import { DataState, StatusBadge } from "@labstack/ui";
+import { Button, Collapse, Group, Paper, Stack, Text } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { changeChips, stageNames, type BuildReceipt } from "./dashboard-receipt";
@@ -33,7 +33,7 @@ export function DashboardReceiptView({ receipt, running = false, activity = "", 
         <Text component="div" size="sm" role="status" aria-live="polite" aria-atomic="true">{summary}{invalid > 0 && <> · <StatusBadge tone="danger">{plural(invalid, "invalid panel")}</StatusBadge></>}<Text span c="dimmed" size="xs"> · {plural(completed, "stage")} complete</Text></Text>
         <Button component="button" variant="subtle" color="gray" size="compact-xs" aria-expanded={expanded} aria-controls={detailsID} onClick={() => setExpanded(v => !v)}>Details{chips.length > 4 ? ` (+${chips.length - 4})` : ""}</Button>
       </Group>
-      {running && awaitingAnswer && <Group gap="xs" data-build-running><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
+      {running && awaitingAnswer && <div data-build-running><DataState state="loading" loadingLabel={activity || "Analyzing your system"} rows={0} /></div>}
       <DashboardChangeChips labels={chips.slice(0,4)} />
       {attention.map(text => running ? text.split(" · ").filter(part => !part.endsWith(": incomplete")).join(" · ") : text).filter(Boolean).map((text,i) => <Text key={i} size="xs" c="dimmed" data-receipt-attention>{text}</Text>)}
       {saved && <Button renderRoot={(props) => <Link {...props} to="/dashboards/$dashboardId" params={{dashboardId:saved.id}} search={{}} />} variant="subtle" size="compact-sm" color="gray" style={{alignSelf:"flex-start"}}>Open dashboard</Button>}

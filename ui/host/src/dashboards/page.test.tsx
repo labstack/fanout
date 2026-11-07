@@ -1,4 +1,5 @@
 import { within } from "@testing-library/dom";
+import { shortcutsEvent } from "../shortcuts-event";
 import { MantineProvider } from "@mantine/core";
 import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
@@ -158,9 +159,9 @@ describe("DashboardPage", () => {
     await key(close,'f');await vi.waitFor(()=>expect(onSearch).toHaveBeenCalledExactlyOnceWith({view:undefined},true));
     await rerender(onSearch.mock.lastCall![0]);await closed();
   });
-  it("uses a keyboard icon with an accessible shortcut tooltip", async () => {
-    const {host}=await render();const help=host.querySelector<HTMLButtonElement>('[aria-label="Keyboard shortcuts (?)"]')!;
-    expect(help).not.toBeNull();expect(help.textContent).toBe("");expect(help.querySelector("svg")).not.toBeNull();
+  it("keeps keyboard shortcuts out of the dashboard toolbar", async () => {
+    const {host}=await render();
+    expect(host.querySelector('[aria-label="Keyboard shortcuts (?)"]')).toBeNull();
   });
   it("pauses the live batch timer while selecting and resumes the chosen interval on cancel",async()=>{
     panelResponse=async()=>json({results:[{id:'latency',status:'ok',frame,elapsed_ms:1}]});
@@ -217,16 +218,16 @@ describe("DashboardPage", () => {
     expect(document.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true);
     await key(close,"Escape");await closed();await vi.waitFor(()=>expect(document.activeElement).toBe(toolbar));
   });
-  it("opens discoverable shortcut help and returns focus to its toolbar button", async () => {
-    const { host } = await render();
-    const help = host.querySelector<HTMLButtonElement>('[aria-label="Keyboard shortcuts (?)"]')!;
-    expect(help.querySelector("svg")).not.toBeNull();
-    help.focus(); await act(async () => help.click());
+  it("opens shortcut help from the header help menu and returns focus", async () => {
+    await render();
+    const trigger = document.createElement("button"); document.body.append(trigger); trigger.focus();
+    await act(async () => { window.dispatchEvent(new Event(shortcutsEvent)); });
     const dialog = document.querySelector('[role="dialog"]')!;
     expect(dialog.textContent).toContain("Shift+Left/Right"); expect(dialog.textContent).toContain("Without a focused panel, f does nothing.");
     const close = dialog.querySelector<HTMLElement>("button")!;
     await act(async () => { close.focus(); close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
-    await closed(); await vi.waitFor(() => expect(document.activeElement).toBe(help));
+    await closed(); await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+    trigger.remove();
   });
   it("returns focus to History after Escape closes its drawer", async () => {
     const { client } = await render();

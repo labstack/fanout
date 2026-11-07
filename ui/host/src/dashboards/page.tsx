@@ -23,6 +23,7 @@ import { useVariableOptions } from "./use-variables";
 import { VariableBar } from "./variable-bar";
 import { useShortcuts } from "./use-shortcuts";
 import { ShortcutsHelp } from "./shortcuts-help";
+import { shortcutsEvent } from "../shortcuts-event";
 import { useViewer } from "../auth";
 import { useShortcutPreference } from "./shortcut-preference";
 import { usePanelViewFocus } from "./use-panel-view-focus";
@@ -77,6 +78,11 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
   const [duplicating, setDuplicating] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  useEffect(() => {
+    const open = () => setHelpOpen(true);
+    window.addEventListener(shortcutsEvent, open);
+    return () => window.removeEventListener(shortcutsEvent, open);
+  }, []);
   const region = useRef<HTMLElement>(null);
   const scope = useId();
   const preference = useShortcutPreference(useViewer().id);
@@ -153,13 +159,13 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
           }}
           onRefresh={setRefresh} onRefreshNow={data.refetch}
           onCompare={(on) => onSearch({ ...search, compare: on ? "1" : "0" }, true)}
-          onEdit={edit} onHistory={() => setHistoryOpen(true)} onShortcuts={() => setHelpOpen(true)} />
+          onEdit={edit} onHistory={() => setHistoryOpen(true)} />
       <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVar} />
       {Object.entries(vars).filter(([, v]) => v !== ALL).length > 0 && <Group gap={6}>
-        {Object.entries(vars).filter(([, v]) => v !== ALL).map(([name, value]) => <Button key={name} color="iris" size="compact-xs" variant="light" aria-label={`$${name} = ${Array.isArray(value) ? value.join(", ") : value} ×: remove filter`} onClick={() => setVar(name, undefined)}>${name} = {Array.isArray(value) ? value.join(", ") : value} ×</Button>)}
+        {Object.entries(vars).filter(([, v]) => v !== ALL).map(([name, value]) => <Button key={name} color="accent" size="compact-xs" variant="light" aria-label={`$${name} = ${Array.isArray(value) ? value.join(", ") : value} ×: remove filter`} onClick={() => setVar(name, undefined)}>${name} = {Array.isArray(value) ? value.join(", ") : value} ×</Button>)}
       </Group>}
       {data.annotationError && <Notice tone="warning" title="Annotations unavailable">{data.annotationError}</Notice>}
-      {data.annotations?.truncated && <Text size="xs" c="warn" role="status">Annotation history is limited.</Text>}
+      {data.annotations?.truncated && <Notice tone="warning">Annotation history is limited.</Notice>}
     </Stack>
     {!loadError && data.skippedAt !== null && <Box data-refresh-skipped><Notice tone="info">
       The server was busy, so the latest refresh was skipped. Marked panels show data from {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(data.skippedAt)}.

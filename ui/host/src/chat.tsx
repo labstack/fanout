@@ -1,7 +1,7 @@
 import { Notice } from "@labstack/ui";
-import { DataState, PageHeader } from "@labstack/ui";
+import { DataState, PageHeader, labstackContentWidths } from "@labstack/ui";
 import type { Message } from "@ag-ui/client";
-import { ActionIcon, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Box, Button, Container, Group, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
 import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight, ArrowDown } from "@phosphor-icons/react";
 import { lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
@@ -127,9 +127,9 @@ function ChatAppView({ view }: { view: AppView }) {
   const status = fragment.dashboard.panels.length>1
     ? Array.from(counts,([status,count])=>`${count} ${status}`).join(" · ")
     : counts.size ? [...counts.keys()].join(", ") : `${rows} ${rows === 1 ? "row" : "rows"}`;
-  return <Paper data-chat-app data-chat-anchor withBorder radius="lg" style={{ overflow: "hidden" }}>
+  return <Paper data-chat-app data-chat-anchor withBorder radius="md" style={{ overflow: "hidden" }}>
     <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><span className="chat-app-chevron" aria-hidden="true">{expanded ? <CaretDown size={14} /> : <CaretRight size={14} />}</span><span className="chat-app-summary">{[title, viz, status].filter(Boolean).join(" · ")}</span></UnstyledButton>
-    {expanded && <Suspense fallback={<Center mih={180}><Loader size="sm" /></Center>}><MCPAppFrame content={view.content} /></Suspense>}
+    {expanded && <Suspense fallback={<DataState state="loading" variant="page" loadingLabel="Preparing view…" />}><MCPAppFrame content={view.content} /></Suspense>}
   </Paper>;
 }
 
@@ -145,7 +145,7 @@ export function ChatPage() {
   const receipts = useDashboardReceipts(messages);
   const lastSent = messages.filter((message) => message.role === "user").at(-1)?.id;
   const { scrollRef, contentRef, turnRef, showJump, jumpToLatest } = useTurnAnchor<HTMLDivElement, HTMLDivElement>(lastSent);
-  if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><PageHeader title="Chat" description="Chat is not configured" /><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
+  if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="md" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><PageHeader title="Chat" description="Chat is not configured" /><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
   const appViews = chatAppViews(messages);
   const failures = toolFailures(messages);
   const visibleMessages = messages.filter((message) => {
@@ -198,7 +198,7 @@ export function ChatPage() {
                   {answer && <Box data-answer-position key={`answer-${lastSent ?? "draft"}`}>
                     <ChatMessage message={answer!} time={messageTimes[answer!.id]} />
                   </Box>}
-                  {running && !hasFinalText && !receipts.has(lastSent ?? "") && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
+                  {running && !hasFinalText && !receipts.has(lastSent ?? "") && <DataState state="loading" loadingLabel={activity || "Analyzing your system"} rows={0} />}
                   {stopped && <Text c="dimmed" size="sm">Stopped</Text>}
                   {error && <RunError message={error} onRetry={retry} />}
                 </>}
@@ -207,7 +207,7 @@ export function ChatPage() {
           </>}
         </Container>
       </Box>
-      {showJump && <Tooltip label="Jump to latest"><ActionIcon className="chat-jump" variant="default" size={36} radius="xl" aria-label="Jump to latest" onClick={jumpToLatest}><ArrowDown size={18} aria-hidden="true" /></ActionIcon></Tooltip>}
+      {showJump && <Tooltip label="Jump to latest"><ActionIcon className="chat-jump" variant="default" size={36} aria-label="Jump to latest" onClick={jumpToLatest}><ArrowDown size={18} aria-hidden="true" /></ActionIcon></Tooltip>}
     </Box>
     {!threadMissing && <Composer />}
   </Box>;
@@ -229,12 +229,12 @@ function Composer() {
   const { input, setInput, inputRef, submit, send, stop, ready, running } = useFanoutApp();
   return <Box className="chat-composer">
     <Container size={880} px={{ base: "md", sm: "xl" }}>
-      <Paper component="form" onSubmit={submit} className="chat-composer-field" style={{ borderColor: "var(--composer-border, var(--labstack-border))" }} withBorder radius={24} py={6} pl="lg" pr={6}>
+      <Paper component="form" onSubmit={submit} className="chat-composer-field" style={{ borderColor: "var(--composer-border, var(--labstack-control-border))" }} withBorder radius="sm" py={6} pl="lg" pr={6}>
         <Group align="flex-end" gap="xs" wrap="nowrap">
           <Textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is working…" : "Ask about health, errors, or latency…"} disabled={!ready} autosize minRows={1} maxRows={8} variant="unstyled" flex={1} />
           {running
-            ? <Tooltip label="Stop"><ActionIcon type="button" variant="default" size={40} radius="xl" aria-label="Stop" onClick={stop}><Stop size={16} weight="fill" /></ActionIcon></Tooltip>
-            : <ActionIcon type="submit" variant="filled" size={40} radius="xl" disabled={!input.trim() || !ready} aria-label="Send message"><PaperPlaneTilt size={17} weight="fill" /></ActionIcon>}
+            ? <Tooltip label="Stop"><ActionIcon type="button" variant="default" size={40} aria-label="Stop" onClick={stop}><Stop size={16} weight="fill" /></ActionIcon></Tooltip>
+            : <ActionIcon type="submit" variant="filled" size={40} disabled={!input.trim() || !ready} aria-label="Send message"><PaperPlaneTilt size={17} weight="fill" /></ActionIcon>}
         </Group>
       </Paper>
       <Text c="dimmed" size="xs" ta="center" mt={6}>Enter to send, Shift+Enter for a new line</Text>
@@ -246,8 +246,8 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
   return <Stack align="center" gap="md" pt={{ base: 32, sm: 88 }} pb="xl" ta="center">
     <BrandMark size="large" />
     <Title order={2} fz={24} fw={500} lh={1.25} maw={560}>What do you want to know about your system?</Title>
-    <Group justify="center" gap="xs" mt="xs" maw={720}>
-      {suggestions.map((suggestion) => <Button key={suggestion} variant="default" size="sm" radius="xl" onClick={() => void onSelect(suggestion)}>{suggestion}</Button>)}
+    <Group justify="center" gap="xs" mt="xs" maw={labstackContentWidths.prose}>
+      {suggestions.map((suggestion) => <Button key={suggestion} variant="default" size="sm" onClick={() => void onSelect(suggestion)}>{suggestion}</Button>)}
     </Group>
   </Stack>;
 }
@@ -268,7 +268,7 @@ function ChatMessage({ message, time, appView }: { message: Message; time?: numb
   const stamp = time ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(time)) : "";
   return <Box className="chat-message" data-chat-anchor data-role={user ? "user" : "assistant"}>
     {user
-      ? <Paper radius="lg" px="md" py="sm" bg="var(--labstack-inset)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
+      ? <Paper radius="md" px="md" py="sm" bg="var(--labstack-inset)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
       : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm, answerStructure]} components={markdownComponents}>{content}</Markdown></Typography>}
     {(stamp || !user) && <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4} h={24}>
       {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}

@@ -6,7 +6,6 @@ import type { Result, TraceDetail, TraceSpan } from "../../../../contracts";
 import { chartTheme, seriesSlot, statusHex } from "../../../../chart";
 import { series } from "../../../../theme";
 import { duration } from "../../../../format";
-import { EmptyState } from "./components";
 import { ListBullets } from "@phosphor-icons/react";
 import { Waterfall } from "./waterfall";
 import { SpanDetails, type SpanLoader } from "./span-details";
@@ -35,8 +34,8 @@ export function TraceDetailView({ result, dark, onSpan, loadSpan }: { result: Re
       <Tabs.Panel value="flame" pt="sm"><FlameGraph spans={data.spans} dark={dark} onSpan={select} traceMs={data.truncated ? data.duration_ms : undefined} /></Tabs.Panel>
       </Tabs>
       {picked && <SpanDetails key={picked.span_id} traceId={data.trace_id} span={picked} load={loadSpan} onClose={() => setPicked(undefined)} />}
-    </> : <Text c="dimmed">No spans were found for this trace.</Text>}
-    <Text fw={600}>Correlated logs</Text>{data.logs.length ? <Box style={{ overflow: "auto", minWidth: 0 }}><LogsViz foldConstants={false} panel={{ id: "correlated_logs", title: "Correlated logs", viz: "logs" }} result={logResult} dark={dark} height={320} /></Box> : <EmptyState tall icon={<ListBullets size={20} weight="duotone" />} title="No correlated logs">No logs in this window carry the selected trace ID.</EmptyState>}
+    </> : <DataState state="empty" empty={{ title: "No spans were found for this trace." }} />}
+    <Text fw={600}>Correlated logs</Text>{data.logs.length ? <Box style={{ overflow: "auto", minWidth: 0 }}><LogsViz foldConstants={false} panel={{ id: "correlated_logs", title: "Correlated logs", viz: "logs" }} result={logResult} dark={dark} height={320} /></Box> : <DataState state="empty" empty={{ icon: <ListBullets size={20} weight="duotone" />, title: "No correlated logs", description: "No logs in this window carry the selected trace ID." }} />}
   </Stack>;
 }
 

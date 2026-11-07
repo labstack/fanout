@@ -2,7 +2,7 @@ import { DataState, Notice } from "@labstack/ui";
 import {mcpAppCSP} from "./mcp-app-csp";
 import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { Box, Button, Center, FocusTrap, Text, useComputedColorScheme } from "@mantine/core";
+import { Box, Button, FocusTrap, Text, useComputedColorScheme } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { mcpAppContent, type MCPAppContent } from "./mcp-app-content";
 import { authorizedFetch } from "./auth";
@@ -303,8 +303,8 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
     }
   }
 
-  if (error) return <Box m="md"><Notice tone="danger">{error}</Notice></Box>;
-  if (!html) return <Center mih={180} p="xl"><Box role="status" aria-label="Loading…"><DataState state="loading" loadingLabel="Loading…" rows={3} /></Box><Text c="dimmed" size="sm" ml="sm">Preparing view…</Text></Center>;
+  if (error) return <Box m="md"><DataState state="error" error={{ message: error }} /></Box>;
+  if (!html) return <DataState state="loading" loadingLabel="Preparing view…" variant="page" />;
   // Keep the iframe in the same DOM position: reparenting or remounting reloads the app.
   return <FocusTrap active={displayMode === "fullscreen"}><Box data-app-fullscreen={displayMode === "fullscreen" ? "" : undefined}
     role={displayMode === "fullscreen" ? "dialog" : undefined} aria-modal={displayMode === "fullscreen" ? true : undefined} aria-label={displayMode === "fullscreen" ? "Fanout analysis view" : undefined}

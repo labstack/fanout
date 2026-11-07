@@ -1,12 +1,12 @@
 import { useComputedColorScheme } from "@mantine/core";
 import type { ReactNode } from "react";
-import { brand, fonts, surfaces } from "../../../../tokens";
+import { accent, fonts, surfaces } from "../../../../tokens";
 import { chart } from "../../../../theme";
 
 export function RowText({ text, template = false, highlight = "" }: { text: string; template?: boolean; highlight?: string }) {
   const dark = useComputedColorScheme("light") === "dark";
-  const accent = brand[dark ? 5 : 7];
-  const rgb = [1,3,5].map(i => parseInt(accent.slice(i,i+2),16)).join(", ");
+  const tint = accent[dark ? 5 : 7];
+  const rgb = [1,3,5].map(i => parseInt(tint.slice(i,i+2),16)).join(", ");
   const matches: number[] = [];
   if (highlight) {
     const lower = text.toLowerCase(), needle = highlight.toLowerCase();

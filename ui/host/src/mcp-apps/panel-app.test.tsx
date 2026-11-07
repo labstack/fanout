@@ -30,7 +30,7 @@ async function mount() {
 it.each([false, true])("renders panels.html fixtures with bridge theme changes and no host fetch (dark=%s)", async dark => {
   const fetch = vi.spyOn(globalThis, "fetch"); const view = await mount();
   try {
-    expect(view.node.querySelector('[aria-label="Loading panel view"]')).not.toBeNull();
+    expect(view.node.querySelector('[role="status"]')?.textContent).toContain("Loading panel view");
     await act(async () => { await bridge.app.ontoolresult!({ structuredContent: { ...fixture(), trace: traceFixture }, content: [] }); await bridge.app.onhostcontextchanged!({ theme: dark ? "dark" : "light" }); });
     expect(document.documentElement.getAttribute("data-mantine-color-scheme")).toBe(dark ? "dark" : "light");
     expect(view.node.querySelector('[data-panel="p"]')).not.toBeNull(); expect(view.node.textContent).toContain("No logs for checkout");
@@ -71,7 +71,7 @@ it("waits for the bridge and sanitizes connection errors", async () => {
   bridge.connected = false;
   const view = await mount();
   try {
-    expect(view.node.querySelector('[aria-label="Loading panel view"]')).not.toBeNull();
+    expect(view.node.querySelector('[role="status"]')?.textContent).toContain("Loading panel view");
     bridge.connectionError = new Error("private connection error");
     await act(async () => view.root.render(<PanelApp />));
     expect(noticeText(view.node.querySelector('[role="alert"]'))).toBe("This view could not be loaded. Please try again.");

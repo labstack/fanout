@@ -1,8 +1,8 @@
 import { DEFAULT_THEME, defaultCssVariablesResolver, mergeMantineTheme } from "@mantine/core";
-import { contrastRatio } from "@labstack/ui";
+import { contrastRatio, labstackDefaultBrand } from "@labstack/ui";
 import { describe, expect, it } from "vitest";
 import { fanoutCssVariables, fanoutTheme, chart } from "../../theme";
-import { brand, fonts, surfaces, typeScale } from "../../tokens";
+import { accent, bad, fonts, info, ok, surfaces, typeScale, warn } from "../../tokens";
 
 const theme = mergeMantineTheme(DEFAULT_THEME, fanoutTheme);
 function variables(scheme: "light" | "dark") {
@@ -12,6 +12,16 @@ function variables(scheme: "light" | "dark") {
   return (name: string) => resolve(values[name]);
 }
 
+it("package-free tokens mirror the library default brand", () => {
+  const brand = labstackDefaultBrand;
+  expect([...accent]).toEqual([...brand.accent]);
+  expect({ ok: [...ok], warn: [...warn], bad: [...bad], info: [...info] }).toEqual(brand.colors);
+  expect(surfaces).toEqual(brand.surfaces);
+  expect(fonts.body).toBe(brand.fontFamily);
+  expect(fonts.display).toBe(brand.fontFamilyMonospace);
+  const { micro: _micro, ...scale } = typeScale;
+  expect(scale).toEqual(brand.typeScale);
+});
 it("uses Geist for UI and headings and Geist Mono for data", () => {
   expect(theme.fontFamily).toBe(fonts.body);
   expect(theme.headings.fontFamily).toBe(fonts.body);
@@ -33,22 +43,19 @@ describe.each(["light", "dark"] as const)("%s scheme", scheme => {
     expect(value("--mantine-color-dimmed")).toBe(surfaces[scheme].muted);
     expect(value("--labstack-control-border")).toBe(surfaces[scheme].controlBorder);
   });
-  it("reads iris text at 4.5:1 and selected edges at 3:1", () => {
-    const accent = brand[scheme === "dark" ? 5 : 7];
-    for (const background of Object.values(surfaces[scheme]).slice(0, 4)) {
-      expect(contrastRatio(accent, background)).toBeGreaterThanOrEqual(4.5);
-      expect(contrastRatio(accent, background)).toBeGreaterThanOrEqual(3);
-    }
-    expect(value("--mantine-color-anchor")).toBe(accent);
+  it("reads accent text at 4.5:1 and uses it for links and focus", () => {
+    const text = value("--mantine-color-accent-text");
+    for (const background of Object.values(surfaces[scheme]).slice(0, 4)) expect(contrastRatio(text, background)).toBeGreaterThanOrEqual(4.5);
+    expect(value("--mantine-color-anchor")).toBe(text);
+    expect(value("--labstack-focus")).toBe(text);
     expect(value("--mantine-primary-color-filled")).toBe(surfaces[scheme].text);
-    expect(value("--fanout-focus")).toBe(accent);
-    expect(contrastRatio(surfaces[scheme].muted, value("--mantine-color-iris-light"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(surfaces[scheme].muted, value("--mantine-color-accent-light"))).toBeGreaterThanOrEqual(4.5);
   });
   it("uses token surfaces for neutral variants and hover", () => {
     expect(value("--mantine-color-default-hover")).toBe(surfaces[scheme].hover);
-    for (const color of ["brand", "gray", "dark", "ink"]) {
-      expect(value(`--mantine-color-${color}-light`)).toBe(surfaces[scheme].inset);
-      expect(value(`--mantine-color-${color}-light-hover`)).toBe(surfaces[scheme].hover);
+    for (const color of ["gray", "dark"]) {
+      expect(value(`--mantine-color-${color}-light`)).toBe(surfaces[scheme].hover);
+      expect(value(`--mantine-color-${color}-light-hover`)).toBe(surfaces[scheme].borderSoft);
       expect(value(`--mantine-color-${color}-light-color`)).toBe(surfaces[scheme].text);
     }
   });

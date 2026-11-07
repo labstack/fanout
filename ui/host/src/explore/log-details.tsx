@@ -1,6 +1,6 @@
 import { LoadingSkeleton } from "../loading-skeleton";
-import { DataState, Notice } from "@labstack/ui";
-import { Box,  Anchor, Group, Stack, Text } from "@mantine/core";
+import { DataState, KeyValueList, Notice } from "@labstack/ui";
+import { Anchor, Box, Stack, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import type { Cell } from "../../../panels/types";
 import { queryPanels } from "../dashboards/api";
@@ -35,17 +35,16 @@ export function LogDetails({ row, onTrace }: { row: Record<string, Cell>; onTrac
   const extras = useQuery({ queryKey: ["log-extras", row], queryFn: ({ signal }) => logExtras(row, signal), retry: false, staleTime: Infinity });
   const traceId = typeof row.trace_id === "string" ? row.trace_id : "";
   return <Stack gap="xs" py={4} data-log-details onClick={event => event.stopPropagation()} style={{ cursor: "auto" }}>
-    {traceId && <Group gap="xs" wrap="wrap">
-      <Text size="xs" c="dimmed">Trace</Text>
-      {onTrace ? <Anchor component="button" type="button" size="xs" ff="monospace" onClick={onTrace} style={{ overflowWrap: "anywhere" }}>{traceId}</Anchor> : <Text size="xs" ff="monospace">{traceId}</Text>}
-      {extras.data?.span_id && <><Text size="xs" c="dimmed">Span</Text><Text size="xs" ff="monospace">{extras.data.span_id}</Text></>}
-    </Group>}
+    {traceId && <Box><KeyValueList label="Log metadata" items={[
+      { label: "Trace", value: onTrace ? <Anchor component="button" type="button" size="sm" ff="monospace" onClick={onTrace} style={{ overflowWrap: "anywhere" }}>{traceId}</Anchor> : <Text span inherit ff="monospace">{traceId}</Text> },
+      ...(extras.data?.span_id ? [{ label: "Span", value: <Text span inherit ff="monospace">{extras.data.span_id}</Text> }] : []),
+    ]} /></Box>}
     {extras.isLoading && <DataState state="loading" loadingLabel="Loading log details" skeleton={<LoadingSkeleton shape="key_value" rows={3} />} />}
-    {extras.error && <Box p="xs"><Notice tone="danger" onRetry={() => void extras.refetch()}>{extras.error.message}</Notice></Box>}
+    {extras.error && <Box p="xs"><DataState state="error" error={{ message: extras.error.message, onRetry: () => void extras.refetch() }} /></Box>}
     {extras.data && <>
       <Attributes label="Attributes" values={extras.data.attributes} />
       <Attributes label="Resource" values={extras.data.resource} />
-      {extras.data.scope && <Text size="xs" c="dimmed">Instrumentation scope: {extras.data.scope}</Text>}
+      {extras.data.scope && <Box><KeyValueList items={[{ label: "Instrumentation scope", value: <Text span inherit ff="monospace">{extras.data.scope}</Text> }]} /></Box>}
     </>}
   </Stack>;
 }

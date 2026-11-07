@@ -15,15 +15,14 @@ type Story = StoryObj<typeof meta>;
 export const KeyValue: Story = { play: async ({ canvas }) => {
   const placeholder = await assertLoadingState(await canvas.findByText("Loading details"), "Loading details", "key_value");
   await expect(placeholder.querySelector('[data-skeleton-row="header"]')).toBeNull();
-  const rows = placeholder.querySelectorAll<HTMLElement>('[data-skeleton-row="body"]');
-  await expect(rows).toHaveLength(3);
-  for (const row of rows) {
-    const bounds = row.getBoundingClientRect();
-    await expect(bounds.height).toBe(20);
-    const cells = row.children;
-    await expect(cells).toHaveLength(2);
-    await expect((cells[1].getBoundingClientRect().left - bounds.left) / bounds.width).toBeCloseTo(0.38, 2);
-    await expect(cells[0].getBoundingClientRect().height).toBe(12);
+  const labels = placeholder.querySelectorAll<HTMLElement>("dt");
+  const values = placeholder.querySelectorAll<HTMLElement>("dd");
+  await expect(labels).toHaveLength(3);
+  await expect(values).toHaveLength(3);
+  for (const [index, label] of labels.entries()) {
+    await expect(label.getBoundingClientRect().width).toBe(192);
+    await expect(values[index].getBoundingClientRect().left).toBe(label.getBoundingClientRect().right);
+    await expect(placeholder.querySelector(`[data-skeleton-value="${index}"]`)?.getBoundingClientRect().height).toBe(21);
   }
 } };
 export const Settings: Story = { args: { shape: "settings" }, play: async ({ canvas }) => {

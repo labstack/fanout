@@ -36,11 +36,11 @@ export const Composer: Story = { args: { messages: [] }, play: async ({ canvas, 
   const composer = input.closest<HTMLElement>(".chat-composer-field")!;
   const style = getComputedStyle(composer);
   const hex = (color: string) => "#" + color.match(/\d+/g)!.slice(0, 3).map(channel => Number(channel).toString(16).padStart(2, "0")).join("");
-  const focus = style.getPropertyValue("--fanout-focus").trim();
+  const focus = style.getPropertyValue("--labstack-focus").trim();
   // The border animates for 150 ms; assert its settled color, not a mid-transition frame.
   await waitFor(() => expect(hex(style.borderColor)).toBe(focus.toLowerCase()));
   await expect(contrastRatio(hex(style.borderColor), hex(style.backgroundColor))).toBeGreaterThanOrEqual(3);
-  await expect(style.boxShadow).toContain(style.borderColor);
+  await waitFor(() => expect(style.boxShadow).toContain(style.borderColor));
   await expect(input).toHaveValue("How is checkout?");
   await expect(canvas.getByRole("button", { name: "Send message" })).toBeEnabled();
 } };
