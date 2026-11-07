@@ -7,7 +7,7 @@ function visible(element: Element) {
   );
 }
 
-function visuallyHidden(element: Element, root: HTMLElement) {
+export function visuallyHidden(element: Element, root: HTMLElement) {
   for (
     let ancestor: Element | null = element;
     ancestor && root.contains(ancestor);

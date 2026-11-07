@@ -76,7 +76,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
     <Stack gap="xs">
       <Title order={2} fz={18}>Rules</Title>
       {rules.data && rules.data.length > 0 && <Text size="xs" c="dimmed">{exploreNote}</Text>}
-      {rules.isLoading ? <DataState state="loading" loadingLabel="Loading alert rules" skeleton={<LoadingSkeleton viz="table" columns={7} rows={4} />} /> : rules.error ? <Notice tone="danger">Rules could not be loaded: {rules.error.message}</Notice>
+      {rules.isLoading ? <DataState state="loading" loadingLabel="Loading alert rules" skeleton={<LoadingSkeleton shape="table" columns={7} rows={4} />} /> : rules.error ? <Notice tone="danger">Rules could not be loaded: {rules.error.message}</Notice>
         : rules.data?.length === 0 ? <DataState state="empty" empty={{title: "No rules yet", description: "Create a rule to get notified when a service misbehaves.", action: canManage && <Button onClick={() => setEditing({})}>New rule</Button>}} />
         : <Table.ScrollContainer minWidth={760}><Table verticalSpacing="sm">
           <Table.Thead><Table.Tr><Table.Th>Rule</Table.Th><Table.Th>Service</Table.Th><Table.Th>Expression</Table.Th><Table.Th>State</Table.Th><Table.Th>Last fired</Table.Th><Table.Th>Enabled</Table.Th><Table.Th w={48}><Text size="xs" c="dimmed">Actions</Text></Table.Th></Table.Tr></Table.Thead>
@@ -105,7 +105,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
 
     <Stack gap="xs">
       <Title order={2} fz={18}>History</Title>
-      {alerts.isLoading ? <DataState state="loading" loadingLabel="Loading alert history" skeleton={<LoadingSkeleton viz="table" columns={7} rows={4} />} /> : alerts.error ? <Notice tone="danger">Alert history could not be loaded: {alerts.error.message}</Notice>
+      {alerts.isLoading ? <DataState state="loading" loadingLabel="Loading alert history" skeleton={<LoadingSkeleton shape="table" columns={7} rows={4} />} /> : alerts.error ? <Notice tone="danger">Alert history could not be loaded: {alerts.error.message}</Notice>
         : history.length === 0 ? <DataState state="empty" empty={{title: "Nothing has fired yet", description: "Connect telemetry to evaluate your alert rules.", action: <Button component="a" href="/settings" variant="default">Connect telemetry</Button>}} />
         : <Table.ScrollContainer minWidth={760} scrollAreaProps={{ viewportProps: { tabIndex: 0, role: "region", "aria-label": "Alert history" } }}><Table verticalSpacing="xs">
           <Table.Thead><Table.Tr><Table.Th>State</Table.Th><Table.Th>Rule</Table.Th><Table.Th>Service</Table.Th><Table.Th ta="right">Value</Table.Th><Table.Th>Fired</Table.Th><Table.Th>Resolved</Table.Th><Table.Th>Delivery</Table.Th></Table.Tr></Table.Thead>

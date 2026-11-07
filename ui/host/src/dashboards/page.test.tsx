@@ -60,7 +60,7 @@ const settle = async (client: QueryClient) => {
     expect(idleCycles).toBeGreaterThanOrEqual(2);
     if (client.getQueryData(["dashboard", "d1"])) expect(document.querySelector('[aria-label="Refresh now"]')).not.toBeNull();
     expect(document.querySelector('[aria-label="Refresh now"][disabled]')).toBeNull();
-    expect(document.querySelector('[data-panel] [aria-label="Loading panel"],[data-panel] [aria-label="Refreshing"]')).toBeNull();
+    expect(document.querySelector('[data-panel-body] > [role="status"],[data-panel] [aria-label="Refreshing"]')).toBeNull();
   }, {timeout: 3000, interval: 5});
 };
 async function key(target: HTMLElement, key: string, extra: KeyboardEventInit = {}) {
@@ -413,7 +413,7 @@ describe("DashboardPage", () => {
     listResponse = async () => json({ dashboards: [] });
     const { host, onOpen } = await render({}, "");
     await vi.waitFor(() => expect(within(host).getByRole("heading", {name: "No dashboards yet", level: 2})).toBeTruthy(), { interval: 5, timeout: 3000 });
-    await vi.waitFor(() => expect(host.textContent).not.toContain("Loading your dashboard"), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(host.textContent).not.toContain("Loading dashboard"), { interval: 5, timeout: 3000 });
     const byText = (label: string) => [...host.querySelectorAll("button")].find(b => b.textContent === label);
     await act(async () => { byText("Create with AI")!.click(); });
     expect(app.openChat).toHaveBeenCalledWith(expect.stringMatching(/^Build me a dashboard for /));
@@ -435,7 +435,7 @@ describe("DashboardPage", () => {
     const { host } = await render({}, "");
     await vi.waitFor(() => expect(host.textContent).toContain("Dashboards could not be loaded"), { interval: 5, timeout: 3000 });
     await vi.waitFor(() => expect(host.textContent).toContain("List failed"), { interval: 5, timeout: 3000 });
-    await vi.waitFor(() => expect(host.textContent).not.toContain("Loading your dashboard"), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(host.textContent).not.toContain("Loading dashboard"), { interval: 5, timeout: 3000 });
   });
 
   it("loads an explicit dashboard without waiting for its list", async () => {
@@ -804,7 +804,7 @@ it("waits for rendered idle even when query notifications lag network idle", asy
     const {host}=await render();
     const refresh=host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]');
     expect(refresh).not.toBeNull();expect(refresh!.disabled).toBe(false);
-    expect(host.querySelector('[aria-label="Loading panel"],[aria-label="Refreshing"]')).toBeNull();
+    expect(host.querySelector('[data-panel-body] > [role="status"],[aria-label="Refreshing"]')).toBeNull();
     expect(host.textContent).toContain("120");
   } finally { notifyManager.setScheduler(callback => setTimeout(callback, 0)); }
 });

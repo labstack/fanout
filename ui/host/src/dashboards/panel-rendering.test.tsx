@@ -210,8 +210,8 @@ it("measures legend labels with the chart font and uses safe full-name tooltips"
 it.each([
   ["timeseries", "chart"], ["bar", "chart"], ["histogram", "chart"], ["scatter", "chart"],
   ["table", "table"], ["logs", "table"], ["traces", "table"], ["log_patterns", "table"],
-  ["stat", "stat"], ["gauge", "gauge"], ["heatmap", "heatmap"], ["text", "text"],
-  ["health", "list"], ["service_map", "list"], ["state_timeline", "chart"],
+  ["stat", "stat"], ["gauge", "gauge"], ["heatmap", "heatmap"],
+  ["health", "health"], ["service_map", "graph"], ["state_timeline", "chart"],
 ] as const)("announces %s loading with a hidden %s placeholder and a visible title", async (viz, shape) => {
   const host = await render(<PanelCard panel={{ ...panel, viz }} title="Requests" loading height={300} group="g" editing={false} agentAvailable={false} />);
   const body = host.querySelector('[data-panel-body]')!;
@@ -225,4 +225,15 @@ it.each([
     expect(placeholder.querySelectorAll('[data-skeleton-row="header"]')).toHaveLength(1);
     expect(placeholder.querySelectorAll('[data-skeleton-row="body"]')).toHaveLength(5);
   }
+});
+
+it.each([false, true])("renders client-side text without a result while loading=%s", async loading => {
+  const host = await render(<PanelCard panel={{ ...panel, viz: "text", content: "Local panel notes" }} title="Notes" loading={loading} height={300} group="g" editing={false} agentAvailable={false} />);
+  expect(host.textContent).toContain("Local panel notes");
+  expect(host.querySelector('[data-panel-body] [role="status"]')).toBeNull();
+});
+
+it("uses the panel id in the loading label when its title is empty", async () => {
+  const host = await render(<PanelCard panel={panel} title="" loading height={300} group="g" editing={false} agentAvailable={false} />);
+  expect(within(host).getByRole("status").textContent).toBe("Loading panel p");
 });

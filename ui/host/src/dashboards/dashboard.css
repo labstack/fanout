@@ -129,6 +129,19 @@
 }
 
 
+.dashboard-loading-panel[data-skeleton-columns="4"] { grid-column: span 4; }
+.dashboard-loading-panel[data-skeleton-columns="6"] { grid-column: span 6; }
+
+/* Carry the body height through DataState's announcement and inert wrappers. */
+[data-panel-loading] > [role="status"],
+[data-panel-loading] > [role="status"] > [aria-hidden="true"][inert] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 @container (max-width: 799px) {
-  .dashboard-loading-grid > .dashboard-loading-panel { grid-column: span 12 !important; }
+  .dashboard-loading-panel[data-skeleton-columns] { grid-column: span 12; }
 }

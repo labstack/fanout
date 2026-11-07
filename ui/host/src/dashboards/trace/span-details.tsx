@@ -52,7 +52,7 @@ export function SpanDetails({ traceId, span, load, onClose }: { traceId: string;
         <Text size="xs" ff="monospace" c="dimmed">span {span.span_id}{span.parent_span_id ? ` · parent ${span.parent_span_id}` : ""}</Text>
       </Group>
       {span.status_message && <Text size="sm" c={failed ? "bad" : undefined} style={{ overflowWrap: "anywhere" }}>{span.status_message}</Text>}
-      {extras.isFetching && <DataState state="loading" loadingLabel="Loading span details" skeleton={<LoadingSkeleton viz="table" columns={2} rows={3} />} />}
+      {extras.isLoading && <DataState state="loading" loadingLabel="Loading span details" skeleton={<LoadingSkeleton shape="key_value" rows={3} />} />}
       {extras.error && <Box p="xs"><Notice tone="danger" onRetry={() => void extras.refetch()}>{extras.error.message}</Notice></Box>}
       {exceptions.map((event, index) => {
         const message = text(event.attributes["exception.message"]), stack = text(event.attributes["exception.stacktrace"]);

@@ -11,7 +11,7 @@ export function DashboardSkeleton() {
     </Stack>
     <Box style={{ containerType: "inline-size" }}>
       <Box className="dashboard-loading-grid" style={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gap: margin }}>
-        {(["stat", "stat", "stat", "timeseries", "table"] as const).map((viz, i) => <Paper key={i} withBorder p="md" className="dashboard-loading-panel" data-skeleton-columns={viz === "stat" ? 4 : 6} style={{ gridColumn: `span ${viz === "stat" ? 4 : 6}`, minHeight: pixels(viz === "stat" ? 4 : 6) }}>
+        {(["stat", "stat", "stat", "timeseries", "table"] as const).map((viz, i) => <Paper key={i} withBorder p="md" className="dashboard-loading-panel" data-skeleton-columns={viz === "stat" ? 4 : 6} style={{ display: "flex", flexDirection: "column", minHeight: pixels(viz === "stat" ? 4 : 6) }}>
           <Skeleton height={14} width="44%" mb="xl" />
           <LoadingSkeleton viz={viz} rows={4} />
         </Paper>)}

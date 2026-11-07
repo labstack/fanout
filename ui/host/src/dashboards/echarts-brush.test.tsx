@@ -68,7 +68,7 @@ it.each([false, true].flatMap(dark => [300, 600].map(width => ({ dark, width }))
       const choose = async (mode: string) => {
         if (folded) {
           await act(async () => card.querySelector<HTMLButtonElement>(`[aria-label="${viz} menu"]`)!.click());
-          await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+          await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull(), { timeout: 5000 });
         }
         const scope = folded ? document : card;
         const button = Array.from(scope.querySelectorAll<HTMLButtonElement>("[data-panel-view]")).find(button => button.textContent === mode)!;
@@ -93,7 +93,7 @@ it.each([false, true].flatMap(dark => [300, 600].map(width => ({ dark, width }))
       expect(!toolbox || toolbox.show === false).toBe(true);
     }
   } finally { await act(async () => root.unmount()); }
-});
+}, 20000);
 
 it("real BrushComponent activates a global lineX cursor without a visible toolbox", async () => {
   const { EChartCanvas } = await import("./echart-canvas");

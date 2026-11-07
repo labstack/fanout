@@ -58,7 +58,7 @@ function ConnectedAgents() {
     <Paper withBorder radius="lg" p="lg">
       {!agents.data
         ? agents.isLoading
-          ? <DataState state="loading" loadingLabel="Loading connected agents" skeleton={<LoadingSkeleton viz="list" rows={3} />} />
+          ? <DataState state="loading" loadingLabel="Loading connected agents" skeleton={<LoadingSkeleton shape="agents" rows={3} />} />
           : <Stack gap="sm" align="flex-start">
               <Notice tone="danger">Fanout could not load your connected agents.</Notice>
               <Button size="compact-sm" variant="light" onClick={() => void agents.refetch()}>Try again</Button>
@@ -331,7 +331,7 @@ export default function Settings() {
 }
 
 function Loading() {
-  return <Stack p="lg"><PageHeader title="Settings" description="Manage telemetry connections and authorized agents." /><DataState state="loading" loadingLabel="Loading connection details" skeleton={<LoadingSkeleton viz="list" rows={6} />} /></Stack>;
+  return <Box w="100%" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl"><Stack gap="xl"><PageHeader title="Settings" description="Manage telemetry connections and authorized agents." /><DataState state="loading" loadingLabel="Loading connection details" skeleton={<LoadingSkeleton shape="settings" />} /></Stack></Box>;
 }
 
 function Unavailable({ onRetry }: { onRetry: () => void }) {

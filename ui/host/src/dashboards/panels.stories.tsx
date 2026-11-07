@@ -44,7 +44,20 @@ const loading = (id: string, shape: string): Story => ({
     await expect(title).toBeVisible();
     await expect(title.closest('[data-panel-body]')).toBeNull();
     await expect(canvasElement.querySelector('[data-panel-body] [data-skeleton-shape]')).toHaveAttribute("data-skeleton-shape", shape);
-    if (shape === "chart") await expect(canvasElement.querySelector('[data-skeleton-axis]')).toBeVisible();
+    if (shape === "health") await expect(canvasElement.querySelectorAll("[data-skeleton-tile]")).toHaveLength(6);
+    if (shape === "graph") {
+      await expect(canvasElement.querySelectorAll("[data-skeleton-node]")).toHaveLength(4);
+      await expect(canvasElement.querySelector("[data-skeleton-edges]")).toBeVisible();
+    }
+    const body = canvasElement.querySelector<HTMLElement>('[data-panel-body]')!;
+    const bounds = body.getBoundingClientRect(), style = getComputedStyle(body);
+    const available = bounds.height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    const skeleton = body.querySelector('[data-skeleton-shape]')!;
+    await expect(Math.abs(skeleton.getBoundingClientRect().height - available)).toBeLessThanOrEqual(1);
+    if (shape === "chart") {
+      await expect(canvasElement.querySelector('[data-skeleton-axis]')).toBeVisible();
+      await expect(canvasElement.querySelector('[data-skeleton-chart]')!.getBoundingClientRect().height).toBeGreaterThan(available - 60);
+    }
     if (shape === "table") {
       await expect(canvasElement.querySelector('[data-skeleton-row="header"]')).toBeVisible();
       await expect(canvasElement.querySelectorAll('[data-skeleton-row="body"]')).toHaveLength(5);
@@ -56,7 +69,9 @@ export const LoadingChart: Story = loading("latency", "chart");
 export const LoadingTable: Story = loading("services", "table");
 export const LoadingGauge: Story = loading("errors", "gauge");
 export const LoadingHeatmap: Story = loading("density", "heatmap");
-export const LoadingText: Story = loading("notes", "text");
+export const LoadingHealth: Story = loading("health", "health");
+export const LoadingServiceMap: Story = loading("topology", "graph");
+export const LoadingSmallTable: Story = { ...loading("services", "table"), args: { ...loading("services", "table").args, height: 180 } };
 export const LoadingLogs: Story = loading("logs", "table");
 export const Empty: Story = { args: { result: { id: "requests", status: "empty", diagnosis: "No requests in this time range.", elapsed_ms: 18 } } };
 export const Error: Story = { args: { result: { id: "requests", status: "error", error: "The telemetry query timed out. Try a shorter time range.", elapsed_ms: 3000, request_error: ["requests"], retryable: true } } };

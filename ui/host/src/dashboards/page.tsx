@@ -56,7 +56,7 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
     </Group>
     {creating && <Suspense fallback={null}><NewDashboard onClose={() => setCreating(false)} onCreated={id => { setCreating(false); onOpen(id); }} /></Suspense>}
   </Stack></Center>;
-  if (!dashboardId || record.isLoading) return <Box maw={1600} mx="auto" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl"><DataState state="loading" loadingLabel="Loading dashboard" skeleton={<DashboardSkeleton />} /></Box>;
+  if (!dashboardId || record.isLoading) return <Box component="section" aria-label="Dashboard" maw={1600} mx="auto" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl"><DataState state="loading" loadingLabel="Loading dashboard" skeleton={<DashboardSkeleton />} /></Box>;
   if (record.error instanceof ApiError && record.error.code === "not_found") {
     return <Center mih="50vh"><Stack align="center" gap="xs">
       <PageHeader title="Dashboard" description="Monitor your services and investigate changes." />
