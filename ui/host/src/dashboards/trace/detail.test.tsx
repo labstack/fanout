@@ -29,6 +29,17 @@ it.each([false, true].flatMap(dark => [false, true].map(external => ({dark, exte
   try {
     const onSpan = external ? vi.fn() : undefined;
     await act(async () => root.render(<MantineProvider forceColorScheme={dark ? "dark" : "light"}><QueryClientProvider client={new QueryClient()}><TraceDetailView result={traceFixture} dark={dark} onSpan={onSpan} /></QueryClientProvider></MantineProvider>));
+    const tabs = within(node).getByRole("tablist", {name: "Trace view"});
+    const waterfall = within(tabs).getByRole("tab", {name: "Waterfall"});
+    const flame = within(tabs).getByRole("tab", {name: "Flame graph"});
+    expect(waterfall.getAttribute("aria-selected")).toBe("true");
+    expect(flame.getAttribute("aria-selected")).toBe("false");
+    for (const tab of [waterfall, flame]) {
+      expect(tab.hasAttribute("aria-pressed")).toBe(false);
+      const panel = document.getElementById(tab.getAttribute("aria-controls")!);
+      expect(panel?.getAttribute("role")).toBe("tabpanel");
+      expect(panel?.getAttribute("aria-labelledby")).toBe(tab.id);
+    }
     expect(node.textContent).toContain("correlated failure"); expect(node.textContent).toContain("1 of 3 spans");
     expect(node.querySelector('[aria-label^="cart on checkout took"]')).not.toBeNull();
     await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
@@ -40,7 +51,7 @@ it.each([false, true].flatMap(dark => [false, true].map(external => ({dark, exte
     // Without a caller's handler a span opens its details below the chart.
     if (onSpan) { expect(onSpan).toHaveBeenCalledWith(span); expect(node.querySelector("[data-span-details]")).toBeNull(); }
     else expect(node.querySelector("[data-span-details]")?.textContent).toContain("Error");
-    expect([...node.querySelectorAll("button")].find(b => b.textContent === "Flame graph")?.getAttribute("aria-pressed")).toBe("true");
+    expect([...node.querySelectorAll("button")].find(b => b.textContent === "Flame graph")?.getAttribute("aria-selected")).toBe("true");
     expect(node.textContent).not.toMatch(/Explain|Investigate|fix it/);
   } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
 });

@@ -19,6 +19,11 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Populated: Story = { play: async ({ canvas, userEvent, args }) => {
+  const dashboard = await canvas.findByRole("link", {name: /Commerce health/});
+  const name = dashboard.querySelector<HTMLElement>('[title="Commerce health"]')!;
+  await document.fonts.ready;
+  await expect(name).toHaveTextContent("Commerce health");
+  await expect(name.scrollWidth).toBeLessThanOrEqual(name.clientWidth);
   await userEvent.click(await canvas.findByRole("button", { name: /^Commerce health/ }));
   await expect(args.onSelectThread).toHaveBeenCalledWith("commerce-review");
 } };

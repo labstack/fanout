@@ -27,10 +27,12 @@ export function TraceDetailView({ result, dark, onSpan, loadSpan }: { result: Re
   return <Stack gap="sm">
     <Group><Text fw={600} ff="monospace" size="sm">{data.trace_id}</Text><StatusBadge tone={data.has_error ? "danger" : "success"}>{data.has_error ? "Error" : "OK"}</StatusBadge></Group>
     {data.spans.length > 0 ? <>
-      <Tabs value={view} onChange={value => value && setView(value)} aria-label="Trace view"><Tabs.List><Tabs.Tab value="waterfall" aria-pressed={view === "waterfall"}>Waterfall</Tabs.Tab><Tabs.Tab value="flame" aria-pressed={view === "flame"}>Flame graph</Tabs.Tab></Tabs.List></Tabs>
+      <Tabs value={view} onChange={value => value && setView(value)} keepMounted={false}><Tabs.List aria-label="Trace view"><Tabs.Tab value="waterfall">Waterfall</Tabs.Tab><Tabs.Tab value="flame">Flame graph</Tabs.Tab></Tabs.List>
       {/* Beside the chart it qualifies: a truncated trace draws only the spans that loaded. */}
       {data.truncated && <Box data-trace-truncated><Notice tone="warning">This trace is truncated: {data.spans.length} of {data.span_count} spans, {data.services.length} of {data.service_count} services.{loadedMs < data.duration_ms ? ` The timeline shows the loaded spans: ${duration(loadedMs)} of the trace's ${duration(data.duration_ms)}.` : ""}</Notice></Box>}
-      {view === "waterfall" ? <Waterfall spans={data.spans} dark={dark} onSpan={select} selected={picked?.span_id} /> : <FlameGraph spans={data.spans} dark={dark} onSpan={select} traceMs={data.truncated ? data.duration_ms : undefined} />}
+      <Tabs.Panel value="waterfall" pt="sm"><Waterfall spans={data.spans} dark={dark} onSpan={select} selected={picked?.span_id} /></Tabs.Panel>
+      <Tabs.Panel value="flame" pt="sm"><FlameGraph spans={data.spans} dark={dark} onSpan={select} traceMs={data.truncated ? data.duration_ms : undefined} /></Tabs.Panel>
+      </Tabs>
       {picked && <SpanDetails key={picked.span_id} traceId={data.trace_id} span={picked} load={loadSpan} onClose={() => setPicked(undefined)} />}
     </> : <Text c="dimmed">No spans were found for this trace.</Text>}
     <Text fw={600}>Correlated logs</Text>{data.logs.length ? <Box style={{ overflow: "auto", minWidth: 0 }}><LogsViz foldConstants={false} panel={{ id: "correlated_logs", title: "Correlated logs", viz: "logs" }} result={logResult} dark={dark} height={320} /></Box> : <EmptyState tall icon={<ListBullets size={20} weight="duotone" />} title="No correlated logs">No logs in this window carry the selected trace ID.</EmptyState>}

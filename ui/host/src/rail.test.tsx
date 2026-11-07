@@ -170,15 +170,28 @@ describe("Rail", () => {
     await act(async () => root.unmount());
   });
 
+  it.each(["Commerce health", "Commerce health across every production service and deployment"])("keeps the full dashboard name available for %s", async name => {
+    fetchMock.mockImplementation(async (input, init) => new URL(String(input), "http://localhost").pathname === "/api/dashboards"
+      ? json({dashboards: [{id:"dash-main", name, is_default:true, version:1, panel_count:4}]}) : respond(input, init));
+    const {root, render} = mount();
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.querySelector('a[href="/dashboards/dash-main"] [title]')?.textContent).toBe(name));
+    const row = document.querySelector('a[href="/dashboards/dash-main"]')!;
+    expect(row.querySelector('[title]')?.getAttribute("title")).toBe(name);
+    expect(row.querySelector('[role="img"][aria-label="Default"]')).not.toBeNull();
+    await act(async () => root.unmount());
+  });
+
   it("marks only the default dashboard independently of the active dashboard", async () => {
     const { root, render } = mount({ activeDashboardID: "dash-checkout" });
     await act(async () => render());
     await vi.waitFor(() => expect(document.querySelector('a[href="/dashboards/dash-main"]')).not.toBeNull());
     const defaultRow = document.querySelector('a[href="/dashboards/dash-main"]');
     const activeRow = document.querySelector('a[href="/dashboards/dash-checkout"]');
-    expect(defaultRow?.textContent).toContain("Default");
+    expect(defaultRow?.querySelector('[role="img"][aria-label="Default"]')).not.toBeNull();
+    expect(defaultRow?.querySelector('[title="System overview"]')?.textContent).toBe("System overview");
     expect(defaultRow?.getAttribute("aria-current")).toBeNull();
-    expect(activeRow?.textContent).not.toContain("Default");
+    expect(activeRow?.querySelector('[role="img"][aria-label="Default"]')).toBeNull();
     expect(activeRow?.getAttribute("aria-current")).toBe("page");
     await act(async () => root.unmount());
   });

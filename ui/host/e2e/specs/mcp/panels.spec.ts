@@ -29,7 +29,7 @@ for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
       }
       if (scenario === "trace") {
         const spans = recordings.trace.result.structuredContent.trace.data.spans;
-        await expect(main.getByRole("button", { name: "Waterfall", exact: true })).toHaveAttribute("aria-pressed", "true");
+        await expect(main.getByRole("tab", { name: "Waterfall", exact: true })).toHaveAttribute("aria-selected", "true");
         // One scrolling list holds every span, the root first and children indented below their parents.
         const rows = main.locator("[data-waterfall] tbody tr");
         await expect(rows).toHaveCount(spans.length);
@@ -48,8 +48,8 @@ for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
         await expect(details.getByText("Error", { exact: true })).toBeVisible();
         await details.getByRole("button", { name: "Close span details", exact: true }).click();
         await expect(details).toHaveCount(0);
-        await main.getByRole("button", { name: "Flame graph", exact: true }).click();
-        await expect(main.getByRole("button", { name: "Flame graph", exact: true })).toHaveAttribute("aria-pressed", "true");
+        await main.getByRole("tab", { name: "Flame graph", exact: true }).click();
+        await expect(main.getByRole("tab", { name: "Flame graph", exact: true })).toHaveAttribute("aria-selected", "true");
         const frame = main.getByRole("button", { name: /^GET \/frontend · .+ · frontend$/ });
         await expect(frame).toBeVisible();
         await frame.click();
@@ -68,7 +68,7 @@ for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
       if (scenario === "trace") {
         await main.getByRole("button", { name: recordings.trace.result.structuredContent.trace.data.trace_id.slice(0, 16), exact: true }).click();
         const detail = frame.getByRole("dialog", { name: "Trace", exact: true });
-        await expect(detail.getByRole("button", { name: "Waterfall", exact: true })).toBeVisible();
+        await expect(detail.getByRole("tab", { name: "Waterfall", exact: true })).toBeVisible();
         await expect(detail.getByRole("alert")).toHaveCount(0);
       }
     });

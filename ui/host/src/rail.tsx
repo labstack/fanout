@@ -1,7 +1,7 @@
 import { DataState, Notice } from "@labstack/ui";
-import { ActionIcon, Badge, Box, Button, Center, Group, Kbd, Loader, Menu, Modal, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Box, Button, Center, Group, Kbd, Loader, Menu, Modal, ScrollArea, Stack, Text, TextInput, ThemeIcon, Tooltip, UnstyledButton } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
-import { Bell, ChatCircle, SquaresFour, Gear, Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
+import { Bell, ChatCircle, SquaresFour, Gear, Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Star, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { getJSON, threadHistoryQueryKey } from "./api";
@@ -186,8 +186,8 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
               onSelectDashboard(dashboard.id);
             }}>
               <Group justify="space-between" gap="sm" wrap="nowrap">
-                <Group gap="xs" wrap="nowrap" style={{minWidth: 0, flex: 1}}><SquaresFour size={16} style={{flexShrink: 0}} /><Text size="sm" fw={active ? 600 : 500} truncate>{dashboard.name}</Text></Group>
-                {dashboard.is_default && <Badge size="xs" variant="light" color="gray" style={{flexShrink: 0}} styles={{label: {whiteSpace: "nowrap"}}}>Default</Badge>}
+                <Group gap="xs" wrap="nowrap" style={{minWidth: 0, flex: 1}}><SquaresFour size={16} style={{flexShrink: 0}} /><Text size="sm" fw={active ? 600 : 500} truncate title={dashboard.name}>{dashboard.name}</Text></Group>
+                {dashboard.is_default && <Tooltip label="Default"><ThemeIcon size={16} variant="light" color="gray" role="img" aria-label="Default" style={{flexShrink: 0}}><Star size={12} weight="fill" aria-hidden="true" /></ThemeIcon></Tooltip>}
               </Group>
             </UnstyledButton>
               {agentAvailable && dashboard.origin && <UnstyledButton component="a" href={`/chat/${encodeURIComponent(dashboard.origin.thread_id)}`} data-request-provenance px="sm" pb="xs" onClick={(event) => {
