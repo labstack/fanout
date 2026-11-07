@@ -48,7 +48,7 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
 
   if (!dashboardId && list.error) return <Stack p="lg"><PageHeader title="Dashboards" description="Monitor your services and investigate changes." /><DataState state="error" error={{title: "Dashboards could not be loaded", message: list.error.message, onRetry: () => void list.refetch()}} /></Stack>;
   if (!dashboardId && list.data?.length === 0) return <Center mih="50vh"><Stack align="center" gap="xs">
-    <PageHeader title="Dashboards" description="Create a dashboard to explore your services." /><DataState state="empty" empty={{title: "No dashboards yet", description: "Create a dashboard to see your telemetry.", action: <Button size="sm" onClick={() => setCreating(true)}>New dashboard</Button>}} />
+    <PageHeader title="Dashboards" description="Create a dashboard to explore your services." /><DataState state="empty" empty={{title: <Title order={2} fz="lg">No dashboards yet</Title>, description: "Create a dashboard to see your telemetry.", action: <Button size="sm" onClick={() => setCreating(true)}>New dashboard</Button>}} />
 
     <Group mt="sm" gap="xs">
       {agentAvailable && <Button size="sm" variant="default" onClick={() => openChat(createDashboardPrompt)}>Create with AI</Button>}
@@ -58,9 +58,12 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
   if (!dashboardId || record.isLoading) return <Stack p="lg"><PageHeader title="Dashboard" description="Monitor your services and investigate changes." /><DataState state="loading" loadingLabel="Loading your dashboard…" rows={6} /></Stack>;
   if (record.error instanceof ApiError && record.error.code === "not_found") {
     return <Center mih="50vh"><Stack align="center" gap="xs">
-      <PageHeader title="Dashboard" description="This dashboard isn't here" />
-      <Text c="dimmed" size="sm" ta="center">The link may be out of date, or the dashboard may have been deleted.</Text>
-      {list.data?.length ? <Button mt="sm" variant="default" size="sm" onClick={() => onOpen((list.data.find((d) => d.is_default) ?? list.data[0]).id, true)}>Open your default dashboard</Button> : null}
+      <PageHeader title="Dashboard" description="Monitor your services and investigate changes." />
+      <DataState state="empty" empty={{
+        title: <Title order={2} fz="lg">This dashboard isn&apos;t here</Title>,
+        description: "The link may be out of date, or the dashboard may have been deleted.",
+        action: list.data?.length ? <Button variant="default" size="sm" onClick={() => onOpen((list.data!.find((d) => d.is_default) ?? list.data![0]).id, true)}>Open your default dashboard</Button> : undefined,
+      }} />
     </Stack></Center>;
   }
   if (record.error || !record.data) return <Stack p="lg"><PageHeader title="Dashboard" description="Monitor your services and investigate changes." /><DataState state="error" error={{message: "Your dashboard is unavailable.", onRetry: () => void record.refetch()}} /></Stack>;

@@ -740,3 +740,10 @@ it("labels a structural answer-only refusal as read-only instead of save or tool
  try { expect(document.body.textContent).toContain("Not saved: Explain is read-only");expect(document.body.textContent).not.toMatch(/Save failed|tool calls? failed/); }
  finally { await act(async()=>root.unmount());document.body.innerHTML=""; }
 });
+
+it("normalizes answer headings below the page title without skipping levels", async () => {
+ const root=await mount(value({messages:[{id:"headings",role:"assistant",content:"### Latency by service\n\n###### Slow endpoints\n\n# Summary\n\n### Next steps\n\n## Details"}]}));
+ try {const headings=[...document.querySelectorAll("h1,h2,h3,h4,h5,h6")];
+ expect(headings.map(h=>[h.tagName,h.textContent])).toEqual([["H1","Chat"],["H2","Latency by service"],["H3","Slow endpoints"],["H2","Summary"],["H3","Next steps"],["H3","Details"]]);
+ } finally {await act(async()=>root.unmount());document.body.innerHTML="";}
+});

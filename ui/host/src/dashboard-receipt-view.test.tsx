@@ -1,19 +1,34 @@
+import { savedReceipt, invalidReceipt, correctedReceipt, savedInvalidReceipt } from "./catalog/fixtures";
 import { createRootRoute, createRoute, createRouter, RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import type { BuildReceipt } from "./dashboard-receipt";
 import { MantineProvider } from "@mantine/core";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { DashboardReceiptView } from "./dashboard-receipt-view";
 import { receiptForTurn } from "./dashboard-receipt";
 import { build, call, user, result, saved } from "../tests/dashboard-receipts";
 
-function view(receipt:BuildReceipt, running=false) {
- const route=createRootRoute({component:()=> <DashboardReceiptView receipt={receipt} running={running} awaitingAnswer={running}/>});
+function view(receipt:BuildReceipt, running=false, initialExpanded=false) {
+ const route=createRootRoute({component:()=> <DashboardReceiptView receipt={receipt} running={running} awaitingAnswer={running} initialExpanded={initialExpanded}/>});
  const dashboard=createRoute({getParentRoute:()=>route,path:'/dashboards/$dashboardId',component:()=>null});
  const router=createRouter({routeTree:route.addChildren([dashboard]),history:createMemoryHistory({initialEntries:['/']})});
  return <MantineProvider><RouterProvider router={router}/></MantineProvider>;
 }
+it.each([
+ ["Saved",savedReceipt,false,false], ["Details",savedReceipt,false,true],
+ ["Building",{...savedReceipt,saved:undefined},true,false], ["Invalid Panel",invalidReceipt,false,false],
+ ["Corrected",correctedReceipt,false,false], ["Saved with invalid panel",savedInvalidReceipt,false,false],
+] as const)("renders valid receipt markup for %s before and after disclosure",async (_name,receipt,running,expanded)=>{
+ const error=vi.spyOn(console,"error").mockImplementation(()=>undefined);
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+ try {await act(async()=>root.render(view(receipt,running,expanded)));
+ const assertMarkup=()=>{expect(host.querySelector("p div,p ul,p ol,button button")).toBeNull();expect(error.mock.calls.filter(args=>/cannot (?:be|contain)|descendant|validateDOMNesting/.test(args.join(" ")))).toEqual([]);};
+ assertMarkup();
+ await act(async()=>host.querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());assertMarkup();
+ if(receipt===invalidReceipt){const rows=[...host.querySelectorAll("[data-build-receipt] div")];expect(rows.some(row=>row.textContent==="Preview · p95 latency: Ok · 24 ms")).toBe(true);}
+ }finally{await act(async()=>root.unmount());host.remove();error.mockRestore();}
+});
 it('renders one quiet status, safe chips, exact saved-version link and keyboard details', async () => {
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  try {

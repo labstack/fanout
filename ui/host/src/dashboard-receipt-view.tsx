@@ -40,10 +40,10 @@ export function DashboardReceiptView({ receipt, running = false, activity = "", 
           {!!receipt.context_counts.deploys && <Text size="xs">{receipt.context_counts.deploys} deploys observed</Text>}
           {!!receipt.context_counts.anomalies && <Text size="xs">{receipt.context_counts.anomalies} anomalies observed</Text>}
           <Text size="xs" fw={600}>Panel preview</Text>
-          {receipt.panels.map(p => <Text size="xs" key={p.id}>Preview · {panelTitle(p.id)}: <StatusBadge tone={p.status === "ok" ? "success" : p.status === "invalid" ? "warning" : p.status === "empty" ? "neutral" : "danger"}>{p.status === "ok" ? "Ok" : p.status.charAt(0).toUpperCase() + p.status.slice(1)}</StatusBadge>{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
+          {receipt.panels.map(p => <Text component="div" size="xs" key={p.id}>Preview · {panelTitle(p.id)}: <StatusBadge tone={p.status === "ok" ? "success" : p.status === "invalid" ? "warning" : p.status === "empty" ? "neutral" : "danger"}>{p.status === "ok" ? "Ok" : p.status.charAt(0).toUpperCase() + p.status.slice(1)}</StatusBadge>{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
           <Text size="xs" fw={600}>Save verification</Text>
           {check && <Text size="xs">Save check: {check.checked ? "checked" : "incomplete"} · {seconds(check.elapsed_ms)}</Text>}
-          {check?.panels.map(p => <Text size="xs" key={p.id}>Save · {panelTitle(p.id)}: <StatusBadge tone={p.status === "ok" ? "success" : p.status === "invalid" ? "warning" : p.status === "empty" ? "neutral" : "danger"}>{p.status === "ok" ? "Ok" : p.status.charAt(0).toUpperCase() + p.status.slice(1)}</StatusBadge> · {p.rows ?? 0} {(p.rows ?? 0) === 1 ? "row" : "rows"}{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
+          {check?.panels.map(p => <Text component="div" size="xs" key={p.id}>Save · {panelTitle(p.id)}: <StatusBadge tone={p.status === "ok" ? "success" : p.status === "invalid" ? "warning" : p.status === "empty" ? "neutral" : "danger"}>{p.status === "ok" ? "Ok" : p.status.charAt(0).toUpperCase() + p.status.slice(1)}</StatusBadge> · {p.rows ?? 0} {(p.rows ?? 0) === 1 ? "row" : "rows"}{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
           {chips.slice(4).map((text,i) => <Text size="xs" key={i}>{text}</Text>)}
           {receipt.corrections.map((c,i) => <Text size="xs" key={i}>Fixed {c.title}: {c.message}</Text>)}
         </Stack>

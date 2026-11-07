@@ -148,7 +148,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
             const column=frame.columns.find(c=>c.name===cell.column.id)!;
             const content = expandable(column) ? <div data-row-text style={{display:expanded.has(row.index)?"block":"-webkit-box",WebkitLineClamp:expanded.has(row.index)?undefined:2,WebkitBoxOrient:"vertical",maxHeight:expanded.has(row.index)?undefined:36,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"normal",overflowWrap:"anywhere",lineHeight:"18px"}}><table.FlexRender cell={cell}/></div> : <table.FlexRender cell={cell}/>;
             return <Table.Td key={cell.id} data-field={column.name} ta={column.type === "number" ? "right" : undefined} style={{ minWidth: columnWidth(column.name), ...(panel.viz === "log_patterns" ? { overflow: "hidden", ...(column.name === "count" ? { paddingLeft: 12, paddingRight: 12 } : {}) } : panel.viz === "traces" && column.type !== "time" ? { overflow: "hidden" } : {}) }}>
-              {controls?.details && expandable(column) ? <UnstyledButton style={{width:"100%", textAlign:"left"}} aria-label={expanded.has(row.index) ? "Hide log details" : "Show log details"} aria-expanded={expanded.has(row.index)} onClick={event => {event.stopPropagation(); toggle(row.index);}}>{content}</UnstyledButton> : content}
+              {controls?.details && expandable(column) ? <UnstyledButton style={{width:"100%", textAlign:"left"}} aria-expanded={expanded.has(row.index)} onClick={event => {event.stopPropagation(); toggle(row.index);}}>{content}</UnstyledButton> : content}
             </Table.Td>;
           })}
         </Table.Tr>

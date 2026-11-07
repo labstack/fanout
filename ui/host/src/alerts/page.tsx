@@ -73,7 +73,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
     <PageHeader title="Alerts" description="Evaluate service rules and deliver notifications when they fire." meta={<LiveDataMeta updatedAt={alerts.dataUpdatedAt} />} actions={canManage && <Button ref={newRule} leftSection={<Plus size={14} />} onClick={event => { opener.remember(event.currentTarget); setEditing({}); }}>New rule</Button>} />
 
     <Stack gap="xs">
-      <Title order={3} fz={18}>Rules</Title>
+      <Title order={2} fz={18}>Rules</Title>
       {rules.data && rules.data.length > 0 && <Text size="xs" c="dimmed">{exploreNote}</Text>}
       {rules.isLoading ? <DataState state="loading" rows={4} /> : rules.error ? <Notice tone="danger">Rules could not be loaded: {rules.error.message}</Notice>
         : rules.data?.length === 0 ? <DataState state="empty" empty={{title: "No rules yet", description: "Create a rule to get notified when a service misbehaves.", action: canManage && <Button onClick={() => setEditing({})}>New rule</Button>}} />
@@ -103,7 +103,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
     </Stack>
 
     <Stack gap="xs">
-      <Title order={3} fz={18}>History</Title>
+      <Title order={2} fz={18}>History</Title>
       {alerts.isLoading ? <DataState state="loading" rows={4} /> : alerts.error ? <Notice tone="danger">Alert history could not be loaded: {alerts.error.message}</Notice>
         : history.length === 0 ? <DataState state="empty" empty={{title: "Nothing has fired yet", description: "Connect telemetry to evaluate your alert rules.", action: <Button component="a" href="/settings" variant="default">Connect telemetry</Button>}} />
         : <Table.ScrollContainer minWidth={760} scrollAreaProps={{ viewportProps: { tabIndex: 0, role: "region", "aria-label": "Alert history" } }}><Table verticalSpacing="xs">

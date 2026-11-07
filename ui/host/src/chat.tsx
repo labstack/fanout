@@ -245,7 +245,7 @@ function Composer() {
 function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
   return <Stack align="center" gap="md" pt={{ base: 32, sm: 88 }} pb="xl" ta="center">
     <BrandMark size="large" />
-    <Title order={1} fz={24} fw={500} lh={1.25} maw={560}>What do you want to know about your system?</Title>
+    <Title order={2} fz={24} fw={500} lh={1.25} maw={560}>What do you want to know about your system?</Title>
     <Group justify="center" gap="xs" mt="xs" maw={720}>
       {suggestions.map((suggestion) => <Button key={suggestion} variant="default" size="sm" radius="xl" onClick={() => void onSelect(suggestion)}>{suggestion}</Button>)}
     </Group>
@@ -269,7 +269,7 @@ function ChatMessage({ message, time, appView }: { message: Message; time?: numb
   return <Box className="chat-message" data-chat-anchor data-role={user ? "user" : "assistant"}>
     {user
       ? <Paper radius="lg" px="md" py="sm" bg="var(--labstack-inset)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
-      : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}
+      : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm, answerHeadingLevels]} components={markdownComponents}>{content}</Markdown></Typography>}
     {(stamp || !user) && <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4} h={24}>
       {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}
       {!user && <CopyButton text={content} label="Copy message" />}
@@ -284,6 +284,25 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       {state === "copied" ? <Check size={13} weight="bold" /> : <Copy size={13} />}
     </ActionIcon>
   </Tooltip>;
+}
+
+type MarkdownNode = { type: string; depth?: number; children?: MarkdownNode[] };
+
+/** Answers are sections under the page h1; authored heading gaps do not skip DOM levels. */
+function answerHeadingLevels() {
+  return (tree: MarkdownNode) => {
+    const parents: number[] = [];
+    const visit = (node: MarkdownNode) => {
+      if (node.type === "heading" && node.depth !== undefined) {
+        const depth = node.depth;
+        while (parents.length && parents.at(-1)! >= depth) parents.pop();
+        parents.push(depth);
+        node.depth = Math.min(6, parents.length + 1);
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
 }
 
 /* Every block the model can emit gets product chrome: tables scroll inside

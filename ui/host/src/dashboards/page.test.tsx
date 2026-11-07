@@ -405,13 +405,13 @@ describe("DashboardPage", () => {
 
   it("answers a missing dashboard instead of showing another", async () => {
     const { host } = await render({}, "missing");
-    await vi.waitFor(() => expect(host.textContent).toContain("This dashboard isn't here"), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(within(host).getByRole("heading", {name: "This dashboard isn't here", level: 2})).toBeTruthy(), { interval: 5, timeout: 3000 });
   });
 
   it("shows an empty dashboard list and opens chat with a starter prompt", async () => {
     listResponse = async () => json({ dashboards: [] });
     const { host, onOpen } = await render({}, "");
-    await vi.waitFor(() => expect(host.textContent).toContain("No dashboards yet"), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(within(host).getByRole("heading", {name: "No dashboards yet", level: 2})).toBeTruthy(), { interval: 5, timeout: 3000 });
     await vi.waitFor(() => expect(host.textContent).not.toContain("Loading your dashboard"), { interval: 5, timeout: 3000 });
     const byText = (label: string) => [...host.querySelectorAll("button")].find(b => b.textContent === label);
     await act(async () => { byText("Create with AI")!.click(); });
@@ -423,7 +423,7 @@ describe("DashboardPage", () => {
     app.agentAvailable = false;
     listResponse = async () => json({ dashboards: [] });
     const { host } = await render({}, "");
-    await vi.waitFor(() => expect(host.textContent).toContain("No dashboards yet"), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(within(host).getByRole("heading", {name: "No dashboards yet", level: 2})).toBeTruthy(), { interval: 5, timeout: 3000 });
     expect([...host.querySelectorAll("button")].map(b => b.textContent)).toEqual(["New dashboard"]);
     await act(async () => { host.querySelector("button")!.click(); });
     await vi.waitFor(() => expect(document.body.querySelector("[role=dialog]")?.textContent).toContain("Dashboard name"), { interval: 5, timeout: 3000 });

@@ -55,6 +55,14 @@ async function render() {
 }
 
 describe("AlertsPage", () => {
+  it.each([false, true])("keeps section headings directly below the page title with empty rules=%s", async empty => {
+    if (empty) rules=[];
+    const {ui, wait}=await render();
+    await wait(()=>expect(ui.getByRole("heading", {name:"Rules", level:2})).toBeTruthy());
+    expect(ui.getByRole("heading", {name:"Alerts", level:1})).toBeTruthy();
+    expect(ui.getByRole("heading", {name:"History", level:2})).toBeTruthy();
+  });
+
   it("opens what each rule watches in Explore", async () => {
     rules = [rule, { ...rule, id: "r3", name: "Log flood", service: "", expression: "service == \"error_rate\" && [1].exists(p95x, p95x > 0) && log_count_delta > 50" }, { ...rule, id: "r4", name: "Slow \"api\"", service: "a\"b", expression: "p95 > 500" }];
     const { ui, wait } = await render();
