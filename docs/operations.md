@@ -166,7 +166,9 @@ h2c for a plaintext backend, or HTTP/2 over TLS when Fanout has a certificate.
 HTTP/1.1 forwarding supports OTLP/HTTP, but cannot carry gRPC.
 `FANOUT_TLS_CLIENT_CA_FILE` additionally requires every client, including a
 TLS-terminating proxy such as Cloudflare with Authenticated Origin Pulls, to
-present a certificate from that CA bundle.
+present a certificate from that CA bundle. The bundle is read at startup, so
+rotation needs a restart; keep the old and new CA in the bundle while clients
+move to certificates from the new one.
 
 Set `FANOUT_PUBLIC_URL` to the externally reachable HTTPS browser origin. When
 using forwarded client addresses, set `FANOUT_TRUSTED_PROXY_CIDRS` to only the
@@ -187,9 +189,9 @@ HTTPS IP-literal probes trust only the configured certificate and verify its
 first DNS or IP SAN, which may differ from the bind IP; hostname probes verify
 normally. Derived HTTPS probes present `FANOUT_HEALTHCHECK_CERT_FILE` and
 `FANOUT_HEALTHCHECK_KEY_FILE` when set, so they pass a listener with
-`FANOUT_TLS_CLIENT_CA_FILE`. Healthcheck
-reads only these settings and does not require valid secrets. An explicit `fanout healthcheck <url>` uses default proxy and
-certificate verification behaviour.
+`FANOUT_TLS_CLIENT_CA_FILE`. Healthcheck reads only these settings and does
+not require valid secrets. An explicit `fanout healthcheck <url>` uses default
+proxy and certificate verification behaviour.
 
 - `/healthz` is the liveness check. It fails only when Fanout's own work on
   the query engine stalls: a Parquet publication holds reads for 10 minutes,

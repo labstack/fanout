@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -20,9 +21,11 @@ func RequireClientCertificates(srv *http.Server, pool *x509.CertPool) {
 	srv.TLSConfig.ClientAuth = tls.RequireAndVerifyClientCert
 }
 
-// LoadClientCAs reads the FANOUT_TLS_CLIENT_CA_FILE bundle. It rejects every
-// block it cannot use instead of silently skipping it, so a truncated or wrong
-// file fails startup. Errors name the path, never file contents.
+// LoadClientCAs reads the FANOUT_TLS_CLIENT_CA_FILE bundle: one or more PEM
+// CERTIFICATE blocks separated only by whitespace. It rejects anything else,
+// including text around the blocks and malformed blocks that pem.Decode would
+// otherwise skip, so a truncated or wrong file fails startup. Errors name the
+// path, never file contents.
 func LoadClientCAs(path string) (*x509.CertPool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -31,10 +34,16 @@ func LoadClientCAs(path string) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
 	count := 0
 	for {
-		var block *pem.Block
-		block, data = pem.Decode(data)
-		if block == nil {
+		data = bytes.TrimLeft(data, " \t\r\n")
+		if len(data) == 0 {
 			break
+		}
+		block, rest := pem.Decode(data)
+		consumed := data[:len(data)-len(rest)]
+		// pem.Decode skips leading text and malformed blocks; only accept a
+		// block that starts the remaining input and is the only one consumed.
+		if block == nil || !bytes.HasPrefix(data, pemBegin) || bytes.Count(consumed, pemBegin) != 1 {
+			return nil, fmt.Errorf("FANOUT_TLS_CLIENT_CA_FILE: %q contains data that is not a PEM block after certificate %d", path, count)
 		}
 		if block.Type != "CERTIFICATE" {
 			return nil, fmt.Errorf("FANOUT_TLS_CLIENT_CA_FILE: %q contains a %q PEM block; only certificates are allowed", path, block.Type)
@@ -45,9 +54,12 @@ func LoadClientCAs(path string) (*x509.CertPool, error) {
 		}
 		pool.AddCert(certificate)
 		count++
+		data = rest
 	}
 	if count == 0 {
 		return nil, fmt.Errorf("FANOUT_TLS_CLIENT_CA_FILE: no PEM certificates in %q", path)
 	}
 	return pool, nil
 }
+
+var pemBegin = []byte("-----BEGIN ")
