@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../loading-skeleton";
 import { DataState, Notice } from "@labstack/ui";
 import { logConstants } from "../../../panels/rows";
 import { useMergedRef } from "@mantine/hooks";
@@ -193,7 +194,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         an opaque backdrop that spans it, which contrast checks need, and keeps
         the card's rounded bottom corners so that ground does not square them. */}
     <Box ref={body} data-panel-body className="dashboard-panel-padding" tabIndex={view !== "Chart" ? 0 : undefined} style={{ flex: "1 1 0px", isolation: "isolate", contain: rows || view === "Data" ? "paint" : undefined, minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column", backgroundColor: "inherit", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>
-      {suspended ? <Center h="100%"><Text size="sm" c="dimmed">Shown in full-screen</Text></Center> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <DataState state="loading" loadingLabel="Loading panel" rows={3} />
+      {suspended ? <Center h="100%"><Text size="sm" c="dimmed">Shown in full-screen</Text></Center> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && (panel.viz !== "text" || loading) ? <DataState state="loading" loadingLabel={`Loading panel ${title}`} skeleton={<LoadingSkeleton viz={panel.viz} />} />
         : (result?.status === "error" || result?.status === "invalid") ? <Box data-panel-error={result.reason !== "busy" || undefined} data-panel-busy={result.reason === "busy" || undefined} style={{minWidth: 0, maxHeight: "100%", overflow: "auto", overflowWrap: "anywhere"}}>
           <Notice tone={result.reason === "busy" ? "info" : "danger"} title={result.reason === "busy" ? "Not run yet" : result.status === "invalid" ? "This panel is invalid" : "This panel failed"} retryLabel="Retry" onRetry={retryable || result.reason === "busy" ? onRetry : undefined}>
             <Text data-panel-error-message={result.reason !== "busy" || undefined} title={result.error} size="xs" style={{overflowWrap: "anywhere"}}>{result.error || "The query could not run."}</Text>

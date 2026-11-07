@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../loading-skeleton";
 import { DataState, Notice } from "@labstack/ui";
 import { Box,  Anchor, Group, Stack, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
@@ -39,7 +40,7 @@ export function LogDetails({ row, onTrace }: { row: Record<string, Cell>; onTrac
       {onTrace ? <Anchor component="button" type="button" size="xs" ff="monospace" onClick={onTrace} style={{ overflowWrap: "anywhere" }}>{traceId}</Anchor> : <Text size="xs" ff="monospace">{traceId}</Text>}
       {extras.data?.span_id && <><Text size="xs" c="dimmed">Span</Text><Text size="xs" ff="monospace">{extras.data.span_id}</Text></>}
     </Group>}
-    {extras.isFetching && <Box role="status" aria-label="Loading log details"><DataState state="loading" loadingLabel="Loading log details" rows={3} /></Box>}
+    {extras.isFetching && <DataState state="loading" loadingLabel="Loading log details" skeleton={<LoadingSkeleton viz="table" columns={2} rows={3} />} />}
     {extras.error && <Box p="xs"><Notice tone="danger" onRetry={() => void extras.refetch()}>{extras.error.message}</Notice></Box>}
     {extras.data && <>
       <Attributes label="Attributes" values={extras.data.attributes} />

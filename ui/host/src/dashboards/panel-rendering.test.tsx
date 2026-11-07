@@ -205,3 +205,24 @@ it("measures legend labels with the chart font and uses safe full-name tooltips"
  expect(measureText).toHaveBeenCalledTimes(7); expect((got.grid as { top: number }).top).toBe(42);
  expect((got.legend as { tooltip: { renderMode: string } }).tooltip.renderMode).toBe("html");
 });
+
+
+it.each([
+  ["timeseries", "chart"], ["bar", "chart"], ["histogram", "chart"], ["scatter", "chart"],
+  ["table", "table"], ["logs", "table"], ["traces", "table"], ["log_patterns", "table"],
+  ["stat", "stat"], ["gauge", "gauge"], ["heatmap", "heatmap"], ["text", "text"],
+  ["health", "list"], ["service_map", "list"], ["state_timeline", "chart"],
+] as const)("announces %s loading with a hidden %s placeholder and a visible title", async (viz, shape) => {
+  const host = await render(<PanelCard panel={{ ...panel, viz }} title="Requests" loading height={300} group="g" editing={false} agentAvailable={false} />);
+  const body = host.querySelector('[data-panel-body]')!;
+  const status = within(body as HTMLElement).getByRole("status");
+  expect(status.textContent).toBe("Loading panel Requests");
+  const placeholder = status.querySelector('[aria-hidden="true"][inert]')!;
+  expect(placeholder.querySelector(`[data-skeleton-shape="${shape}"]`)).not.toBeNull();
+  expect(within(host).getByText("Requests").closest('[data-panel-body]')).toBeNull();
+  if (shape === "chart") expect(placeholder.querySelector('[data-skeleton-axis]')).not.toBeNull();
+  if (shape === "table") {
+    expect(placeholder.querySelectorAll('[data-skeleton-row="header"]')).toHaveLength(1);
+    expect(placeholder.querySelectorAll('[data-skeleton-row="body"]')).toHaveLength(5);
+  }
+});

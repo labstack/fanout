@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "./loading-skeleton";
 import { formatTimestamp } from "../../panels/units";
 import { DataState, Notice, PageHeader } from "@labstack/ui";
 import { Anchor, Box, Button, Code, CopyButton, Group, Modal, Paper, Stack, Text, TextInput, Title, Tooltip } from "@mantine/core";
@@ -57,7 +58,7 @@ function ConnectedAgents() {
     <Paper withBorder radius="lg" p="lg">
       {!agents.data
         ? agents.isLoading
-          ? <DataState state="loading" loadingLabel="Loading connected agents…" rows={3} />
+          ? <DataState state="loading" loadingLabel="Loading connected agents" skeleton={<LoadingSkeleton viz="list" rows={3} />} />
           : <Stack gap="sm" align="flex-start">
               <Notice tone="danger">Fanout could not load your connected agents.</Notice>
               <Button size="compact-sm" variant="light" onClick={() => void agents.refetch()}>Try again</Button>
@@ -330,7 +331,7 @@ export default function Settings() {
 }
 
 function Loading() {
-  return <Stack p="lg"><PageHeader title="Settings" description="Manage telemetry connections and authorized agents." /><DataState state="loading" loadingLabel="Loading connection details…" rows={6} /></Stack>;
+  return <Stack p="lg"><PageHeader title="Settings" description="Manage telemetry connections and authorized agents." /><DataState state="loading" loadingLabel="Loading connection details" skeleton={<LoadingSkeleton viz="list" rows={6} />} /></Stack>;
 }
 
 function Unavailable({ onRetry }: { onRetry: () => void }) {

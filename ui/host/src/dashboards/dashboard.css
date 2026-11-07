@@ -128,5 +128,7 @@
   border-color: var(--labstack-border-soft);
 }
 
-.mantine-Skeleton-root[data-visible]::before { background-color: var(--labstack-raised); }
-.mantine-Skeleton-root[data-visible]::after { background-color: var(--labstack-hover); }
+
+@container (max-width: 799px) {
+  .dashboard-loading-grid > .dashboard-loading-panel { grid-column: span 12 !important; }
+}
