@@ -4,13 +4,13 @@ import { useMemo } from "react";
 import type { TraceSpan } from "../../../../contracts";
 import { seriesSlot } from "../../../../chart";
 import { criticalPathSegments } from "./critical-path";
+import { spanStarts } from "./span-timing";
 import { duration } from "../../../../format";
 
 /** Parents before their children, siblings by start time. A span whose parent
  *  is not in the trace is a root; spans caught in a parent cycle follow, flat. */
-function spanTree(spans: TraceSpan[]): { span: TraceSpan; depth: number }[] {
+function spanTree(spans: TraceSpan[], start: Map<TraceSpan, number>): { span: TraceSpan; depth: number }[] {
   const ids = new Set(spans.map(span => span.span_id));
-  const start = new Map(spans.map(span => [span, new Date(span.start).valueOf()]));
   const byStart = (a: TraceSpan, b: TraceSpan) => start.get(a)! - start.get(b)!;
   const children = new Map<string, TraceSpan[]>();
   const roots: TraceSpan[] = [];
@@ -47,14 +47,13 @@ export function Waterfall({ spans, dark, onSpan, selected, showCriticalPath = tr
     return bySpan;
   }, [spans]);
   const rows = useMemo(() => {
-    const starts = spans.map(span => new Date(span.start).valueOf());
-    const start = Math.min(...starts);
-    const total = Math.max(Math.max(...spans.map((span, i) => starts[i] + span.duration_ms)) - start, 1);
+    const starts = spanStarts(spans);
+    const total = spans.reduce((end, span) => Math.max(end, starts.get(span)! + span.duration_ms), 1);
     const services = [...new Set(spans.map(span => span.service))];
-    return spanTree(spans).map(({ span, depth }) => {
-      const offset = ((new Date(span.start).valueOf() - start) / total) * 100;
+    return spanTree(spans, starts).map(({ span, depth }) => {
+      const offset = (starts.get(span)! / total) * 100;
       const color = seriesSlot(services.indexOf(span.service), dark);
-      return { span, depth, offset, total, start, width: Math.min(Math.max((span.duration_ms / total) * 100, 0.6), 100 - offset), color, failed: span.status === "STATUS_CODE_ERROR" };
+      return { span, depth, offset, total, width: Math.min(Math.max((span.duration_ms / total) * 100, 0.6), 100 - offset), color, failed: span.status === "STATUS_CODE_ERROR" };
     });
   }, [spans, dark]);
   return <Box data-waterfall style={{ maxHeight: 520, overflow: "auto" }}>
@@ -64,8 +63,8 @@ export function Waterfall({ spans, dark, onSpan, selected, showCriticalPath = tr
         <Table.Tr><Table.Th>Operation</Table.Th><Table.Th>Timeline</Table.Th><Table.Th ta="right">Duration</Table.Th></Table.Tr>
       </Table.Thead>
       <Table.Tbody>
-        {rows.map(({ span, depth, offset, total, start, width, color, failed }) => {
-          const segments = critical.get(span.span_id) ?? [];
+        {rows.map(({ span, depth, offset, total, width, color, failed }) => {
+          const segments = showCriticalPath ? critical.get(span.span_id) ?? [] : [];
           const share = segments.reduce((sum, segment) => sum + segment.end - segment.start, 0);
           const criticalLabel = segments.length ? ` · on critical path · ${duration(share)} (${(share / span.duration_ms * 100).toFixed(1)}% of span)` : "";
           const label = `${span.service} · ${span.operation} · ${duration(span.duration_ms)}${criticalLabel}`;
@@ -86,10 +85,11 @@ export function Waterfall({ spans, dark, onSpan, selected, showCriticalPath = tr
             <Table.Td>
               <Box pos="relative" h={14} bg="var(--mantine-color-default-hover)" role="img" title={label}
                 aria-label={`${span.operation} on ${span.service} took ${duration(span.duration_ms)}${criticalLabel}`} style={{ borderRadius: "var(--mantine-radius-sm)" }}>
-                <Box pos="absolute" left={`${offset}%`} w={`${width}%`} h="100%" bg={failed ? "bad" : color} style={{ borderRadius: "var(--mantine-radius-sm)", minWidth: 3 }} />
-                {showCriticalPath && segments.map((segment, i) => <Box key={i} data-critical-path-segment={span.span_id} aria-hidden="true"
-                  pos="absolute" left={`${(segment.start - start) / total * 100}%`} w={`${(segment.end - segment.start) / total * 100}%`} h="100%"
-                  style={{ borderRadius: "var(--mantine-radius-sm)", minWidth: 3, outline: "2px solid var(--fanout-focus)", pointerEvents: "none" }} />)}
+                {/* Soften fills locally so the text-color band has 3:1 contrast in both schemes. */}
+                <Box pos="absolute" left={`${offset}%`} w={`${width}%`} h="100%" bg={`color-mix(in srgb, ${failed ? "var(--mantine-color-bad-filled)" : color} 75%, var(--mantine-color-body))`} style={{ borderRadius: "var(--mantine-radius-sm)", minWidth: 3 }} />
+                {segments.map((segment, i) => <Box key={i} data-critical-path-segment={span.span_id} aria-hidden="true"
+                  pos="absolute" left={`${segment.start / total * 100}%`} w={`${(segment.end - segment.start) / total * 100}%`} top="50%" bg="var(--mantine-color-text)"
+                  style={{ height: 3, transform: "translateY(-50%)", pointerEvents: "none" }} />)}
               </Box>
             </Table.Td>
             <Table.Td ta="right"><Text size="sm" ff="monospace">{duration(span.duration_ms)}</Text></Table.Td>

@@ -1,17 +1,22 @@
 import type { TraceSpan } from "../../../../contracts";
+import { spanStarts } from "./span-timing";
 
-/** Absolute milliseconds, in the same clock as TraceSpan.start. */
+/** Milliseconds relative to the minimum start of the trace. */
 export type CriticalPathSegment = { span_id: string; start: number; end: number };
 
 /** Jaeger's backwards critical-path walk over the longest root. Each sibling
  * list is sorted once; each child is examined at most once thereafter. The
  * explicit stack also bounds work and avoids recursion on very deep traces.
  * Missing parents and self-parent spans are roots; rootless cycles contribute
- * nothing. Zero/negative durations contribute no segments.
+ * nothing. Zero/negative durations contribute no segments. Producer-to-consumer
+ * edges (and their consumer subtrees) are not blocking dependencies.
+ * Deviations from Jaeger: end == cursor is accepted, equal-end ties prefer the
+ * later start, and only the longest root is walked.
  */
 export function criticalPathSegments(spans: readonly TraceSpan[]): CriticalPathSegment[] {
+  const starts = spanStarts(spans);
   const nodes = spans.map(span => {
-    const start = Date.parse(span.start);
+    const start = starts.get(span)!;
     return { span, start, end: start + Math.max(0, span.duration_ms), children: [] as number[] };
   });
   const ids = new Map(nodes.map((node, i) => [node.span.span_id, i]));
@@ -19,7 +24,9 @@ export function criticalPathSegments(spans: readonly TraceSpan[]): CriticalPathS
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     const parent = ids.get(node.span.parent_span_id ?? "");
-    if (parent !== undefined && parent !== i) nodes[parent].children.push(i);
+    if (parent !== undefined && parent !== i) {
+      if (nodes[parent].span.kind !== "SPAN_KIND_PRODUCER" || node.span.kind !== "SPAN_KIND_CONSUMER") nodes[parent].children.push(i);
+    }
     else if (root === undefined || node.end - node.start > nodes[root].end - nodes[root].start) root = i;
   }
   if (root === undefined) return [];
