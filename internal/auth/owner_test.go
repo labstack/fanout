@@ -53,12 +53,12 @@ func TestDesignateOwnerRefusesASecondOwner(t *testing.T) {
 	if _, err := users.CreateFirstAdminWithAudit("admin@example.com", "", AuditEvent{EventType: "setup.completed", Outcome: "success"}); err != nil {
 		t.Fatalf("CreateFirstAdmin: %v", err)
 	}
-	_, outcome, err := users.DesignateOwner("owner@example.com")
+	refused, outcome, err := users.DesignateOwner(" Owner@Example.com ")
 	if err != nil {
 		t.Fatalf("DesignateOwner: %v", err)
 	}
-	if outcome != OwnerRefused {
-		t.Fatalf("outcome = %v, want OwnerRefused", outcome)
+	if outcome != OwnerRefused || refused.ID != "" || refused.Email != "owner@example.com" {
+		t.Fatalf("outcome = %v user = %+v, want OwnerRefused reporting owner@example.com", outcome, refused)
 	}
 	if _, err := users.GetByEmail("owner@example.com"); err != ErrUserNotFound {
 		t.Fatalf("GetByEmail(owner) err = %v, want ErrUserNotFound", err)
@@ -88,8 +88,8 @@ func TestDesignateOwnerLeavesAnExistingAccountUnchanged(t *testing.T) {
 
 func TestDesignateOwnerRejectsInvalidEmail(t *testing.T) {
 	users := NewUserStore(newTestSQLite(t).DB)
-	if _, _, err := users.DesignateOwner("not-an-email"); err == nil {
-		t.Fatal("expected invalid email error")
+	if _, outcome, err := users.DesignateOwner("not-an-email"); err == nil || outcome != OwnerUnknown {
+		t.Fatalf("DesignateOwner = (%v, %v), want OwnerUnknown with an error", outcome, err)
 	}
 	if count, _ := users.CountUsers(); count != 0 {
 		t.Fatalf("users = %d, want 0", count)

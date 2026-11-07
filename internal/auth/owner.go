@@ -8,9 +8,12 @@ import (
 type OwnerOutcome int
 
 const (
+	// OwnerUnknown is the zero value, returned with every error: nothing is
+	// known about the owner and no outcome should be acted on.
+	OwnerUnknown OwnerOutcome = iota
 	// OwnerCreated means the control database had no users and the owner was
 	// created as an active administrator.
-	OwnerCreated OwnerOutcome = iota
+	OwnerCreated
 	// OwnerPresent means users already existed and one of them has the owner
 	// email. The account is returned unchanged, whatever its role or status.
 	OwnerPresent
@@ -24,11 +27,12 @@ const (
 // using the same transactional check as interactive setup, so it can never
 // add a second administrator alongside an existing installation's accounts.
 // When users already exist it reports whether the owner is among them and
-// changes nothing.
+// changes nothing. OwnerRefused returns the normalized email in User.Email so
+// callers can report it; no such account exists.
 func (s *UserStore) DesignateOwner(rawEmail string) (User, OwnerOutcome, error) {
 	email, err := NormalizeEmail(rawEmail)
 	if err != nil {
-		return User{}, OwnerRefused, err
+		return User{}, OwnerUnknown, err
 	}
 	user, err := s.CreateFirstAdminWithAudit(email, "", AuditEvent{
 		EventType: "setup.completed",
@@ -39,14 +43,14 @@ func (s *UserStore) DesignateOwner(rawEmail string) (User, OwnerOutcome, error) 
 		return user, OwnerCreated, nil
 	}
 	if !errors.Is(err, ErrSetupComplete) {
-		return User{}, OwnerRefused, err
+		return User{}, OwnerUnknown, err
 	}
 	existing, err := s.GetByEmail(email)
 	if errors.Is(err, ErrUserNotFound) {
-		return User{}, OwnerRefused, nil
+		return User{Email: email}, OwnerRefused, nil
 	}
 	if err != nil {
-		return User{}, OwnerRefused, err
+		return User{}, OwnerUnknown, err
 	}
 	return existing, OwnerPresent, nil
 }

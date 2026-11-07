@@ -57,6 +57,14 @@ configuration loads.
   **Connect telemetry → Ingest token** or `POST /api/settings/ingest/token/rotate`.
   Ingest stays closed until then.
 
+> [!WARNING]
+> Until the owner first signs in, whoever first proves control of that address
+> claims the administrator account: anyone who can read its mailbox in local
+> mode, or any identity provider account that asserts that email in OIDC mode.
+> Use an address you control, sign in promptly after first boot, and in OIDC
+> mode confirm that the owner's `identity.linked` audit event (in the control
+> database's `auth_audit_events` table) came from your own sign-in.
+
 ### Before you complete setup
 
 Local mode requires only a 32-character `FANOUT_AUTH_CODE_SECRET`. SMTP is
@@ -79,7 +87,10 @@ successfully verified. The role is fixed: self-signup can never create an
 operator or administrator.
 The setting requires complete SMTP configuration and local auth mode.
 
-Self-signup remains unavailable until the first administrator completes setup.
+Self-signup remains unavailable until the first administrator exists. An owner
+created from `FANOUT_OWNER_EMAIL` counts, so with that setting self-signup opens
+at first boot, before the owner has signed in. It still creates only viewers and
+cannot claim the owner's address, which already belongs to an account.
 Suspended accounts are not recreated or reactivated. Public installations
 should enforce traffic and AI-budget limits at the deployment edge; Fanout also
 retains its per-IP, per-address, expiry, and attempt limits described below.

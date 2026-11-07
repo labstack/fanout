@@ -131,20 +131,32 @@ func TestSafeReturnTo(t *testing.T) {
 	}
 }
 
-func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
+// testOIDCProvider is a minimal OpenID provider for driving the real start and
+// callback handlers. It issues one RS256 ID token per token exchange for the
+// configured email and groups, bound to the nonce from the last start.
+type testOIDCProvider struct {
+	issuer       string
+	email        string
+	groups       []string
+	nonce        string
+	challenge    string
+	pkceVerified bool
+}
+
+func newTestOIDCProvider(t *testing.T, email string) *testOIDCProvider {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate signing key: %v", err)
 	}
-	var issuer, issuedNonce, expectedChallenge string
-	var pkceVerified bool
+	p := &testOIDCProvider{email: email}
 	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"issuer": issuer, "authorization_endpoint": issuer + "/authorize", "token_endpoint": issuer + "/token",
-				"jwks_uri": issuer + "/keys", "response_types_supported": []string{"code"},
+				"issuer": p.issuer, "authorization_endpoint": p.issuer + "/authorize", "token_endpoint": p.issuer + "/token",
+				"jwks_uri": p.issuer + "/keys", "response_types_supported": []string{"code"},
 				"subject_types_supported": []string{"public"}, "id_token_signing_alg_values_supported": []string{"RS256"},
 				"token_endpoint_auth_methods_supported": []string{"client_secret_basic"},
 			})
@@ -162,11 +174,14 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 			}
 			verifier := r.Form.Get("code_verifier")
 			digest := sha256.Sum256([]byte(verifier))
-			pkceVerified = verifier != "" && base64.RawURLEncoding.EncodeToString(digest[:]) == expectedChallenge
+			p.pkceVerified = verifier != "" && base64.RawURLEncoding.EncodeToString(digest[:]) == p.challenge
 			claims := jwt.MapClaims{
-				"iss": issuer, "sub": "subject-1", "aud": "fanout-client",
+				"iss": p.issuer, "sub": "subject-1", "aud": "fanout-client",
 				"exp": time.Now().Add(time.Minute).Unix(), "iat": time.Now().Add(-time.Second).Unix(),
-				"nonce": issuedNonce, "email": "admin@example.com", "email_verified": true,
+				"nonce": p.nonce, "email": p.email, "email_verified": true,
+			}
+			if p.groups != nil {
+				claims["groups"] = p.groups
 			}
 			idToken := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 			idToken.Header["kid"] = "test-key"
@@ -183,9 +198,55 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer idp.Close()
-	issuer = idp.URL
+	t.Cleanup(idp.Close)
+	p.issuer = idp.URL
+	return p
+}
 
+// login runs /api/auth/oidc/start and then the callback with the issued state
+// and pre-auth cookie, returning the callback response.
+func (p *testOIDCProvider) login(t *testing.T, e *echo.Echo, returnTo string) *httptest.ResponseRecorder {
+	t.Helper()
+	startRecorder := httptest.NewRecorder()
+	e.ServeHTTP(startRecorder, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/start?return_to="+url.QueryEscape(returnTo), nil))
+	if startRecorder.Code != http.StatusFound {
+		t.Fatalf("OIDC start status = %d, want 302: %s", startRecorder.Code, startRecorder.Body.String())
+	}
+	authorizeURL, err := url.Parse(startRecorder.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse authorization redirect: %v", err)
+	}
+	state := authorizeURL.Query().Get("state")
+	p.nonce = authorizeURL.Query().Get("nonce")
+	p.challenge = authorizeURL.Query().Get("code_challenge")
+	if state == "" || p.nonce == "" || p.challenge == "" || authorizeURL.Query().Get("code_challenge_method") != "S256" {
+		t.Fatalf("incomplete authorization redirect: %s", authorizeURL.String())
+	}
+	cookies := startRecorder.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("pre-auth cookies = %d, want 1", len(cookies))
+	}
+	callback := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=authorization-code&state="+url.QueryEscape(state), nil)
+	callback.AddCookie(cookies[0])
+	callbackRecorder := httptest.NewRecorder()
+	e.ServeHTTP(callbackRecorder, callback)
+	return callbackRecorder
+}
+
+func newOIDCCallbackServer(t *testing.T, cfg config.Config, db *appstore.SQLite) (*echo.Echo, *appauth.IdentityStore) {
+	t.Helper()
+	identities := appauth.NewIdentityStore(db.DB)
+	sessions := appauth.NewBrowserSessions(db.DB, 12*time.Hour, 7*24*time.Hour, false)
+	e := echo.New()
+	e.Use(echo.WrapMiddleware(sessions.Middleware))
+	if err := RegisterOIDCRoutes(context.Background(), e, cfg, appauth.NewUserStore(db.DB), identities, sessions, appauth.NewAuditStore(db.DB)); err != nil {
+		t.Fatalf("RegisterOIDCRoutes: %v", err)
+	}
+	return e, identities
+}
+
+func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
+	idp := newTestOIDCProvider(t, "admin@example.com")
 	db, err := appstore.NewSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("NewSQLite: %v", err)
@@ -196,49 +257,20 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	identities := appauth.NewIdentityStore(db.DB)
-	sessions := appauth.NewBrowserSessions(db.DB, 12*time.Hour, 7*24*time.Hour, false)
-	e := echo.New()
-	e.Use(echo.WrapMiddleware(sessions.Middleware))
 	cfg := config.Config{
-		AuthMode: "oidc", OIDCIssuerURL: issuer, OIDCClientID: "fanout-client", OIDCClientSecret: "client-secret",
+		AuthMode: "oidc", OIDCIssuerURL: idp.issuer, OIDCClientID: "fanout-client", OIDCClientSecret: "client-secret",
 		PublicURL: "https://fanout.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
 	}
-	if err := RegisterOIDCRoutes(context.Background(), e, cfg, users, identities, sessions, appauth.NewAuditStore(db.DB)); err != nil {
-		t.Fatalf("RegisterOIDCRoutes: %v", err)
-	}
+	e, identities := newOIDCCallbackServer(t, cfg, db)
 
-	startRecorder := httptest.NewRecorder()
-	e.ServeHTTP(startRecorder, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/start?return_to=/dashboards", nil))
-	if startRecorder.Code != http.StatusFound {
-		t.Fatalf("OIDC start status = %d, want 302: %s", startRecorder.Code, startRecorder.Body.String())
-	}
-	authorizeURL, err := url.Parse(startRecorder.Header().Get("Location"))
-	if err != nil {
-		t.Fatalf("parse authorization redirect: %v", err)
-	}
-	state := authorizeURL.Query().Get("state")
-	issuedNonce = authorizeURL.Query().Get("nonce")
-	expectedChallenge = authorizeURL.Query().Get("code_challenge")
-	if state == "" || issuedNonce == "" || expectedChallenge == "" || authorizeURL.Query().Get("code_challenge_method") != "S256" {
-		t.Fatalf("incomplete authorization redirect: %s", authorizeURL.String())
-	}
-	cookies := startRecorder.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("pre-auth cookies = %d, want 1", len(cookies))
-	}
-
-	callback := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=authorization-code&state="+url.QueryEscape(state), nil)
-	callback.AddCookie(cookies[0])
-	callbackRecorder := httptest.NewRecorder()
-	e.ServeHTTP(callbackRecorder, callback)
+	callbackRecorder := idp.login(t, e, "/dashboards")
 	if callbackRecorder.Code != http.StatusFound || callbackRecorder.Header().Get("Location") != "/dashboards" {
 		t.Fatalf("OIDC callback = %d location %q: %s", callbackRecorder.Code, callbackRecorder.Header().Get("Location"), callbackRecorder.Body.String())
 	}
-	if !pkceVerified {
+	if !idp.pkceVerified {
 		t.Fatal("token exchange did not present the PKCE verifier from the pre-auth session")
 	}
-	identity, err := identities.Find(t.Context(), issuer, "subject-1")
+	identity, err := identities.Find(t.Context(), idp.issuer, "subject-1")
 	if err != nil || identity.UserID != user.ID {
 		t.Fatalf("linked identity = %+v, err %v", identity, err)
 	}
@@ -248,6 +280,54 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 	}
 	if sessionCount != 1 {
 		t.Fatalf("authenticated sessions = %d, want 1", sessionCount)
+	}
+}
+
+// An owner designated by FANOUT_OWNER_EMAIL has no linked identity until the
+// first OIDC sign-in. That sign-in must link by verified email, audit the
+// link, and keep the owner an administrator even when the group mapping would
+// demote it, because the owner is the only active administrator.
+func TestOIDCCallbackLinksDesignatedOwnerAndKeepsAdministrator(t *testing.T) {
+	idp := newTestOIDCProvider(t, "Owner@Example.com")
+	idp.groups = []string{"staff"}
+	db, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	defer db.Close()
+	users := appauth.NewUserStore(db.DB)
+	owner, outcome, err := users.DesignateOwner("owner@example.com")
+	if err != nil || outcome != appauth.OwnerCreated {
+		t.Fatalf("DesignateOwner = (%v, %v)", outcome, err)
+	}
+	cfg := config.Config{
+		AuthMode: "oidc", OIDCIssuerURL: idp.issuer, OIDCClientID: "fanout-client", OIDCClientSecret: "client-secret",
+		PublicURL: "https://fanout.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
+		OIDCAdminGroups: "fanout-admins", OIDCOperatorGroups: "fanout-operators",
+	}
+	e, identities := newOIDCCallbackServer(t, cfg, db)
+
+	callbackRecorder := idp.login(t, e, "/")
+	if callbackRecorder.Code != http.StatusFound || callbackRecorder.Header().Get("Location") != "/" {
+		t.Fatalf("OIDC callback = %d location %q: %s", callbackRecorder.Code, callbackRecorder.Header().Get("Location"), callbackRecorder.Body.String())
+	}
+	identity, err := identities.Find(t.Context(), idp.issuer, "subject-1")
+	if err != nil || identity.UserID != owner.ID {
+		t.Fatalf("linked identity = %+v, err %v; want owner %s", identity, err, owner.ID)
+	}
+	after, err := users.GetByID(owner.ID)
+	if err != nil || after.Role != appauth.RoleAdmin || after.Status != appauth.UserStatusActive {
+		t.Fatalf("owner after OIDC login = %+v err %v, want active admin", after, err)
+	}
+	var linked, roleChanges int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'identity.linked' AND actor_user_id = ?`, owner.ID).Scan(&linked); err != nil {
+		t.Fatalf("count identity.linked: %v", err)
+	}
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'role.changed'`).Scan(&roleChanges); err != nil {
+		t.Fatalf("count role.changed: %v", err)
+	}
+	if linked != 1 || roleChanges != 0 {
+		t.Fatalf("identity.linked = %d role.changed = %d, want 1 and 0", linked, roleChanges)
 	}
 }
 

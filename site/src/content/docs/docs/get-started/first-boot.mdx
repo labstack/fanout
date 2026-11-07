@@ -76,7 +76,7 @@ error if it is malformed. The setting only designates the first administrator:
 
 - Once any user exists, it creates nothing. Restarting with the same address is
   a no-op. A different address is refused with a warning naming it, and no
-  account is created; an administrator adds further accounts from the console.
+  account is created; an administrator adds further accounts with `POST /api/users`.
 - It never promotes, reactivates or edits an existing account. If the address
   belongs to an account that is not an active administrator, Fanout warns and
   leaves the account unchanged.
@@ -85,6 +85,14 @@ The owner signs in like any other user: with an email code when SMTP is
 configured, or with `fanout login-link` as shown below. In OIDC mode the owner
 signs in through the provider, and Fanout links the first sign-in to the account
 by its email address, subject to the usual allowed group and domain checks.
+
+:::caution[Claim the owner account promptly]
+Until the owner first signs in, whoever first proves control of that address
+claims the administrator account: anyone who can read its mailbox in local mode,
+or any identity provider account that asserts that email in OIDC mode. Use an
+address you control, sign in promptly after first boot, and in OIDC mode confirm
+that the owner's `identity.linked` audit event came from your own sign-in.
+:::
 
 No setup request runs, so no ingest token is issued at first boot and ingest
 rejects every exporter until the owner issues one. After signing in, open

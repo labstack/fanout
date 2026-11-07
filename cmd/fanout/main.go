@@ -712,7 +712,7 @@ func prepareFirstAdministrator(ownerEmail string, users *auth.UserStore) (bool, 
 				slog.Warn("auth: FANOUT_OWNER_EMAIL names an existing account that is not an active administrator; it was left unchanged", "email", owner.Email, "role", owner.Role, "status", owner.Status)
 			}
 		case auth.OwnerRefused:
-			slog.Warn("auth: FANOUT_OWNER_EMAIL ignored; the control database already has users and none has this email, so no owner was created. Unset it, or have an administrator add the account", "email", strings.ToLower(strings.TrimSpace(ownerEmail)))
+			slog.Warn("auth: FANOUT_OWNER_EMAIL ignored; the control database already has users and none has this email, so no owner was created. Unset it, or have an administrator add the account", "email", owner.Email)
 		}
 	}
 	count, err := users.CountUsers()

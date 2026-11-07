@@ -12,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -287,12 +288,19 @@ func TestPrepareFirstAdministratorRefusesSecondOwner(t *testing.T) {
 	if _, err := users.CreateFirstAdminWithAudit("admin@example.com", "", auth.AuditEvent{EventType: "setup.completed", Outcome: "success"}); err != nil {
 		t.Fatalf("CreateFirstAdmin: %v", err)
 	}
-	setupRequired, err := prepareFirstAdministrator("owner@example.com", users)
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	setupRequired, err := prepareFirstAdministrator(" Owner@Example.com", users)
+	slog.SetDefault(previous)
 	if err != nil || setupRequired {
 		t.Fatalf("prepareFirstAdministrator = (%v, %v), want (false, nil)", setupRequired, err)
 	}
 	if _, err := users.GetByEmail("owner@example.com"); !errors.Is(err, auth.ErrUserNotFound) {
 		t.Fatalf("second owner lookup err = %v, want ErrUserNotFound", err)
+	}
+	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "FANOUT_OWNER_EMAIL ignored") || !strings.Contains(out, "email=owner@example.com") {
+		t.Fatalf("refusal log = %q, want a warning naming owner@example.com", out)
 	}
 }
 
