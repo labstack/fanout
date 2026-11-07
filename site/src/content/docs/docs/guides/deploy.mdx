@@ -99,3 +99,53 @@ sudo journalctl -u fanout
 Use the setup URL from the journal. Restrict journal access because that URL
 is an administrator credential. Check `http://127.0.0.1:7520/readyz` after startup.
 See [hardening](/docs/guides/hardening) before exposing the listener.
+
+### Listen on port 443
+
+Some TLS-terminating proxies connect to the origin only on port 443. For
+example, [Cloudflare's gRPC proxying](https://developers.cloudflare.com/network/grpc-connections/)
+requires the origin to listen on 443 with TLS and HTTP/2 advertised through
+ALPN, which Fanout's [direct TLS](/docs/guides/tls#direct-tls) provides.
+Linux reserves ports below 1024 for privileged processes, so grant the
+unprivileged `fanout` user only the capability to bind them rather than running
+as root.
+
+Add a drop-in with `sudo systemctl edit fanout`:
+
+```ini
+[Service]
+Environment=FANOUT_ADDR=:443
+LoadCredential=fanout_tls_cert:/etc/fanout/tls/cert.pem
+LoadCredential=fanout_tls_key:/etc/fanout/tls/key.pem
+Environment=FANOUT_TLS_CERT_FILE=%d/fanout_tls_cert
+Environment=FANOUT_TLS_KEY_FILE=%d/fanout_tls_key
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+```
+
+`AmbientCapabilities` gives the process `CAP_NET_BIND_SERVICE` although it runs
+as `fanout`. `CapabilityBoundingSet` drops every other capability, and
+`NoNewPrivileges` stops the process and its children from gaining more.
+The later `FANOUT_ADDR` replaces the unit's loopback address; `:443` listens on
+every interface, so restrict the port to the proxy's networks with a firewall.
+The certificate and key are passed as credentials, like the auth secret, so
+they can stay readable only by root.
+
+Restart and confirm the listener runs as `fanout` with only that capability:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl restart fanout
+systemctl show fanout -p User -p AmbientCapabilities -p CapabilityBoundingSet
+sudo ss -ltnp 'sport = :443'
+grep Cap /proc/"$(systemctl show fanout -p MainPID --value)"/status
+```
+
+`ss` should show the `fanout` process on port 443, and `CapAmb` and `CapEff`
+should both be `0000000000000400` (`CAP_NET_BIND_SERVICE` alone). Check
+readiness on the host with a name in the certificate:
+
+```sh
+curl --resolve fanout.example.com:443:127.0.0.1 https://fanout.example.com/readyz
+```
