@@ -117,6 +117,12 @@ jobs:
             slug: performance
             skip_performance: ""
             args: e2e/specs/app/performance.spec.ts
+          # The local Storybook catalog runs in its own job so the smoke group
+          # stays inside its timeout; `just check` stays browser-free.
+          - group: catalog
+            slug: catalog
+            skip_performance: "1"
+            args: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -134,14 +140,13 @@ jobs:
       - name: just ui-deps
         run: just ui-deps
       - name: just e2e-browsers
-        if: matrix.slug == 'smoke'
+        if: matrix.slug == 'smoke' || matrix.slug == 'catalog'
         run: just e2e-browsers
-      # The local Storybook catalog needs the same Chromium, so it runs here
-      # rather than in the browser-free `just check`.
       - name: just design-check
-        if: matrix.slug == 'smoke'
+        if: matrix.slug == 'catalog'
         run: just design-check
       - name: just e2e
+        if: matrix.slug != 'catalog'
         run: just e2e ${{ matrix.args }}
         env:
           FANOUT_E2E_SKIP_PERFORMANCE: ${{ matrix.skip_performance }}
