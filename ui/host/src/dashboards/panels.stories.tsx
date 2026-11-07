@@ -4,7 +4,6 @@ import { expect, fn } from "storybook/test";
 import { panels, results, invalidResult } from "../catalog/fixtures";
 import { PanelCard } from "./panel-card";
 
-import { loadingRules } from "../catalog/accessibility";
 
 const meta = {
   id: "components-dashboard-panels", title: "Components/Dashboard panels", component: PanelCard,
@@ -36,20 +35,22 @@ export const Logs: Story = panel("logs");
 export const LogPatterns: Story = panel("patterns");
 export const Traces: Story = panel("traces");
 export const ServiceDependencies: Story = panel("topology");
-export const Loading: Story = { args: { result: undefined }, parameters: { a11y: { config: { rules: loadingRules } } } };
+export const Loading: Story = { args: { result: undefined }, parameters: { } };
 export const Empty: Story = { args: { result: { id: "requests", status: "empty", diagnosis: "No requests in this time range.", elapsed_ms: 18 } } };
 export const Error: Story = { args: { result: { id: "requests", status: "error", error: "The telemetry query timed out. Try a shorter time range.", elapsed_ms: 3000 } } };
-export const Data: Story = { play: async ({ canvas, userEvent }) => {
+export const Data: Story = { args: { initialView: "Data" }, play: async ({ canvas, userEvent }) => {
+  await expect(await canvas.findByRole("table")).toBeVisible();
+  await userEvent.click(canvas.getByRole("button", { name: /^Spec$/ }));
   await userEvent.click(canvas.getByRole("button", { name: /^Data$/ }));
   await expect(await canvas.findByRole("table")).toBeVisible();
 } };
 
 export const Invalid: Story = { args: { result: invalidResult }, play: async ({ canvas }) => {
-  await expect(canvas.getByText("Unknown field: request_total")).toBeVisible();
+  await expect(canvas.getByText("Unknown field: request_total", { exact: true })).toBeVisible();
   await expect(canvas.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
 } };
 export const InvalidDataTab: Story = { args: { result: invalidResult }, play: async ({ canvas, userEvent, args }) => {
-  await expect(canvas.getByText("Unknown field: request_total")).toBeVisible();
+  await expect(canvas.getByText("Unknown field: request_total", { exact: true })).toBeVisible();
   await expect(canvas.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   await userEvent.click(canvas.getByRole("button", { name: /^Data$/ }));
   await expect(args.onRetry).not.toHaveBeenCalled();

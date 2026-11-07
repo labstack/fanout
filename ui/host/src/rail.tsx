@@ -1,4 +1,5 @@
-import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Kbd, Loader, Menu, Modal, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
+import { DataState, Notice } from "@labstack/ui";
+import { ActionIcon, Badge, Box, Button, Center, Group, Kbd, Loader, Menu, Modal, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { Bell, ChatCircle, SquaresFour, Gear, Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -137,16 +138,16 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
       <Stack gap="lg" pb="sm">
         {agentAvailable && <Stack gap={4}>
           <SectionLabel>Chats</SectionLabel>
-          {history.isLoading && <Center py="md"><Loader size="xs" /></Center>}
-          {history.isError && <Alert color="bad" radius="md" p="xs">Chats could not be loaded.</Alert>}
-          {!history.isLoading && !history.isError && threads.length === 0 && <Text c="dimmed" size="sm" px="sm" py="xs">{query ? "No matching chats" : "No chats yet"}</Text>}
+          {history.isLoading && <DataState state="loading" rows={3} />}
+          {history.isError && <Notice tone="danger">Chats could not be loaded.</Notice>}
+          {!history.isLoading && !history.isError && threads.length === 0 && <DataState state="empty" variant="inline" empty={{title: query ? "No matching chats" : "No chats yet", description: "Start a chat to investigate your telemetry.", action: <Button size="compact-xs" variant="subtle" onClick={onNewChat}>New chat</Button>}} />}
           {groups.map((group) => <Stack key={group.label} gap={2}>
             {groups.length > 1 && <Text c="dimmed" size="xs" px="sm" pt={4}>{group.label}</Text>}
             {group.threads.map((thread) => <ThreadRow key={thread.id} thread={thread} active={thread.id === activeThreadID} onSelect={() => onSelectThread(thread.id)} onRename={() => beginRename(thread)} onDelete={() => { setMutationError(""); setDeleting(thread); }} />)}
           </Stack>)}
           {history.hasNextPage && <Button variant="subtle" color="gray" size="compact-sm" loading={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>See all</Button>}
         </Stack>}
-        {agentAvailable && query && onInvestigateService && schema.isLoading && <Center py="md"><Loader size="xs" /></Center>}
+        {agentAvailable && query && onInvestigateService && schema.isLoading && <DataState state="loading" rows={3} />}
         {agentAvailable && query && onInvestigateService && (schema.isSuccess || schema.isError) && <Stack gap={4}>
           <SectionLabel>Services</SectionLabel>
           {schema.isError && <Text c="dimmed" size="sm" px="sm">Services could not be searched</Text>}
@@ -170,8 +171,8 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
         </Stack>
         <Stack gap={4}>
           <SectionLabel>Dashboards</SectionLabel>
-          {dashboards.isLoading && <Center py="md"><Loader size="xs" /></Center>}
-          {dashboards.isError && <Alert color="bad" radius="md" p="xs">Dashboards could not be loaded.</Alert>}
+          {dashboards.isLoading && <DataState state="loading" rows={3} />}
+          {dashboards.isError && <Notice tone="danger">Dashboards could not be loaded.</Notice>}
           {/* A search that matches nothing here would otherwise leave the
               label sitting on top of the Create button with no word about
               why the list emptied. */}
@@ -206,7 +207,7 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
       <form onSubmit={(event) => { event.preventDefault(); void renameThread(); }}>
         <Stack>
           <TextInput label="Name" value={renameTitle} onChange={(event) => setRenameTitle(event.currentTarget.value)} maxLength={120} autoFocus />
-          {mutationError && <Alert color="bad">{mutationError}</Alert>}
+          {mutationError && <Notice tone="danger">{mutationError}</Notice>}
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setRenaming(null)} disabled={busy}>Cancel</Button>
             <Button type="submit" loading={busy} disabled={!renameTitle.trim()}>Save</Button>
@@ -217,7 +218,7 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
     <Modal opened={deleting !== null} onClose={() => !busy && setDeleting(null)} title="Delete chat?" centered>
       <Stack>
         <Text size="sm">This permanently removes <Text span fw={650}>{deleting?.title}</Text> and its saved messages.</Text>
-        {mutationError && <Alert color="bad">{mutationError}</Alert>}
+        {mutationError && <Notice tone="danger">{mutationError}</Notice>}
         <Group justify="flex-end">
           <Button variant="default" onClick={() => setDeleting(null)} disabled={busy}>Cancel</Button>
           <Button color="bad" loading={busy} onClick={() => void deleteThread()}>Delete</Button>

@@ -160,7 +160,7 @@ it("keeps the chart body and plot budget identical after a transient refresh fai
 });
 
 
-it.each([120,300])("bounds the full error state inside a %ipx body with inline Retry in short cards",async height=>{
+it.each([120,300])("bounds a scrollable full error notice with working Retry in a %ipx body",async height=>{
   const observers:{callback:ResizeObserverCallback;elements:Element[]}[]=[];
   vi.stubGlobal("ResizeObserver",class { record:{callback:ResizeObserverCallback;elements:Element[]}; constructor(callback:ResizeObserverCallback){this.record={callback,elements:[]};observers.push(this.record);} observe(el:Element){this.record.elements.push(el);} disconnect(){} });
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
@@ -172,13 +172,12 @@ it.each([120,300])("bounds the full error state inside a %ipx body with inline R
   await act(async()=>observer!.callback([{target:body,contentRect:{height,width:300}} as unknown as ResizeObserverEntry],{} as ResizeObserver));
   const state=host.querySelector<HTMLElement>('[data-panel-error]')!;
   expect(state).not.toBeNull();expect(body.contains(state)).toBe(true);
-  expect(state.style.height).toBe("100%");expect(state.style.maxHeight).toBe("100%");expect(state.style.minHeight).toBe("0");expect(state.style.overflow).toBe("hidden");
-  expect(state.style.flexDirection).toBe(height<160?"row":"column");
+  expect(state.style.maxHeight).toBe("100%"); expect(state.style.overflow).toBe("auto");
   const text=state.querySelector<HTMLElement>('[data-panel-error-message]')!;
-  expect(text.title).toBe(message);expect(text.style.minWidth).toBe("0");expect(text.style.overflow).toBe("hidden");
-  if(height<160)expect(text.style.whiteSpace).toBe("nowrap");
-  const button=[...state.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==="Retry")!;
-  expect(button.style.flexShrink).toBe("0");await act(async()=>button.click());expect(retry).toHaveBeenCalledOnce();
+  expect(text.title).toBe(message); expect(text.textContent).toBe(message);
+  expect(text.style.overflowWrap).toBe("anywhere");
+  const button=within(state).getByRole("button", {name: "Retry"});
+  await act(async()=>button.click()); expect(retry).toHaveBeenCalledOnce();
   vi.unstubAllGlobals();
 });
 
@@ -197,10 +196,8 @@ it.each([120,300])("shows a busy panel as not run yet in a %ipx body",async heig
   expect(state.textContent).toContain("Not run yet");
   expect(state.querySelector('[data-panel-error-message]')).toBeNull();
   const button=within(state).getByRole("button",{name:"Retry"});
-  expect(button.getAttribute("aria-describedby")).toBeTruthy();
-  expect(document.getElementById(button.getAttribute("aria-describedby")!)!.textContent).toBe(message);
-  if(height>=160)expect(state.textContent).toContain(message);
-  else expect(state.textContent).not.toContain("…");
+  expect(state.textContent).toContain(message);
+  expect(state.style.maxHeight).toBe("100%"); expect(state.style.overflow).toBe("auto");
   await act(async()=>button.click());expect(retry).toHaveBeenCalledOnce();
 });
 
@@ -290,7 +287,7 @@ it("closes the tooltip after a mouse Retry and programmatic focus restoration", 
   await vi.waitFor(() => expect(within(document.body).queryByRole("tooltip")).toBeNull(), {timeout: 3000, interval: 5});
 });
 
-it.each(["error", "invalid"] as const)("gives the compact %s message at least half a 200px card with an icon Fix", async (status) => {
+it.each(["error", "invalid"] as const)("keeps the full %s notice and Fix reachable in a 200px card", async (status) => {
   const observers: {callback: ResizeObserverCallback; elements: Element[]}[] = [];
   vi.stubGlobal("ResizeObserver", class {
     record: {callback: ResizeObserverCallback; elements: Element[]};
@@ -307,17 +304,10 @@ it.each(["error", "invalid"] as const)("gives the compact %s message at least ha
     });
     const row = host.querySelector<HTMLElement>('[data-panel-error]')!;
     const action = within(row).getByRole("button", {name: "Ask Fanout to fix it"});
-    expect(action.textContent).toBe("");
-    expect(action.querySelector("svg")).not.toBeNull();
+    expect(action.textContent).toBe("Ask Fanout to fix it");
     const text = row.querySelector<HTMLElement>('[data-panel-error-message]')!;
-    expect(text.style.flex).toBe("1 1 0px");
-    // happy-dom has no layout: bound the flex budget from the actual DOM styles.
-    const rowWidth = 200 - 2 * parseFloat(body.style.padding);
-    const occupied = Number(row.querySelector("svg")!.getAttribute("width")) + parseFloat(action.style.flexBasis) + 2 * parseFloat(row.style.gap);
-    expect(rowWidth - occupied).toBeGreaterThanOrEqual(rowWidth * .5);
-    expect(rowWidth - occupied).toBeGreaterThanOrEqual(200 * .5);
-    await act(async () => {action.dispatchEvent(new MouseEvent("mouseover", {bubbles: true})); action.dispatchEvent(new MouseEvent("mouseenter"));});
-    await vi.waitFor(() => expect(within(document.body).getByRole("tooltip").textContent).toBe("Ask Fanout to fix it"), {timeout: 3000, interval: 5});
+    expect(text.textContent).toBe("Invalid query"); expect(text.title).toBe("Invalid query");
+    expect(row.style.overflow).toBe("auto"); expect(row.style.maxHeight).toBe("100%");
     await act(async () => action.click());
     expect(fix).toHaveBeenCalledOnce();
   } finally {await act(async () => cleanup.splice(0).forEach(fn => fn()));}
@@ -388,4 +378,11 @@ it("shows a zero count's diagnosis as a note under the 0",async()=>{
   const h=await render({...p,viz:"stat"},{...r,frame,diagnosis:"No spans for service nope in this time range."});
   expect(h.querySelector('[data-stat-value]')?.textContent).toBe("0");
   expect([...h.querySelectorAll('[data-panel-note]')].map(n=>n.textContent)).toEqual(["No spans for service nope in this time range."]);
+});
+
+it("shows invalid problem paths and hints without claiming execution", async () => {
+ const host = await render(p, {id: p.id, status: "invalid", elapsed_ms: 0, error: "Invalid field", problems: [{path: "query.measures[0]", message: "Unknown field", hint: "Use count()"}]});
+ expect(host.textContent).toContain("query.measures[0]"); expect(host.textContent).toContain("Use count()");
+ await act(async()=>host.querySelector<HTMLButtonElement>('[data-panel-view="Data"]')!.click());
+ expect(host.textContent).not.toContain("Ran in 0 ms");
 });

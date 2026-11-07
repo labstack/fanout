@@ -1,4 +1,6 @@
-import { Alert, Box, Button, Center, Code, Container, Group, Loader, Paper, PinInput, Stack, Text, TextInput, Title } from "@mantine/core";
+import { Notice } from "@labstack/ui";
+import { DataState } from "@labstack/ui";
+import { Box, Button, Center, Code, Container, Group, Paper, PinInput, Stack, Text, TextInput, Title } from "@mantine/core";
 import { ArrowLeft, ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { createContext, FormEvent, ReactNode, useContext, useEffect, useRef, useState } from "react";
@@ -62,21 +64,17 @@ function AuthSurface({ children, wide = false }: { children: ReactNode; wide?: b
   return <Box
     mih="100dvh"
     style={{
-      // Tokens rather than literals: the old mint wash was left over from the
-      // teal palette, and --mantine-color-white is white in both schemes, so
-      // the sign-in page stayed light while the rest of the app went dark.
-      background: "radial-gradient(circle at 50% -12%, var(--labstack-inset), transparent 38%), linear-gradient(180deg, var(--mantine-color-default-hover), var(--mantine-color-body) 62%)",
+      background: "var(--labstack-ground)",
     }}
   >
     <Center mih="100dvh" px="md" py={48}>
       <Container size={wide ? 680 : 480} w="100%">
         <Paper
-          radius={28}
+          radius="md"
           p={{ base: 24, sm: 40 }}
           style={{
-            background: "var(--mantine-color-body)",
+            background: "var(--labstack-raised)",
             border: "1px solid var(--mantine-color-default-border)",
-            boxShadow: "var(--mantine-shadow-xl)",
           }}
         >
           {children}
@@ -214,7 +212,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       <Text c="dimmed">Fanout shows this token once. Store it with your collector secrets before continuing.</Text>
       <Stack gap="xs"><Text size="sm" fw={600}>OTLP endpoint</Text><Code block>{setupResult.suggested_endpoint ?? window.location.origin}</Code></Stack>
       <Stack gap="xs"><Text size="sm" fw={600}>Header</Text><Code block>{setupResult.ingest_header_name ?? "Authorization"}: Bearer {setupResult.ingest_token}</Code></Stack>
-      {error && <Alert color="bad" radius="md">{error}</Alert>}
+      {error && <Notice tone="danger">{error}</Notice>}
       <Group grow align="stretch">
         <Button variant="light" radius="md" leftSection={copied ? <Check size={16} weight="bold" /> : <Copy size={16} />} onClick={() => void copyText(`${setupResult.ingest_header_name ?? "Authorization"}: Bearer ${setupResult.ingest_token}`)}>{copied ? "Copied" : "Copy header"}</Button>
         <Button radius="md" rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setViewer("user"); setSetupResult(null); void refreshAccount(); }}>Continue to Fanout</Button>
@@ -223,8 +221,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     </Stack></AuthSurface>;
   }
 
-  if (!sessionReady || !statusReady || loginToken) return <Center mih="100dvh"><Loader size="sm" /></Center>;
-  if (!status) return <AuthSurface><Stack gap="lg"><BrandLockup /><Title order={1}>Fanout is unavailable</Title><Alert color="bad" radius="md">{error || "Authentication status could not be loaded."}</Alert></Stack></AuthSurface>;
+  if (!sessionReady || !statusReady || loginToken) return <AuthSurface><DataState state="loading" loadingLabel="Loading sign-in" rows={4} /></AuthSurface>;
+  if (!status) return <AuthSurface><Stack gap="lg"><BrandLockup /><Title order={1}>Fanout is unavailable</Title><Notice tone="danger">{error || "Authentication status could not be loaded."}</Notice></Stack></AuthSurface>;
   if (authenticated && returnTo) return null;
   if (authenticated) return <RuntimeStatusContext.Provider value={status}>
     <ViewerContext.Provider value={account ?? { id: "", email, display_name: displayName, status: "active", role: "" }}>{children}</ViewerContext.Provider>
@@ -239,7 +237,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         <Title order={1} fz={{ base: 28, sm: 32 }} lh={1.08}>Sign in</Title>
         <Text c="dimmed" size="md" lh={1.6}>Use your organization&apos;s identity provider to continue.</Text>
       </Stack>
-      {error && <Alert color="bad" radius="md">{error}</Alert>}
+      {error && <Notice tone="danger">{error}</Notice>}
       <Button component="a" href={target} size="md" radius="md" rightSection={<ArrowRight size={17} weight="bold" />}>Continue with SSO</Button>
     </Stack></AuthSurface>;
   }
@@ -345,7 +343,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           <Button variant="subtle" size="compact-xs" onClick={() => void sendCode()} disabled={busy || resendWait > 0}>{resendWait > 0 ? `Resend in ${resendWait}s` : "Resend code"}</Button>
         </Group>
       </Stack>}
-      {error && <Alert color="bad" radius="md">{error}</Alert>}
+      {error && <Notice tone="danger">{error}</Notice>}
       {/* The sixth digit still submits on its own, but a partial paste, a short
           autofill or a cleared field has to leave something to press. */}
       {onCodeStep

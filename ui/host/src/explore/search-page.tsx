@@ -1,4 +1,6 @@
-import { Alert, Anchor, Box, Button, Group, NumberInput, SegmentedControl, Select, Stack, Switch, Text, Title, Tooltip } from "@mantine/core";
+import { LiveDataMeta } from "../live-data-meta";
+import { PageHeader, Notice } from "@labstack/ui";
+import { Anchor, Box, Button, Group, NumberInput, SegmentedControl, Select, Stack, Switch, Text, Tooltip } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { rowModel } from "../../../panels/rows";
@@ -15,7 +17,7 @@ import { RangeMenu } from "../dashboards/toolbar";
 import type { RowControls } from "../dashboards/viz/table";
 import { LogDetails } from "./log-details";
 import { FanqlEditor } from "../fanql-editor/fanql-editor";
-import { completeFanql, formatFanql, parseFanql, type Notice } from "./api";
+import { completeFanql, formatFanql, parseFanql, type Notice as QueryNotice } from "./api";
 import { SaveDialog, defaultTitle } from "./save-dialog";
 import { exploreTime, maxSlower, type ExploreSearch, type Picks } from "./search";
 import type { TextSpan } from "../api-error";
@@ -88,7 +90,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
   const [text, setText] = useState(search.q);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [shifted, setShifted] = useState({ shift: 0, length: 0 });
-  const [notices, setNotices] = useState<Notice[]>([]);
+  const [notices, setNotices] = useState<QueryNotice[]>([]);
   const [error, setError] = useState<string>();
   const [ran, setRan] = useState<Ran>();
   const [running, setRunning] = useState(false);
@@ -96,6 +98,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
   const controller = useRef<AbortController | undefined>(undefined);
   const resultBox = useRef<HTMLDivElement>(null);
   const help = useId();
+  const [ranAt, setRanAt] = useState<number>();
   const time = exploreTime(search);
   const windowKey = `${search.range}|${search.from ?? ""}|${search.to ?? ""}`;
   const sort = search.sort && preset.sorts.some(s => s.value === search.sort) ? search.sort : preset.sorts[0].value;
@@ -142,6 +145,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
         if (current.current === filters) setProblems(result.problems ?? []);
         return;
       }
+      setRanAt(Date.now());
       setRan({ text: filters, terms: picked, sort: order, window: windowKey, panel, result: classifyPanelResult(searchCopy(result), [panelID]) });
     } catch (failure) {
       if (abort.signal.aborted) return;
@@ -166,7 +170,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
   // Problems and notices from the combined text, in the editor's coordinates; generated terms are not the author's to fix.
   const local = useMemo(() => {
     const inText = (span?: TextSpan) => span && span.start >= shifted.shift && span.end - shifted.shift <= shifted.length ? { start: span.start - shifted.shift, end: span.end - shifted.shift } : undefined;
-    const map = <T extends Problem | Notice>(item: T): T => ({ ...item, span: inText(item.span), fix_its: item.fix_its?.flatMap(fix => { const span = inText(fix.span); return span ? [{ ...fix, span }] : []; }) });
+    const map = <T extends Problem | QueryNotice>(item: T): T => ({ ...item, span: inText(item.span), fix_its: item.fix_its?.flatMap(fix => { const span = inText(fix.span); return span ? [{ ...fix, span }] : []; }) });
     return { problems: problems.map(map), notices: notices.map(map) };
   }, [problems, notices, shifted]);
   // Stable row callbacks keep the table's cells mounted while the URL changes, so
@@ -193,7 +197,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
 
   return <Stack gap="md" p="lg" maw={1400} data-search-page={preset.viz}>
     <Group justify="space-between" align="flex-end">
-      <Title order={2}>{preset.name}</Title>
+      <PageHeader title={preset.name} description={preset.name === "Logs" ? "Search and inspect log events." : "Find slow requests and inspect their traces."} meta={<LiveDataMeta time={time} updatedAt={ran ? ranAt : null} />} />
       <RangeMenu time={time} onRange={range => onSearch({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => onSearch({ ...search, from, to })} />
     </Group>
     <Stack gap="xs">
@@ -223,7 +227,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
       </Group>
       <Tooltip label="Search for something that returns rows first" disabled={canSave}><span><Button variant="default" disabled={!canSave} onClick={() => ran && setSaving(ran.panel)}>Save to dashboard</Button></span></Tooltip>
     </Group>
-    {error && <Alert color="bad" title="The search could not run">{error}</Alert>}
+    {error && <Notice tone="danger" title="The search could not run">{error}</Notice>}
     <Box ref={resultBox}>
       {ran && <Stack gap="xs">
         {stale && <Text size="sm" fw={600} role="status">Result of the last search · filters have changed</Text>}

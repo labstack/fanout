@@ -1,5 +1,6 @@
+import { Notice } from "@labstack/ui";
 import { ColorSchemeToggle } from "./color-scheme-toggle";
-import { ActionIcon, Alert, AppShell, Avatar, Burger, Button, Drawer, Group, Menu, Tooltip } from "@mantine/core";
+import { ActionIcon, AppShell, Avatar, Burger, Button, Drawer, Group, Menu, Tooltip } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { BookOpen, MagnifyingGlass, SidebarSimple, PlugsConnected, SignOut } from "@phosphor-icons/react";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
@@ -100,7 +101,7 @@ export default function Shell({ children }: { children: ReactNode }) {
       <Rail {...railProps} autoFocusSearch={drawerOpened && keyboardOpen} />
     </Drawer>
     <AppShell.Main id="main" tabIndex={-1}>
-      {signOutError && <Alert color="bad" m="md" withCloseButton onClose={() => setSignOutError("")}>{signOutError}</Alert>}
+      {signOutError && <Notice tone="danger">{signOutError}</Notice>}
       {children}
     </AppShell.Main>
     {creating && <Suspense fallback={null}><NewDashboard onClose={closeNew} onCreated={id => { setCreating(false); void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: {} }); }} /></Suspense>}

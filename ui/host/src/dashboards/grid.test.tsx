@@ -166,7 +166,7 @@ describe("PanelGrid", () => {
     extraResults.delete("by_service");
     const { host } = await render({ results: extraResults, fetching: true, agentAvailable: false });
     expect(host.textContent).toContain("No requests here.");
-    expect(host.querySelector('.mantine-Loader-root')).not.toBeNull();
+    expect(host.querySelector('[role="status"]')).not.toBeNull();
     expect(host.textContent).not.toContain("Ask Fanout to fix it");
     expect(host.textContent).toContain("Could not convert");
     expect(host.querySelector("strong")!.textContent).toBe("Checkout");

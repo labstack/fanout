@@ -1,4 +1,3 @@
-import { nestedMainRules } from "../catalog/accessibility";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect } from "storybook/test";
 import { Product, pageParameters } from "../catalog/product";
@@ -6,7 +5,7 @@ import { Product, pageParameters } from "../catalog/product";
 const meta = {
   id: "pages-dashboards", title: "Pages/Dashboards", component: Product,
   args: { path: "/dashboards" },
-  parameters: { ...pageParameters, a11y: { config: { rules: [...nestedMainRules] } }, docs: { ...pageParameters.docs, description: { component: "The index opens the default dashboard when one exists. An empty workspace offers Create with AI." } } },
+  parameters: { ...pageParameters, docs: { ...pageParameters.docs, description: { component: "The index opens the default dashboard when one exists. An empty workspace offers Create with AI." } } },
 } satisfies Meta<typeof Product>;
 export default meta;
 type Story = StoryObj<typeof meta>;

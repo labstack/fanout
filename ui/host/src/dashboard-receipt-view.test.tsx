@@ -28,7 +28,7 @@ it('renders one quiet status, safe chips, exact saved-version link and keyboard 
   await act(async()=>details.click());expect(details.getAttribute('aria-expanded')).toBe('true');
   expect(host.textContent?.match(/(?:Saved v|saved version |saved v)2/g)).toHaveLength(1);
   expect(host.textContent).toContain('Unknown field');expect(host.textContent).toContain('Preview');
-  expect(host.textContent).toContain('Preview · Latency: ok');expect(host.textContent).toContain('Save · Latency: ok');
+  expect(host.textContent).toContain('Preview · Latency: Ok');expect(host.textContent).toContain('Save · Latency: Ok');
   expect(host.textContent).not.toContain('Preview · latency:');expect(host.textContent).not.toContain('Save · latency:');
  }finally{await act(async()=>root.unmount());host.remove();}
 });
@@ -38,7 +38,7 @@ it('shows unchanged panel titles in a rename-only save receipt',async()=>{
  const host=document.createElement('div');const root=createRoot(host);
  try{await act(async()=>root.render(view(receiptForTurn(messages,'u')!)));
  await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
- expect(host.textContent).toContain('Save · P95 by operation: ok');expect(host.textContent).not.toContain('p95_by_operation');
+ expect(host.textContent).toContain('Save · P95 by operation: Ok');expect(host.textContent).not.toContain('p95_by_operation');
  }finally{await act(async()=>root.unmount());}
 });
 it.each(['P95 by operation',undefined])('shows one correction chip per panel with title %s and no spec paths',async title=>{
@@ -53,7 +53,7 @@ it.each(['P95 by operation',undefined])('shows one correction chip per panel wit
  expect(chips.querySelectorAll('[title]')).toHaveLength(1);expect(chips.textContent).toBe(`Fixed ${label}`);
  await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
  expect(host.textContent).toContain(`Fixed ${label}: Invalid sort`);expect(host.textContent).toContain(`Fixed ${label}: Invalid grouping`);
- expect(host.textContent).toContain(`Preview · ${label}: ok`);
+ expect(host.textContent).toContain(`Preview · ${label}: Ok`);
  expect(host.textContent).not.toContain('query.sort');expect(host.textContent).not.toContain('panels[');
  }finally{await act(async()=>root.unmount());}
 });
@@ -95,4 +95,14 @@ it('lists a failed attempt as retried in Details beside the proven save',async()
  await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
  expect(host.textContent).toContain('Save attempt 1: retried');expect(host.textContent).toContain('Save: complete');expect(host.textContent).not.toContain('Save: failed');
  }finally{await act(async()=>root.unmount());}
+});
+
+it('uses milliseconds for short checks and singular counts', async () => {
+ const receipt=receiptForTurn(build(),'u')!;
+ receipt.saved!.receipt.save_check.elapsed_ms=24;
+ receipt.saved!.receipt.save_check.panels[0].rows=1;
+ const host=document.createElement('div');const root=createRoot(host);
+ try { await act(async()=>root.render(view(receipt))); await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
+ expect(host.textContent).toContain('Checked in 24 ms'); expect(host.textContent).toContain('1 row'); expect(host.textContent).not.toContain('1 rows');
+ } finally {await act(async()=>root.unmount());}
 });

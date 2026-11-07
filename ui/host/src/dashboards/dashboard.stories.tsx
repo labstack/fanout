@@ -1,4 +1,3 @@
-import { nestedMainRules } from "../catalog/accessibility";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect } from "storybook/test";
 import { Product, pageParameters } from "../catalog/product";
@@ -7,7 +6,7 @@ import { dashboardRows } from "../catalog/interactions";
 const meta = {
   id: "pages-dashboard", title: "Pages/Dashboard", component: Product,
   args: { path: "/dashboards/commerce-health" },
-  parameters: { ...pageParameters, a11y: { config: { rules: [...nestedMainRules] } }, docs: { ...pageParameters.docs, description: { component: "A saved dashboard rendered by the real route, query client, toolbar, grid, and panels." } } },
+  parameters: { ...pageParameters, docs: { ...pageParameters.docs, description: { component: "A saved dashboard rendered by the real route, query client, toolbar, grid, and panels." } } },
 } satisfies Meta<typeof Product>;
 export default meta;
 type Story = StoryObj<typeof meta>;

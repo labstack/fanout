@@ -1,12 +1,13 @@
+import { StatusBadge } from "@labstack/ui";
 import { Button, Collapse, Group, Loader, Paper, Stack, Text } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { changeChips, stageNames, type BuildReceipt } from "./dashboard-receipt";
 import { DashboardChangeChips } from "./dashboard-change-chips";
 
-const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
-export function DashboardReceiptView({ receipt, running = false, activity = "", awaitingAnswer = false }: { receipt: BuildReceipt; running?: boolean; activity?: string; awaitingAnswer?: boolean }) {
-  const [expanded, setExpanded] = useState(false), detailsID = useId();
+const seconds = (ms: number) => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+export function DashboardReceiptView({ receipt, running = false, activity = "", awaitingAnswer = false, initialExpanded = false }: { receipt: BuildReceipt; running?: boolean; activity?: string; awaitingAnswer?: boolean; initialExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(initialExpanded), detailsID = useId();
   const saved = receipt.saved, check = saved?.receipt.save_check;
   const panelTitle = (id:string) => Object.hasOwn(receipt.panel_titles,id) ? receipt.panel_titles[id] : id;
   const completed = Object.values(receipt.stages).filter(s => s.state === "complete").length;
@@ -23,23 +24,26 @@ export function DashboardReceiptView({ receipt, running = false, activity = "", 
   return <Paper data-build-receipt={receipt.turn_id} data-dashboard-result={saved?.id} data-chat-anchor withBorder radius="md" p="sm">
     <Stack gap={6}>
       <Group gap="xs" justify="space-between">
-        <Text size="sm" role="status" aria-live="polite" aria-atomic="true">{summary}<Text span c="dimmed" size="xs"> · {completed} stages complete</Text></Text>
+        <Text size="sm" role="status" aria-live="polite" aria-atomic="true">{summary}<Text span c="dimmed" size="xs"> · {completed} {completed === 1 ? "stage" : "stages"} complete</Text></Text>
         <Button component="button" variant="subtle" color="gray" size="compact-xs" aria-expanded={expanded} aria-controls={detailsID} onClick={() => setExpanded(v => !v)}>Details{chips.length > 4 ? ` (+${chips.length - 4})` : ""}</Button>
       </Group>
       {running && awaitingAnswer && <Group gap="xs" data-build-running><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
       <DashboardChangeChips labels={chips.slice(0,4)} />
-      {receipt.explanations.map(text => running ? text.split(" · ").filter(part => !part.endsWith(": incomplete")).join(" · ") : text).filter(Boolean).map((text,i) => <Text key={i} size="xs" c="dimmed" data-receipt-attention>{text}</Text>)}
+      {[...new Set(receipt.explanations)].map(text => running ? text.split(" · ").filter(part => !part.endsWith(": incomplete")).join(" · ") : text).filter(Boolean).map((text,i) => <Text key={i} size="xs" c="dimmed" data-receipt-attention>{text}</Text>)}
       {saved && <Button renderRoot={(props) => <Link {...props} to="/dashboards/$dashboardId" params={{dashboardId:saved.id}} search={{}} />} variant="subtle" size="compact-sm" color="gray" style={{alignSelf:"flex-start"}}>Open dashboard</Button>}
       <Collapse expanded={expanded} id={detailsID}>
         <Stack gap={4}>
           {saved && <Text size="xs">{saved.label} {saved.name} · opens the current dashboard</Text>}
+          <Text size="xs" fw={600}>Build stages</Text>
           {Object.entries(receipt.stages).map(([key,stage]) => <Text size="xs" c="dimmed" key={key}>{stageNames[key as keyof typeof stageNames]}: {running && stage.state === "incomplete" ? "in progress" : stage.state}{stage.elapsed_ms !== undefined ? ` · ${seconds(stage.elapsed_ms)}` : ""}</Text>)}
           {receipt.save_attempts.map((attempt,i) => attempt.state === "retried" && <Text size="xs" c="dimmed" key={attempt.call_id}>Save attempt {i+1}: retried</Text>)}
           {!!receipt.context_counts.deploys && <Text size="xs">{receipt.context_counts.deploys} deploys observed</Text>}
           {!!receipt.context_counts.anomalies && <Text size="xs">{receipt.context_counts.anomalies} anomalies observed</Text>}
-          {receipt.panels.map(p => <Text size="xs" key={p.id}>Preview · {panelTitle(p.id)}: {p.status}{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
+          <Text size="xs" fw={600}>Panel preview</Text>
+          {receipt.panels.map(p => <Text size="xs" key={p.id}>Preview · {panelTitle(p.id)}: <StatusBadge tone={p.status === "ok" ? "success" : p.status === "invalid" ? "warning" : p.status === "empty" ? "neutral" : "danger"}>{p.status === "ok" ? "Ok" : p.status.charAt(0).toUpperCase() + p.status.slice(1)}</StatusBadge>{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
+          <Text size="xs" fw={600}>Save verification</Text>
           {check && <Text size="xs">Save check: {check.checked ? "checked" : "incomplete"} · {seconds(check.elapsed_ms)}</Text>}
-          {check?.panels.map(p => <Text size="xs" key={p.id}>Save · {panelTitle(p.id)}: {p.status} · {p.rows ?? 0} rows{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
+          {check?.panels.map(p => <Text size="xs" key={p.id}>Save · {panelTitle(p.id)}: <StatusBadge tone={p.status === "ok" ? "success" : p.status === "invalid" ? "warning" : p.status === "empty" ? "neutral" : "danger"}>{p.status === "ok" ? "Ok" : p.status.charAt(0).toUpperCase() + p.status.slice(1)}</StatusBadge> · {p.rows ?? 0} {(p.rows ?? 0) === 1 ? "row" : "rows"}{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
           {chips.slice(4).map((text,i) => <Text size="xs" key={i}>{text}</Text>)}
           {receipt.corrections.map((c,i) => <Text size="xs" key={i}>Fixed {c.title}: {c.message}</Text>)}
         </Stack>

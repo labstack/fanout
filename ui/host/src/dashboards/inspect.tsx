@@ -18,7 +18,7 @@ export function PanelData({ panel, result }: { panel: Panel; result?: PanelResul
       return <Table.Td key={c.name} ff={fonts.display}>{v === null ? "—" : c.type === "time" ? new Date(Number(v)).toISOString() : c.role === "measure" ? formatValue(c.unit ?? panel.unit, Number(v)) : String(v)}</Table.Td>;
     })}</Table.Tr>)}</Table.Tbody>
   </Table> : <Text c="dimmed" size="sm">No data.</Text>}
-    <Text c="dimmed" fz={12} mt={8}>Ran in {result?.elapsed_ms ?? 0} ms{result?.interval ? `, one point per ${result.interval}` : ""}{frame ? `, ${frame.rows} rows${frame.truncated ? " (truncated)" : ""}` : ""}.</Text>
+    {result && result.status !== "invalid" && result.elapsed_ms !== undefined && <Text c="dimmed" fz={12} mt={8}>Ran in {result.elapsed_ms} ms{result?.interval ? `, one point per ${result.interval}` : ""}{frame ? `, ${frame.rows} rows${frame.truncated ? " (truncated)" : ""}` : ""}.</Text>}
     {(result?.sql ?? panel.sql) && <Code block tabIndex={0} mt={8}>{result?.sql ?? panel.sql}</Code>}
   </div>;
 }

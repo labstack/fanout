@@ -1,4 +1,7 @@
-import { ActionIcon, Alert, Box, Button, Center, Group, Loader, Stack, Text, Title, Tooltip } from "@mantine/core";
+import { LiveDataMeta } from "../live-data-meta";
+import { Notice } from "@labstack/ui";
+import { DataState, PageHeader } from "@labstack/ui";
+import { ActionIcon, Box, Button, Center, Group, Stack, Text, Title, Tooltip } from "@mantine/core";
 import { Copy, WarningCircle } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -43,17 +46,16 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
   }, [dashboardId, list.data]);
   const record = useQuery({ queryKey: ["dashboard", dashboardId], queryFn: ({ signal }) => getDashboard(dashboardId!, signal), enabled: Boolean(dashboardId), retry: (count, error) => !(error instanceof ApiError && error.code === "not_found") && count < 2 });
 
-  if (!dashboardId && list.error) return <Center mih="50vh"><Alert color="bad" title="Dashboards could not be loaded">{list.error.message}</Alert></Center>;
+  if (!dashboardId && list.error) return <Stack p="lg"><PageHeader title="Dashboards" description="Monitor your services and investigate changes." /><DataState state="error" error={{title: "Dashboards could not be loaded", message: list.error.message, onRetry: () => void list.refetch()}} /></Stack>;
   if (!dashboardId && list.data?.length === 0) return <Center mih="50vh"><Stack align="center" gap="xs">
-    <Title order={1} fz={24}>No dashboards yet</Title>
-    <Text c="dimmed" size="sm" ta="center">Create a dashboard to explore your services.</Text>
+    <PageHeader title="Dashboards" description="Create a dashboard to explore your services." /><DataState state="empty" empty={{title: "No dashboards yet", description: "Create a dashboard to see your telemetry.", action: <Button size="sm" onClick={() => setCreating(true)}>New dashboard</Button>}} />
+
     <Group mt="sm" gap="xs">
-      <Button size="sm" onClick={() => setCreating(true)}>New dashboard</Button>
       {agentAvailable && <Button size="sm" variant="default" onClick={() => openChat(createDashboardPrompt)}>Create with AI</Button>}
     </Group>
     {creating && <Suspense fallback={null}><NewDashboard onClose={() => setCreating(false)} onCreated={id => { setCreating(false); onOpen(id); }} /></Suspense>}
   </Stack></Center>;
-  if (!dashboardId || record.isLoading) return <Center mih="50vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading your dashboard…</Text></Center>;
+  if (!dashboardId || record.isLoading) return <Stack p="lg"><PageHeader title="Dashboard" description="Monitor your services and investigate changes." /><DataState state="loading" loadingLabel="Loading your dashboard…" rows={6} /></Stack>;
   if (record.error instanceof ApiError && record.error.code === "not_found") {
     return <Center mih="50vh"><Stack align="center" gap="xs">
       <Title order={1} fz={24}>This dashboard isn&apos;t here</Title>
@@ -61,7 +63,7 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
       {list.data?.length ? <Button mt="sm" variant="default" size="sm" onClick={() => onOpen((list.data.find((d) => d.is_default) ?? list.data[0]).id, true)}>Open your default dashboard</Button> : null}
     </Stack></Center>;
   }
-  if (record.error || !record.data) return <Center mih="50vh"><Text c="dimmed" size="sm">Your dashboard is unavailable. Try refreshing.</Text></Center>;
+  if (record.error || !record.data) return <Stack p="lg"><PageHeader title="Dashboard" description="Monitor your services and investigate changes." /><DataState state="error" error={{message: "Your dashboard is unavailable.", onRetry: () => void record.refetch()}} /></Stack>;
   return <Loaded key={record.data.id} id={record.data.id} version={record.data.version} spec={record.data.spec} search={search} onSearch={onSearch} onOpen={onOpen} agentAvailable={agentAvailable} openChat={openChat} />;
 }
 
@@ -131,16 +133,10 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
     r: () => data.refetch(), e: edit, h: () => setHistoryOpen(true), "?": () => setHelpOpen(true),
     f: target => { if (search.view) { onView(); return; } const panel = target.closest<HTMLElement>("[data-panel]")?.dataset.panel; if (panel && spec.panels.some(p => p.id === panel)) onView(panel); },
   }, {modalOpen: historyOpen || helpOpen || Boolean(search.drill), fullscreenScope: search.view ? scope : undefined, enabled: preference.enabled});
-  return <Box component="main" ref={region} aria-label="Dashboard" maw={1600} mx="auto" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
+  return <Box component="section" ref={region} aria-label="Dashboard" maw={1600} mx="auto" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
     <Stack gap="sm" mb="md">
       <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
-        <Box miw={0}>
-          <Group gap="xs" wrap="nowrap">
-            <Title order={1} fz={28} lts="-0.02em">{spec.name}</Title>
-            {canManage && <Tooltip label="Duplicate dashboard"><ActionIcon variant="subtle" color="gray" aria-label="Duplicate dashboard" onClick={() => setDuplicating(true)}><Copy size={16} /></ActionIcon></Tooltip>}
-          </Group>
-          {spec.description && <Text c="dimmed" size="sm" mt={2}>{spec.description}</Text>}
-        </Box>
+        <PageHeader title={spec.name} description={spec.description || "Monitor your services and investigate changes."} meta={<LiveDataMeta time={time} updatedAt={data.updatedAt} />} actions={canManage && <Tooltip label="Duplicate dashboard"><ActionIcon variant="subtle" color="gray" aria-label="Duplicate dashboard" onClick={() => setDuplicating(true)}><Copy size={16} /></ActionIcon></Tooltip>} />
         <Toolbar selecting={ranges.size > 0} time={time} refresh={refresh} compare={compare} editing={search.edit === "1"} fetching={data.fetching} updatedAt={data.updatedAt}
           onRange={(range) => { resetBrush(); onSearch({ ...search, range, from: undefined, to: undefined }); }}
           onAbsolute={(from, to) => { resetBrush(); onSearch({ ...search, range: undefined, from, to }); }}
@@ -160,17 +156,18 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
       {Object.entries(vars).filter(([, v]) => v !== ALL).length > 0 && <Group gap={6}>
         {Object.entries(vars).filter(([, v]) => v !== ALL).map(([name, value]) => <Button key={name} color="iris" size="compact-xs" variant="light" aria-label={`$${name} = ${Array.isArray(value) ? value.join(", ") : value} ×: remove filter`} onClick={() => setVar(name, undefined)}>${name} = {Array.isArray(value) ? value.join(", ") : value} ×</Button>)}
       </Group>}
-      {data.annotationError && <Alert color="warn" title="Annotations unavailable">{data.annotationError}</Alert>}
+      {data.annotationError && <Notice tone="warning" title="Annotations unavailable">{data.annotationError}</Notice>}
       {data.annotations?.truncated && <Text size="xs" c="warn" role="status">Annotation history is limited.</Text>}
     </Stack>
-    {!loadError && data.skippedAt !== null && <Alert color="gray" variant="light" mb="md" role="status" data-refresh-skipped>
+    {!loadError && data.skippedAt !== null && <Box data-refresh-skipped><Notice tone="info">
       The server was busy, so the latest refresh was skipped. Marked panels show data from {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(data.skippedAt)}.
-    </Alert>}
-    {loadError && <Alert color="bad" icon={<WarningCircle size={18} weight="fill" />} mb="md" title={options.error ? "Variables could not be loaded" : "Panels could not be loaded"}>
+    </Notice></Box>}
+    {loadError && <Notice tone="danger" title={options.error ? "Variables could not be loaded" : "Panels could not be loaded"}>
       {loadError.message}
       {loadError instanceof ApiError && <ul>{loadError.problems.map((problem, index) =>
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
-    </Alert>}
+    </Notice>}
+    {spec.panels.length === 0 && <DataState state="empty" empty={{title: "No panels yet", description: "Add a panel to see telemetry on this dashboard.", action: <Button onClick={edit}>Add panel</Button>}} />}
     <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={{ ...time, compare: compare ? "previous_period" : undefined }} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
       canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onRetry={data.retry} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={onView} onRangePending={rangePending} shortcutScope={scope} onShortcuts={() => setHelpOpen(true)} overlayOpen={historyOpen || helpOpen || Boolean(search.drill)} returnViewFocus={viewFocus.restore} onVisible={setVisible}
       onPoint={(panel, selection) => {

@@ -1,5 +1,7 @@
+import { Notice } from "@labstack/ui";
+import { DataState, PageHeader } from "@labstack/ui";
 import type { Message } from "@ag-ui/client";
-import { ActionIcon, Alert, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
 import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight, ArrowDown } from "@phosphor-icons/react";
 import { lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
@@ -173,19 +175,20 @@ export function ChatPage() {
       {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} running={running && message.id === lastSent} awaitingAnswer={!hasFinalText} activity={activity} /></Box>}
     </Box>;
   return <Box className="chat-pane">
+    <Box p="md"><PageHeader title="Chat" description="Investigate your telemetry with Fanout." /></Box>
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
         scroller focusable only when it holds no focusable children, and this
         one holds copy buttons and links, so it says so itself. */}
     <Box className="chat-viewport">
       <Box className="chat-scroll" ref={scrollRef} tabIndex={0} role="log" aria-label="Conversation">
         <Container size={880} px={{ base: "md", sm: "xl" }} py="lg" ref={contentRef}>
-          {threadMissing && <Alert color="warn" radius="lg" title="This chat no longer exists"><Group justify="space-between"><Text size="sm">It was deleted, or the link is wrong.</Text><Button size="compact-sm" variant="light" onClick={newThread}>New chat</Button></Group></Alert>}
+          {threadMissing && <Notice tone="warning" title="This chat no longer exists"><Group justify="space-between"><Text size="sm">It was deleted, or the link is wrong.</Text><Button size="compact-sm" variant="light" onClick={newThread}>New chat</Button></Group></Notice>}
           {/* A thread whose load failed never becomes ready, so showing the
               loader here would spin forever: state the failure instead. Retry
               here asks the server for the thread again; there is no run to
               retry, because the conversation never arrived. */}
           {!threadMissing && !ready && error && <RunError message={error} onRetry={reloadThread} onNewThread={newThread} />}
-          {!threadMissing && !ready && !error && <Center mih="40vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading chat</Text></Center>}
+          {!threadMissing && !ready && !error && <DataState state="loading" loadingLabel="Loading chat" rows={5} />}
           {!threadMissing && ready && <>
             {visibleMessages.length === 0 && <Welcome onSelect={send} />}
             <Stack gap="lg">
@@ -211,7 +214,7 @@ export function ChatPage() {
 }
 
 function RunError({ message, onRetry, onNewThread }: { message: string; onRetry: () => void; onNewThread?: () => void }) {
-  return <Alert color="bad" radius="lg" title="Something went wrong">
+  return <Notice tone="danger" title="Something went wrong">
     <Group justify="space-between" gap="sm" wrap="nowrap">
       <Text size="sm">{message}</Text>
       <Group gap="xs" wrap="nowrap">
@@ -219,7 +222,7 @@ function RunError({ message, onRetry, onNewThread }: { message: string; onRetry:
         <Button size="compact-sm" variant="light" color="bad" onClick={onRetry}>Retry</Button>
       </Group>
     </Group>
-  </Alert>;
+  </Notice>;
 }
 
 function Composer() {
@@ -253,9 +256,9 @@ function ChatMessage({ message, time, appView }: { message: Message; time?: numb
 
   if (message.role === "activity") {
     if (message.activityType === "agent-outcome" && message.content && typeof message.content === "object" && "message" in message.content && typeof message.content.message === "string") {
-      return "status" in message.content && message.content.status === "stopped" ? <Text c="dimmed" size="sm" data-chat-anchor>{message.content.message}</Text> : <Alert color="bad" title="Something went wrong" data-chat-anchor>{message.content.message}</Alert>;
+      return "status" in message.content && message.content.status === "stopped" ? <Text c="dimmed" size="sm" data-chat-anchor>{message.content.message}</Text> : <Notice tone="danger" title="Something went wrong">{message.content.message}</Notice>;
     }
-    if (message.activityType === "mcp-app") return appView ? <ChatAppView view={appView} /> : <Alert color="bad" data-chat-anchor>This view could not be loaded. Please try again.</Alert>;
+    if (message.activityType === "mcp-app") return appView ? <ChatAppView view={appView} /> : <Notice tone="danger">This view could not be loaded. Please try again.</Notice>;
     return null;
   }
   if (message.role === "assistant" && message.toolCalls?.length) return null;

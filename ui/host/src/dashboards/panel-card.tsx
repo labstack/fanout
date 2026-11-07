@@ -1,3 +1,4 @@
+import { DataState, Notice } from "@labstack/ui";
 import { logConstants } from "../../../panels/rows";
 import { useMergedRef } from "@mantine/hooks";
 import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
@@ -15,7 +16,8 @@ import { Viz } from "./viz";
 import type { RowControls } from "./viz/table";
 import { PanelTooltipContext } from "./panel-fullscreen";
 
-export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, onEdit, staleAt, traceLinks, controls, suspended = false, menuRef }: {
+export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, onEdit, staleAt, traceLinks, controls, suspended = false, menuRef, initialView = "Chart" }: {
+  initialView?: "Chart" | "Data" | "Spec";
   compare?: boolean; range?: string; panel: Panel; title: string; result?: PanelDisplayResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
   annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; traceLinks?: "button"; controls?: RowControls;
   onSelect?: (value: string) => void; onView?(): void; onCopyLink?: () => void; onExplain?: () => void; onFix?: () => void; onRetry?(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
@@ -59,7 +61,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, [staleAt]);
-  const [view, setView] = useState("Chart");
+  const [view, setView] = useState<string>(initialView);
   const [mapView, setMapView] = useState<MapView>();
   const onMapView = useCallback((next: MapView) => setMapView(next), []);
   const hint = panel.click ? `click to filter by ${panel.click.set_variable}`
@@ -83,7 +85,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const refreshDetails = refreshError ? `${refreshAge ? `${refreshAge}. ` : ""}${refreshError}` : undefined;
   const refreshDescription = refreshDetails && refreshDetails.length > 200 ? `${refreshDetails.slice(0, 199)}…` : refreshDetails;
   const refreshDescriptionId = useId();
-  const busyReasonId = useId();
+
   const tooltipTarget = useRef<HTMLButtonElement>(null);
   const buttonRef = useMergedRef(menuRef, tooltipTarget);
   const [menuFocused, setMenuFocused] = useState(false);
@@ -143,7 +145,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   return <Paper ref={card} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0, position:"relative" }} data-panel={panel.id} data-compact-views={compactViews}>
     <Group justify="space-between" wrap="nowrap" gap="xs" px={16} pt={12} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
       <Group gap={6} wrap="nowrap" miw={0} style={{flex:1}}>
-        <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate={compactViews ? undefined : true} style={compactViews ? {overflowWrap:"anywhere"} : undefined}>{title}</Text><Text data-panel-subtitle title={keyboardHint ?? subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={{position: "relative", ...(small ? {overflowWrap:"anywhere"} : {})}}>
+        <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={14} truncate={compactViews ? undefined : true} style={compactViews ? {overflowWrap:"anywhere"} : undefined}>{title}</Text><Text data-panel-subtitle title={keyboardHint ?? subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={{position: "relative", ...(small ? {overflowWrap:"anywhere"} : {})}}>
             {/* Preserve the subtitle's measured line box, including narrow cards. */}
             <span aria-hidden={keyboardHint ? true : undefined} style={{visibility: keyboardHint ? "hidden" : undefined}}>{subtitle}</span>
             {keyboardHint && <><span data-chart-hint aria-hidden="true" style={{position: "absolute", inset: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{compactHint(keyboardHint)}</span></>}
@@ -196,27 +198,15 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         an opaque backdrop that spans it, which contrast checks need, and keeps
         the card's rounded bottom corners so that ground does not square them. */}
     <Box ref={body} data-panel-body className="dashboard-panel-padding" tabIndex={view !== "Chart" ? 0 : undefined} style={{ flex: "1 1 0px", isolation: "isolate", contain: rows || view === "Data" ? "paint" : undefined, minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column", backgroundColor: "inherit", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>
-      {suspended ? <Center h="100%"><Text size="sm" c="dimmed">Shown in full-screen</Text></Center> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Loader size="sm" role="status" aria-label="Loading panel" /></Center>
-        : result?.status === "error" && result.reason === "busy" ? <Box data-panel-busy style={{height:"100%", maxHeight:"100%", minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:compactError ? "row" : "column", alignItems:"center", justifyContent:"center", gap:compactError ? 6 : 4}}>
-          <HourglassMedium size={18} color="var(--mantine-color-dimmed)" style={{flexShrink:0}} />
-          <Text size="sm" fw={500} style={{flexShrink:0}}>Not run yet</Text>
-          {!compactError && <Text size="xs" c="dimmed" ta="center" style={{minWidth:0, minHeight:0, overflow:"hidden", overflowWrap:"anywhere", flex:"0 1 auto"}}>{result.error}</Text>}
-          {onRetry && <Tooltip label={result.error} disabled={!compactError} multiline maw="min(320px, calc(100vw - 32px))" events={{hover: true, focus: true, touch: true}}>
-            <Button size="compact-xs" variant="light" color="gray" style={{flexShrink:0}} disabled={loading} aria-describedby={busyReasonId} onClick={onRetry}>Retry</Button>
-          </Tooltip>}
-          <span id={busyReasonId} hidden>{result.error}</span>
+      {suspended ? <Center h="100%"><Text size="sm" c="dimmed">Shown in full-screen</Text></Center> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <DataState state="loading" loadingLabel="Loading panel" rows={3} />
+        : (result?.status === "error" || result?.status === "invalid") ? <Box data-panel-error={result.reason !== "busy" || undefined} data-panel-busy={result.reason === "busy" || undefined} style={{minWidth: 0, maxHeight: "100%", overflow: "auto", overflowWrap: "anywhere"}}>
+          <Notice tone={result.reason === "busy" ? "info" : "danger"} title={result.reason === "busy" ? "Not run yet" : result.status === "invalid" ? "This panel is invalid" : "This panel failed"} retryLabel="Retry" onRetry={retryable || result.reason === "busy" ? onRetry : undefined}>
+            <Text data-panel-error-message={result.reason !== "busy" || undefined} title={result.error} size="xs" style={{overflowWrap: "anywhere"}}>{result.error || "The query could not run."}</Text>
+            {result.problems?.map((problem, i) => <Text key={i} size="xs"><code>{problem.path}</code>: {problem.message}{problem.hint && ` — ${problem.hint}`}</Text>)}
+          </Notice>
+          {fixable && agentAvailable && onFix && <Button size="compact-xs" variant="light" onClick={onFix}>Ask Fanout to fix it</Button>}
         </Box>
-        : (result?.status === "error" || result?.status === "invalid") ? <Box data-panel-error style={{height:"100%", maxHeight:"100%", minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:compactError ? "row" : "column", alignItems:"center", justifyContent:"center", gap:compactError ? 6 : 4}}>
-          <WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" style={{flexShrink:0}} />
-          {!compactError && <Text size="sm" fw={500} c="bad" style={{flexShrink:0}}>This panel failed</Text>}
-          <Text data-panel-error-message title={result.error} size="xs" c="dimmed" ta={compactError ? "left" : "center"} style={{minWidth:0, minHeight:0, overflow:"hidden", ...(compactError ? {flex:"1 1 0px", whiteSpace:"nowrap", textOverflow:"ellipsis"} : {overflowWrap:"anywhere", flex:"0 1 auto"})}}>{compactError ? `This panel failed: ${result.error ?? "Request failed"}` : result.error}</Text>
-          {retryable && onRetry && <Button size="compact-xs" variant="light" style={{flexShrink:0}} disabled={loading} onClick={onRetry}>Retry</Button>}
-          {fixable && agentAvailable && onFix && (compactError ? <Tooltip label="Ask Fanout to fix it" events={{hover: true, focus: true, touch: false}}><ActionIcon size={32} variant="light" aria-label="Ask Fanout to fix it" style={{flex:"0 0 32px"}} onClick={onFix}><Wrench size={16}/></ActionIcon></Tooltip> : <Button size="compact-xs" variant="light" style={{flexShrink:0}} onClick={onFix}>Ask Fanout to fix it</Button>)}
-        </Box>
-        : result?.status === "empty" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
-          <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
-          <Text size="sm" c="dimmed" ta="center" style={{overflowWrap:"anywhere"}}>{result.diagnosis || "No data in this time range."}</Text>
-        </Stack></Center>
+        : result?.status === "empty" ? <DataState state="empty" empty={{title: "No data in this time range", description: <Text size="sm" style={{overflowWrap: "anywhere"}}>{result.diagnosis || "Widen the time range to find matching telemetry."}</Text>, action: <Button variant="default" size="compact-xs" onClick={onZoomReset ?? (() => document.getElementById("shell-time-range")?.querySelector("button")?.click())}>Widen time range</Button>}} />
         : <ChartHintContext.Provider value={chartHint}><Viz traceLinks={traceLinks} controls={controls} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} /></ChartHintContext.Provider>}
     </Box>
     {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, paddingTop: 8, background: "var(--mantine-color-body)", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>

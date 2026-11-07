@@ -1,4 +1,5 @@
-import { Alert, Anchor, Box, Button, Code, CopyButton, Group, Loader, Modal, Paper, Stack, Text, TextInput, Title, Tooltip } from "@mantine/core";
+import { DataState, Notice, PageHeader } from "@labstack/ui";
+import { Anchor, Box, Button, Code, CopyButton, Group, Modal, Paper, Stack, Text, TextInput, Title, Tooltip } from "@mantine/core";
 import { ArrowsClockwise, Check, Copy, WarningCircle } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -55,13 +56,13 @@ function ConnectedAgents() {
     <Paper withBorder radius="lg" p="lg">
       {!agents.data
         ? agents.isLoading
-          ? <Text c="dimmed" size="sm" role="status">Loading connected agents…</Text>
+          ? <DataState state="loading" loadingLabel="Loading connected agents…" rows={3} />
           : <Stack gap="sm" align="flex-start">
-              <Alert color="bad" radius="md" icon={<WarningCircle size={18} weight="fill" />}>Fanout could not load your connected agents.</Alert>
+              <Notice tone="danger">Fanout could not load your connected agents.</Notice>
               <Button size="compact-sm" variant="light" onClick={() => void agents.refetch()}>Try again</Button>
             </Stack>
         : agents.data.connections.length === 0
-          ? <Text c="dimmed" size="sm">No agents connected. <Anchor href={docs.connect} target="_blank" rel="noopener noreferrer" inherit>Connect an agent over MCP</Anchor> to get started.</Text>
+          ? <Text c="dimmed" size="sm">No agents connected. <Anchor href={docs.connect} target="_blank" rel="noopener noreferrer" underline="always">Connect an agent over MCP</Anchor> to get started.</Text>
           : <Stack gap="md">
               {agents.data.connections.map((agent) => <Group key={agent.client_id} justify="space-between" align="center">
                 <Box style={{ minWidth: 0, overflowWrap: "anywhere" }}>
@@ -76,7 +77,7 @@ function ConnectedAgents() {
     <Modal opened={selected !== null} onClose={() => !disconnect.isPending && setSelected(null)} title={`Disconnect ${selected?.client_name ?? "agent"}?`} centered radius="md">
       <Stack gap="md">
         <Text size="sm" c="dimmed">This agent loses access immediately. Your other agents and browser session stay connected. You can authorize the agent again to reconnect.</Text>
-        {disconnect.isError && <Alert color="bad" radius="md" icon={<WarningCircle size={18} weight="fill" />}>Fanout could not disconnect this agent. Try again.</Alert>}
+        {disconnect.isError && <Notice tone="danger">Fanout could not disconnect this agent. Try again.</Notice>}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" size="sm" onClick={() => { disconnect.reset(); setSelected(null); }} disabled={disconnect.isPending}>Cancel</Button>
           <Button color="bad" size="sm" loading={disconnect.isPending} onClick={() => selected && disconnect.mutate(selected)}>Disconnect</Button>
@@ -216,12 +217,11 @@ export default function Settings() {
   const canRotate = viewer.role === "admin";
   const authorization = `${header}: Bearer <your token>`;
 
-  return <Box component="main" w="100%" px={{ base: "md", sm: "xl" }} pt={{ base: "lg", sm: "xl" }} pb="xl">
+  return <Box w="100%" px={{ base: "md", sm: "xl" }} pt={{ base: "lg", sm: "xl" }} pb="xl">
     <Stack gap="xl">
-      <Box>
-        <Title order={1} fz={32} lts="-0.03em">Connect telemetry</Title>
-        <Text c="dimmed" mt={2}>Point an OpenTelemetry collector or SDK at this workspace.</Text>
-      </Box>
+      <PageHeader title="Settings" description="Manage telemetry connections and authorized agents." />
+      <Title order={2} fz={18}>Connect telemetry</Title>
+      <Text c="dimmed" size="sm">Point an OpenTelemetry collector or SDK at this workspace.</Text>
 
       <Paper withBorder radius="lg" p="lg">
         <Stack gap="lg">
@@ -295,14 +295,14 @@ export default function Settings() {
         </Paper>
       </Stack>
       <Text c="dimmed" size="xs">
-        <Anchor href={docs.ingest} target="_blank" rel="noopener noreferrer" inherit>Sending telemetry</Anchor> covers SDK setup, the collector, and the OTLP/HTTP endpoint.
+        <Anchor href={docs.ingest} target="_blank" rel="noopener noreferrer" underline="always">Sending telemetry</Anchor> covers SDK setup, the collector, and the OTLP/HTTP endpoint.
       </Text>
       {!agentAvailable && <Stack gap="sm">
         <Title order={2} fz={22} lts="-0.02em">Chat is disabled</Title>
         <Paper withBorder radius="lg" p="lg">
           <Stack gap="sm">
             <Text size="sm">To enable chat on a self-hosted instance, set <Code>FANOUT_AI_PROVIDER</Code> to <Code>anthropic</Code> with <Code>ANTHROPIC_API_KEY</Code>, or <Code>openai</Code> with <Code>OPENAI_API_KEY</Code>, then restart Fanout.</Text>
-            <Text size="sm">You can also <Anchor href={docs.connect} target="_blank" rel="noopener noreferrer" inherit>connect an MCP client</Anchor> such as Claude, Codex, or ChatGPT to use your own AI.</Text>
+            <Text size="sm">You can also <Anchor href={docs.connect} target="_blank" rel="noopener noreferrer" underline="always">connect an MCP client</Anchor> such as Claude, Codex, or ChatGPT to use your own AI.</Text>
           </Stack>
         </Paper>
       </Stack>}
@@ -316,7 +316,7 @@ export default function Settings() {
             ? "The current token stops working the moment the new one is issued. Any collector still sending with it will be rejected until you update it. Fanout shows the new token once and stores only its hash."
             : "Fanout will show the new token once, and store only its hash."}
         </Text>
-        {rotate.isError && <Alert color="bad" radius="md" icon={<WarningCircle size={18} weight="fill" />}>{rotate.error instanceof Error ? rotate.error.message : "Fanout could not issue a new token."}</Alert>}
+        {rotate.isError && <Notice tone="danger">{rotate.error instanceof Error ? rotate.error.message : "Fanout could not issue a new token."}</Notice>}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" size="sm" onClick={() => { rotate.reset(); setConfirming(false); }} disabled={rotate.isPending}>Cancel</Button>
           <Button color={hasToken ? "bad" : undefined} size="sm" loading={rotate.isPending} onClick={() => rotate.mutate()}>
@@ -329,17 +329,9 @@ export default function Settings() {
 }
 
 function Loading() {
-  return <Group justify="center" mih="50vh" gap="sm"><Loader size="sm" /><Text c="dimmed" size="sm">Loading connection details…</Text></Group>;
+  return <Stack p="lg"><PageHeader title="Settings" description="Manage telemetry connections and authorized agents." /><DataState state="loading" loadingLabel="Loading connection details…" rows={6} /></Stack>;
 }
 
-/* A failed load is not a slow one: a spinner here reads as still working. */
 function Unavailable({ onRetry }: { onRetry: () => void }) {
-  return <Group justify="center" mih="50vh">
-    <Alert color="bad" radius="md" icon={<WarningCircle size={18} weight="fill" />} maw={420}>
-      <Stack gap="sm" align="flex-start">
-        <Text size="sm">Fanout could not load this workspace&apos;s connection details.</Text>
-        <Button size="compact-sm" variant="light" color="bad" onClick={onRetry}>Try again</Button>
-      </Stack>
-    </Alert>
-  </Group>;
+  return <Stack p="lg"><PageHeader title="Settings" description="Manage telemetry connections and authorized agents." /><DataState state="error" error={{message: "Fanout could not load this workspace's connection details.", onRetry}} /></Stack>;
 }

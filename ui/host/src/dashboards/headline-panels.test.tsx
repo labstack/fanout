@@ -42,7 +42,7 @@ describe("headline panel views", () => {
   it.each([false, true])("provides subtitle, accessible Chart/Data/Spec, syntax tokens and 16px body padding (%s)", async dark => {
     const host = await render(panel, dark);
     expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("time series · click for exemplar traces");
-    expect((host.querySelector('[data-panel-title]') as HTMLElement).style.fontSize).toBe("calc(0.9375rem * var(--mantine-scale))");
+    expect((host.querySelector('[data-panel-title]') as HTMLElement).style.fontSize).toBe("calc(0.875rem * var(--mantine-scale))");
     expect((host.querySelector('[data-panel-body]') as HTMLElement).style.padding).toBe("16px");
     expect(host.textContent).toContain("click for exemplar traces");
     const button = (view: string) => host.querySelector<HTMLButtonElement>(`[data-panel-view="${view}"]`)!;

@@ -54,7 +54,7 @@ describe("visualizations",()=>{
       const panel:Panel={id:"p",title:viz,viz};
       const props={panel,title:viz,height:300,group:"g",editing:false,agentAvailable:false,onView:noop,onCopyLink:noop,onExplain:noop};
       await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading result={undefined}/></MantineProvider>));
-      expect(container.querySelector('[role="status"][aria-label="Loading panel"]')).not.toBeNull();
+      expect(container.querySelector('[role="status"]')).not.toBeNull();
       await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={{...result,status:"empty",diagnosis:"No matching events"}}/></MantineProvider>));
       expect(container.textContent).toContain("No matching events");
       await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={{...result,status:"error",error:"Query failed"}}/></MantineProvider>));

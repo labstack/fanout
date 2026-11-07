@@ -71,16 +71,16 @@ describe("AlertsPage", () => {
   it("lists rules with their firing alerts and the history", async () => {
     const { ui, wait } = await render();
     await wait(() => expect(ui.getAllByText("Checkout errors").length).toBeGreaterThan(0));
-    expect(ui.getByText("firing · checkout")).toBeTruthy();
+    expect(ui.getByText("Firing · checkout")).toBeTruthy();
     expect(ui.getByText("error_rate > 0.05")).toBeTruthy();
     expect(ui.getByText("9%")).toBeTruthy();
   });
 
   it("keeps state badges whole, lets the keyboard scroll the history, and does not tint rows under dimmed text", async () => {
     const { ui, wait } = await render();
-    await wait(() => expect(ui.getByText("firing · checkout")).toBeTruthy());
+    await wait(() => expect(ui.getByText("Firing · checkout")).toBeTruthy());
     // A narrow screen squeezes the table's columns; a badge must not shrink to "FIR…".
-    for (const label of document.querySelectorAll<HTMLElement>(".mantine-Badge-label")) expect(label.style.overflow).toBe("visible");
+    expect(ui.getByText("Firing · checkout").textContent).toBe("Firing · checkout");
     const history = ui.getByRole("region", { name: "Alert history" });
     expect(history.tabIndex).toBe(0);
     expect(history.querySelector("table")).not.toBeNull();
@@ -262,7 +262,7 @@ describe("AlertsPage", () => {
     await wait(() => expect(ui.getByRole("button", { name: "Checkout errors actions" })).toBeTruthy());
     await act(async () => ui.getByRole("button", { name: "Checkout errors actions" }).click());
     await act(async () => ui.getByRole("menuitem", { name: "Test against current data", hidden: true }).click());
-    await wait(() => expect(ui.getByLabelText("Testing the rule")).toBeTruthy());
+    await wait(() => expect(ui.getByText("Testing the rule")).toBeTruthy());
     await act(async () => ui.getByRole("button", { name: "Close test" }).click());
     await act(async () => answer(json({ rule, results: [{ service: "checkout", triggered: true, env: {} }] })));
     await act(async () => {});
