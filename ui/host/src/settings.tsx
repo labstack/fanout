@@ -216,7 +216,7 @@ export default function Settings() {
   const canRotate = viewer.role === "admin";
   const authorization = `${header}: Bearer <your token>`;
 
-  return <Box component="main" maw={760} mx="auto" px={{ base: "md", sm: "xl" }} pt={{ base: "lg", sm: "xl" }} pb="xl">
+  return <Box component="main" w="100%" px={{ base: "md", sm: "xl" }} pt={{ base: "lg", sm: "xl" }} pb="xl">
     <Stack gap="xl">
       <Box>
         <Title order={1} fz={32} lts="-0.03em">Connect telemetry</Title>

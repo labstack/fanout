@@ -8,7 +8,7 @@ import Rail from "./rail";
 function RailFrame({ children }: { children: ReactNode }) {
   const client = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }), []);
   useEffect(() => () => client.clear(), [client]);
-  return <QueryClientProvider client={client}><Box mih="100dvh" bg="var(--mantine-color-body)"><Box w={256} h="100dvh" p="sm">{children}</Box></Box></QueryClientProvider>;
+  return <QueryClientProvider client={client}><Box mih="100dvh" bg="var(--mantine-color-body)"><Box w={248} h="100dvh" p="sm">{children}</Box></Box></QueryClientProvider>;
 }
 const meta = {
   id: "layout-rail", title: "Layout/Rail", component: Rail,
@@ -23,3 +23,6 @@ export const Populated: Story = { play: async ({ canvas, userEvent, args }) => {
   await expect(args.onSelectThread).toHaveBeenCalledWith("commerce-review");
 } };
 export const Empty: Story = { parameters: { scenario: { empty: true } } };
+
+export const Collapsed: Story = { args: { collapsed: true } };
+export const SettingsActive: Story = { args: { activePath: "/settings" } };

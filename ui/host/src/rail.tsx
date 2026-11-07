@@ -1,6 +1,6 @@
 import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Kbd, Loader, Menu, Modal, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
-import { Bell, Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
+import { Bell, ChatCircle, SquaresFour, Gear, Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { getJSON, threadHistoryQueryKey } from "./api";
@@ -11,6 +11,7 @@ export type RailHandle = { focusSearch(): void };
 
 export type RailProps = {
   agentAvailable: boolean;
+  collapsed?: boolean;
   activeThreadID?: string;
   activeDashboardID?: string;
   /** The current path, to mark the matching page link. */
@@ -28,12 +29,13 @@ export type RailProps = {
   ref?: Ref<RailHandle>;
 };
 
-export type PagePath = "/explore" | "/logs" | "/traces" | "/alerts";
+export type PagePath = "/explore" | "/logs" | "/traces" | "/alerts" | "/settings";
 const pages = [
   { path: "/explore", label: "Explore", Icon: Compass },
   { path: "/logs", label: "Logs", Icon: ListMagnifyingGlass },
   { path: "/traces", label: "Traces", Icon: Path },
   { path: "/alerts", label: "Alerts", Icon: Bell },
+  { path: "/settings", label: "Settings", Icon: Gear },
 ] as const;
 
 type ThreadSummary = { id: string; title: string; updated_at: string };
@@ -48,7 +50,7 @@ async function fetchThreads(query: string, cursor: string): Promise<ThreadPage> 
   return response.json();
 }
 
-export default function Rail({ agentAvailable, activeThreadID, activeDashboardID, activePath, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, onNewDashboard, onNavigate, onInvestigateService, ref }: RailProps) {
+export default function Rail({ collapsed = false, agentAvailable, activeThreadID, activeDashboardID, activePath, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, onNewDashboard, onNavigate, onInvestigateService, ref }: RailProps) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query] = useDebouncedValue(search.trim(), 250);
@@ -123,6 +125,12 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
     } finally { setBusy(false); }
   }
 
+  if (collapsed) return <Stack gap={4} component="nav" aria-label="Navigation">
+    {agentAvailable && <ActionIcon variant="subtle" color="gray" size={46} aria-label="New chat" onClick={onNewChat}><ChatCircle size={18} /></ActionIcon>}
+    {pages.map(({path, label, Icon}) => <ActionIcon key={path} component="a" href={path} title={label} aria-label={label} aria-current={activePath === path ? "page" : undefined} className="rail-row" data-active={activePath === path || undefined} variant="subtle" color="gray" size={46} onClick={event => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); onNavigate(path); }}><Icon size={18} /></ActionIcon>)}
+    <ActionIcon variant="subtle" color="gray" size={46} aria-label="New dashboard" onClick={onNewDashboard}><SquaresFour size={18} /></ActionIcon>
+  </Stack>;
+
   return <Stack gap="sm" h="100%" component="nav" aria-label="Navigation">
     {agentAvailable && <Button leftSection={<Plus size={16} weight="bold" />} onClick={onNewChat}>New chat</Button>}
     <ScrollArea type="auto" offsetScrollbars flex={1} mx={-4} px={4}>
@@ -176,7 +184,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
               onSelectDashboard(dashboard.id);
             }}>
               <Group justify="space-between" gap="sm" wrap="nowrap">
-                <Text size="sm" fw={active ? 600 : 500} truncate>{dashboard.name}</Text>
+                <Group gap="xs" wrap="nowrap"><SquaresFour size={16} style={{flexShrink: 0}} /><Text size="sm" fw={active ? 600 : 500} truncate>{dashboard.name}</Text></Group>
                 {dashboard.is_default && <Badge size="xs" variant="light" color="gray">Default</Badge>}
               </Group>
             </UnstyledButton>
@@ -188,8 +196,8 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
               </UnstyledButton>}
             </Stack>;
           })}
-          <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Plus size={14} />} onClick={onNewDashboard}>New dashboard</Button>
-          {agentAvailable && <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>Create with AI</Button>}
+          <Button variant="subtle" color="gray" size="sm" px="sm" justify="flex-start" leftSection={<Plus size={14} />} onClick={onNewDashboard}>New dashboard</Button>
+          {agentAvailable && <Button variant="subtle" color="gray" size="sm" px="sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>Create with AI</Button>}
         </Stack>
       </Stack>
     </ScrollArea>
@@ -230,7 +238,8 @@ function ThreadRow({ thread, active, onSelect, onRename, onDelete }: { thread: T
           about a hundred pixels of a 219px row, and the cut point moved with
           the length of the time. On its own line the title gets the row. */}
       <UnstyledButton onClick={onSelect} aria-current={active ? "page" : undefined} p="sm" flex={1} style={{ minWidth: 0 }}>
-        <Stack gap={0}>
+        <Stack gap={0} pl={24} style={{position: "relative"}}>
+          <ChatCircle size={16} style={{position: "absolute", left: 0, top: 2}} />
           <Text size="sm" fw={active ? 600 : 500} truncate title={thread.title}>{thread.title}</Text>
           <Text c="dimmed" size="xs">{threadTime(thread.updated_at)}</Text>
         </Stack>

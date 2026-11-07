@@ -62,7 +62,8 @@ body,
 }
 
 .rail-row[data-active] {
-  background: var(--mantine-color-iris-light);
+  color: var(--mantine-color-iris-text);
+  box-shadow: inset 2px 0 var(--mantine-color-iris-text);
 }
 
 .rail-row-actions {
@@ -214,3 +215,8 @@ body,
 .skip-link:focus {
   transform: none;
 }
+
+.mantine-AppShell-header, .mantine-AppShell-navbar { background: var(--labstack-raised); }
+.mantine-AppShell-main { background: var(--labstack-ground); }
+.rail-row:focus-within { outline: 2px solid var(--fanout-focus); outline-offset: -2px; }
+.rail-row:focus-within .mantine-UnstyledButton-root { outline: none; }

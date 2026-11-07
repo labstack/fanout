@@ -1,0 +1,1 @@
+import{t as e}from"./chat-BWBSPhjp.js";var t=e;export{t as component};

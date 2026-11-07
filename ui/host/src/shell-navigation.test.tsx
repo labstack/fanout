@@ -31,6 +31,16 @@ async function render() {
 }
 
 describe("Shell navigation", () => {
+  it("collapses and expands the desktop navigation", async () => {
+    const { ui } = await render();
+    const collapse = ui.getByRole("button", { name: "Collapse navigation" });
+    expect(collapse.getAttribute("aria-expanded")).toBe("true");
+    await act(async () => collapse.click());
+    expect(ui.getByRole("button", { name: "Expand navigation" }).getAttribute("aria-expanded")).toBe("false");
+    await act(async () => ui.getByRole("button", { name: "Expand navigation" }).click());
+    expect(ui.getByRole("button", { name: "Collapse navigation" })).toBeTruthy();
+  });
+
   it("offers a skip link to the page and says whether the navigation is open", async () => {
     const { ui, wait } = await render();
     const skip = ui.getByRole("link", { name: "Skip to content" });

@@ -1,6 +1,7 @@
 import { Button, Group, Menu, SegmentedControl, Switch, Text, TextInput, Tooltip } from "@mantine/core";
 import { ArrowClockwise, CaretDown, Clock, ClockCounterClockwise, MagnifyingGlassMinus, PencilSimple } from "@phosphor-icons/react";
-import { useState } from "react";
+import { createPortal } from "react-dom";
+import { useEffect, useState } from "react";
 import type { DashboardTime } from "../../../panels/types";
 import { exactTimestamp } from "../../../format";
 import { ShortcutButton } from "./shortcut-button";
@@ -18,7 +19,9 @@ export function RangeMenu({ time, onRange, onAbsolute }: { time: DashboardTime; 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [opened, setOpened] = useState(false);
-  return <Menu position="bottom-end" withinPortal opened={opened} onChange={setOpened}>
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useEffect(() => { setHost(document.getElementById("shell-time-range")); }, []);
+  const menu = <Menu position="bottom-end" withinPortal opened={opened} onChange={setOpened}>
     <Menu.Target>
       <Button variant="default" size="sm" leftSection={<Clock size={15} />} rightSection={<CaretDown size={12} weight="bold" />}>{timeLabel(time)}</Button>
     </Menu.Target>
@@ -36,6 +39,7 @@ export function RangeMenu({ time, onRange, onAbsolute }: { time: DashboardTime; 
       </Group>
     </Menu.Dropdown>
   </Menu>;
+  return host ? createPortal(menu, host) : menu;
 }
 
 export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, onRange, onAbsolute, onZoomOut, onRefresh, onRefreshNow, onCompare, onEdit, onHistory, onShortcuts, selecting = false }: {
