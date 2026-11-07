@@ -19,8 +19,10 @@ export const Checkout: Story = { play: async ({ canvas, canvasElement, userEvent
   await expect(segments()).toHaveLength(6);
   const hex = (color: string) => "#" + color.match(/[\d.]+/g)!.slice(0, 3).map(channel => Math.round(Number(channel) * (color.startsWith("color(srgb") ? 255 : 1)).toString(16).padStart(2, "0")).join("");
   for (const marked of segments()) {
-    const fill = marked.parentElement!.firstElementChild!;
-    await expect(contrastRatio(hex(getComputedStyle(marked).backgroundColor), hex(getComputedStyle(fill).backgroundColor))).toBeGreaterThanOrEqual(3);
+    // The band is outlined by a body-colored halo, so it contrasts with its halo on any fill.
+    const style = getComputedStyle(marked);
+    const halo = style.boxShadow.match(/(?:rgba?|color)\([^)]*\)/)![0];
+    await expect(contrastRatio(hex(style.backgroundColor), hex(halo))).toBeGreaterThanOrEqual(3);
     await expect(getComputedStyle(marked).height).toBe("3px");
   }
   await userEvent.click(toggle);

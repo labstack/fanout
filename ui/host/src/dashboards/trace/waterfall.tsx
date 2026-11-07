@@ -85,11 +85,11 @@ export function Waterfall({ spans, dark, onSpan, selected, showCriticalPath = tr
             <Table.Td>
               <Box pos="relative" h={14} bg="var(--mantine-color-default-hover)" role="img" title={label}
                 aria-label={`${span.operation} on ${span.service} took ${duration(span.duration_ms)}${criticalLabel}`} style={{ borderRadius: "var(--mantine-radius-sm)" }}>
-                {/* Soften fills locally so the text-color band has 3:1 contrast in both schemes. */}
-                <Box pos="absolute" left={`${offset}%`} w={`${width}%`} h="100%" bg={`color-mix(in srgb, ${failed ? "var(--mantine-color-bad-filled)" : color} 75%, var(--mantine-color-body))`} style={{ borderRadius: "var(--mantine-radius-sm)", minWidth: 3 }} />
+                <Box pos="absolute" left={`${offset}%`} w={`${width}%`} h="100%" bg={failed ? "bad" : color} style={{ borderRadius: "var(--mantine-radius-sm)", minWidth: 3 }} />
+                {/* A body-colored halo keeps the text-color band readable on every series and status fill. */}
                 {segments.map((segment, i) => <Box key={i} data-critical-path-segment={span.span_id} aria-hidden="true"
                   pos="absolute" left={`${segment.start / total * 100}%`} w={`${(segment.end - segment.start) / total * 100}%`} top="50%" bg="var(--mantine-color-text)"
-                  style={{ height: 3, transform: "translateY(-50%)", pointerEvents: "none" }} />)}
+                  style={{ height: 3, transform: "translateY(-50%)", pointerEvents: "none", boxShadow: "0 0 0 1px var(--mantine-color-body)" }} />)}
               </Box>
             </Table.Td>
             <Table.Td ta="right"><Text size="sm" ff="monospace">{duration(span.duration_ms)}</Text></Table.Td>
