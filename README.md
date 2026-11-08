@@ -147,7 +147,7 @@ change requires a restart.
 | `FANOUT_ADDR` | `127.0.0.1:7520` | UI, API, MCP, and both OTLP transports |
 | `FANOUT_DATA_DIR` | `./data` | Parquet, query state, and control SQLite |
 | `FANOUT_AUTH_MODE` | `local` | Login link or SMTP, or `oidc` |
-| `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode, 32+ characters |
+| `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode and for OIDC break-glass links, 32+ characters |
 | `FANOUT_AI_PROVIDER` | — | Empty disables chat; `anthropic` or `openai` enables it |
 | `ANTHROPIC_API_KEY` | — | Required for Anthropic chat |
 | `OPENAI_API_KEY` | — | Required for OpenAI chat |
