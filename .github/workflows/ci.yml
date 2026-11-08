@@ -181,16 +181,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The MCP host specs take most of the smoke time, so they run apart
-          # from the app viewports and each half stays well inside the timeout.
-          - group: smoke and accessibility (app)
-            slug: smoke-app
+          # The suite runs on one worker, and most of its time is the 1100
+          # viewport's accessibility and smoke specs, so each 1100 scheme gets a
+          # runner and the 1440 viewport shares one with the short MCP specs.
+          - group: smoke and accessibility (1100 light)
+            slug: smoke-1100-light
             skip_performance: "1"
-            args: --project=app-1100-light --project=app-1100-dark --project=app-1440-light --project=app-1440-dark
-          - group: smoke and accessibility (MCP)
-            slug: smoke-mcp
+            args: --project=app-1100-light
+          - group: smoke and accessibility (1100 dark)
+            slug: smoke-1100-dark
             skip_performance: "1"
-            args: --project=mcp
+            args: --project=app-1100-dark
+          - group: smoke and accessibility (1440, MCP)
+            slug: smoke-1440-mcp
+            skip_performance: "1"
+            args: --project=app-1440-light --project=app-1440-dark --project=mcp
           - group: performance
             slug: performance
             skip_performance: ""
