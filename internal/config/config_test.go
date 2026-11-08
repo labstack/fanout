@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -353,6 +355,32 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("OIDC startup tolerates an unusable login-link secret", func(t *testing.T) {
+		c := valid
+		c.AuthMode = "oidc"
+		c.OIDCIssuerURL = "https://id.example.com"
+		c.OIDCClientID = "fanout"
+		c.OIDCClientSecret = "secret"
+		c.OIDCEmailClaim = "email"
+		c.OIDCEmailVerification = "required"
+		c.OIDCDefaultRole = "viewer"
+		c.PublicURL = "https://fanout.example.com"
+		for _, secret := range []string{"", "short"} {
+			c.AuthCodeSecret = secret
+			if err := c.Validate(); err != nil {
+				t.Fatalf("secret %q should not fail OIDC startup: %v", secret, err)
+			}
+			err := c.ValidateLoginLinkSecret()
+			if err == nil || !strings.Contains(err.Error(), "FANOUT_AUTH_CODE_SECRET") {
+				t.Fatalf("secret %q: ValidateLoginLinkSecret = %v, want an error naming the variable", secret, err)
+			}
+		}
+		c.AuthCodeSecret = strings.Repeat("x", 32)
+		if err := c.ValidateLoginLinkSecret(); err != nil {
+			t.Fatalf("32-character secret should be usable: %v", err)
+		}
+	})
+
 	t.Run("OIDC verified email wildcard is explicit and valid", func(t *testing.T) {
 		c := valid
 		c.AuthMode = "oidc"
@@ -496,4 +524,115 @@ func TestSecureCookies(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLogStartupWarnsAboutUnusableBreakGlassSecret(t *testing.T) {
+	const shortSecret = "not-long-enough-value"
+	for _, tc := range []struct {
+		name   string
+		mode   string
+		secret string
+		want   bool
+	}{
+		{"oidc short", "oidc", shortSecret, true},
+		{"oidc normalized mode short", " OIDC ", shortSecret, true},
+		{"oidc unset", "oidc", "", false},
+		{"oidc usable", "oidc", strings.Repeat("x", 32), false},
+		{"local short", "local", shortSecret, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
+			Config{AuthMode: tc.mode, AuthCodeSecret: tc.secret}.LogStartup()
+
+			output := logs.String()
+			got := strings.Contains(output, "FANOUT_AUTH_CODE_SECRET") && strings.Contains(output, "break-glass")
+			if got != tc.want {
+				t.Fatalf("warning present = %v, want %v; logs: %s", got, tc.want, output)
+			}
+			if strings.Contains(output, shortSecret) {
+				t.Fatalf("logs contain the secret value: %s", output)
+			}
+		})
+	}
+}
+
+func TestLoadIngestToken(t *testing.T) {
+	const name = "FANOUT_INGEST_TOKEN"
+	valid := "foi_" + strings.Repeat("A", 43)
+
+	t.Run("absent by default", func(t *testing.T) {
+		cfg, err := Load(LoadOptions{Environ: validEnvironment()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.IngestToken != "" {
+			t.Fatal("ingest token must default to empty")
+		}
+	})
+
+	t.Run("environment value", func(t *testing.T) {
+		cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"="+valid)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.IngestToken != valid {
+			t.Fatal("ingest token was not loaded from the environment")
+		}
+	})
+
+	t.Run("file value", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "ingest-token")
+		if err := os.WriteFile(path, []byte(valid+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"_FILE="+path)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.IngestToken != valid {
+			t.Fatal("ingest token was not loaded from its file")
+		}
+	})
+
+	for _, malformed := range []string{
+		"synthetic-private-value",
+		"foi_" + strings.Repeat("A", 42),
+		"foi_" + strings.Repeat("A", 44),
+		"foi_" + strings.Repeat("A", 42) + "+",
+		"fo_" + strings.Repeat("A", 43),
+		strings.Repeat("A", 43),
+		" " + valid,
+	} {
+		t.Run("rejects malformed environment value", func(t *testing.T) {
+			_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"="+malformed)})
+			if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), malformed) {
+				t.Fatal("expected redacted error naming the setting")
+			}
+		})
+		t.Run("rejects malformed file value", func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ingest-token")
+			if err := os.WriteFile(path, []byte(malformed), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"_FILE="+path)})
+			if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), malformed) {
+				t.Fatal("expected redacted error naming the setting")
+			}
+		})
+	}
+
+	t.Run("rejects both forms", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "ingest-token")
+		if err := os.WriteFile(path, []byte(valid), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"="+valid, name+"_FILE="+path)})
+		if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), valid) {
+			t.Fatal("expected redacted conflict error naming the setting")
+		}
+	})
 }

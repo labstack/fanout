@@ -61,8 +61,13 @@ type repairCommand struct {
 	batch  string
 }
 
+type loginLinkCommand struct {
+	email      string
+	breakGlass bool
+}
+
 func main() {
-	showVersion, loginEmail, healthURL, derivedProbe, repair, err := parseCommandLine(os.Args[1:], os.Stderr)
+	showVersion, loginLink, healthURL, derivedProbe, repair, err := parseCommandLine(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
 	}
@@ -103,8 +108,8 @@ func main() {
 		}
 		return
 	}
-	if loginEmail != "" {
-		if err := createLoginLink(cfg, loginEmail, os.Stderr); err != nil {
+	if loginLink != nil {
+		if err := createLoginLink(cfg, loginLink.email, loginLink.breakGlass, os.Stderr); err != nil {
 			slog.Error("create login link failed", "err", err)
 			os.Exit(1)
 		}
@@ -184,6 +189,14 @@ func main() {
 	}
 	defer sqlite.Close()
 
+	settingsStore := settings.NewStore(sqlite.DB)
+	auditStore := auth.NewAuditStore(sqlite.DB)
+	// Runs before the alert engine, the control database's first other writer.
+	if err := applyConfiguredIngestToken(ctx, settingsStore, auditStore, cfg.IngestToken); err != nil {
+		slog.Error("configured ingest token init failed", "err", err)
+		os.Exit(1)
+	}
+
 	// Start alert engine
 	var alertStore *alert.Store
 	var alertEngine *alert.Engine
@@ -198,11 +211,9 @@ func main() {
 		slog.Info("alert engine enabled", "interval", cfg.AlertEvaluationInterval)
 	}
 
-	settingsStore := settings.NewStore(sqlite.DB)
 	userStore := auth.NewUserStore(sqlite.DB)
 	identityStore := auth.NewIdentityStore(sqlite.DB)
 	browserSessions := auth.NewBrowserSessions(sqlite.DB, cfg.SessionIdleTTL, cfg.SessionAbsoluteTTL, cfg.SecureCookies())
-	auditStore := auth.NewAuditStore(sqlite.DB)
 	setup := auth.NewSetup()
 
 	userCount, err := userStore.CountUsers()
@@ -479,15 +490,15 @@ func main() {
 	}
 }
 
-func parseCommandLine(args []string, output io.Writer) (showVersion bool, loginEmail, healthURL string, derivedProbe bool, repair *repairCommand, err error) {
+func parseCommandLine(args []string, output io.Writer) (showVersion bool, loginLink *loginLinkCommand, healthURL string, derivedProbe bool, repair *repairCommand, err error) {
 	if len(args) == 1 && args[0] == "version" {
-		return true, "", "", false, nil, nil
+		return true, nil, "", false, nil, nil
 	}
 	if len(args) >= 1 && len(args) <= 2 && args[0] == "healthcheck" {
 		if len(args) == 2 {
-			return false, "", args[1], false, nil, nil
+			return false, nil, args[1], false, nil, nil
 		}
-		return false, "", "", true, nil, nil
+		return false, nil, "", true, nil, nil
 	}
 
 	flags := flag.NewFlagSet("fanout", flag.ContinueOnError)
@@ -495,7 +506,7 @@ func parseCommandLine(args []string, output io.Writer) (showVersion bool, loginE
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage of fanout:")
 		fmt.Fprintln(output, "  fanout [flags]")
-		fmt.Fprintln(output, "  fanout login-link <email>")
+		fmt.Fprintln(output, "  fanout login-link <email> [--break-glass]")
 		fmt.Fprintln(output, "  fanout repair verify")
 		fmt.Fprintln(output, "  fanout repair quarantine --batch <id>")
 		fmt.Fprintln(output, "  fanout healthcheck [url]")
@@ -506,22 +517,41 @@ func parseCommandLine(args []string, output io.Writer) (showVersion bool, loginE
 	flags.BoolVar(&showVersion, "version", false, "print the Fanout version")
 	flags.BoolVar(&showVersion, "v", false, "print the Fanout version")
 	if err := flags.Parse(args); err != nil {
-		return false, "", "", false, nil, err
+		return false, nil, "", false, nil, err
 	}
-	if flags.NArg() == 2 && flags.Arg(0) == "login-link" {
-		return false, flags.Arg(1), "", false, nil, nil
+	if flags.NArg() > 0 && flags.Arg(0) == "login-link" {
+		if command, ok := parseLoginLinkCommand(flags.Args()[1:]); ok {
+			return false, &command, "", false, nil, nil
+		}
 	}
 	if flags.NArg() > 0 && flags.Arg(0) == "repair" {
 		repair, err := parseRepairCommand(flags.Args()[1:], output)
-		return false, "", "", false, repair, err
+		return false, nil, "", false, repair, err
 	}
 	if flags.NArg() != 0 {
 		err := fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
 		fmt.Fprintln(output, err)
 		flags.Usage()
-		return false, "", "", false, nil, err
+		return false, nil, "", false, nil, err
 	}
-	return showVersion, "", "", false, nil, nil
+	return showVersion, nil, "", false, nil, nil
+}
+
+// parseLoginLinkCommand accepts --break-glass on either side of the email,
+// which the standard flag package cannot do once parsing reaches an operand.
+func parseLoginLinkCommand(args []string) (loginLinkCommand, bool) {
+	var command loginLinkCommand
+	for _, arg := range args {
+		switch {
+		case arg == "--break-glass":
+			command.breakGlass = true
+		case strings.HasPrefix(arg, "-") || command.email != "":
+			return loginLinkCommand{}, false
+		default:
+			command.email = arg
+		}
+	}
+	return command, command.email != ""
 }
 
 func parseRepairCommand(args []string, output io.Writer) (*repairCommand, error) {
@@ -669,8 +699,16 @@ func checkHealth(healthURL string, derivedProbe bool, certFile, clientCertFile, 
 	return nil
 }
 
-func createLoginLink(cfg config.Config, rawEmail string, output io.Writer) error {
-	if strings.ToLower(strings.TrimSpace(cfg.AuthMode)) != "local" {
+func createLoginLink(cfg config.Config, rawEmail string, breakGlass bool, output io.Writer) error {
+	mode := strings.ToLower(strings.TrimSpace(cfg.AuthMode))
+	if breakGlass {
+		if mode != "oidc" {
+			return fmt.Errorf("--break-glass is available only in oidc auth mode; use fanout login-link <email> in local mode")
+		}
+		if err := cfg.ValidateLoginLinkSecret(); err != nil {
+			return fmt.Errorf("break-glass login links need a configured secret: %w", err)
+		}
+	} else if mode != "local" {
 		return fmt.Errorf("login links are available only in local auth mode")
 	}
 	email, err := auth.NormalizeEmail(rawEmail)
@@ -695,12 +733,20 @@ func createLoginLink(cfg config.Config, rawEmail string, output io.Writer) error
 	if user.Status != auth.UserStatusActive {
 		return fmt.Errorf("user %s is suspended", email)
 	}
-	token, err := auth.NewCodeStore(sqlite.DB, cfg.AuthCodeSecret).CreateLoginLink(email)
+	if breakGlass && user.Role != auth.RoleAdmin {
+		return fmt.Errorf("user %s is not an administrator; break-glass links are limited to active administrators", email)
+	}
+	codes := auth.NewCodeStore(sqlite.DB, cfg.AuthCodeSecret)
+	createLink, issuedEvent, label := codes.CreateLoginLink, auth.AuditEventType("login_link.issued"), "login link"
+	if breakGlass {
+		createLink, issuedEvent, label = codes.CreateBreakGlassLoginLink, auth.AuditEventType("login_link.break_glass_issued"), "break-glass login link"
+	}
+	token, err := createLink(email)
 	if err != nil {
 		return err
 	}
 	if err := auth.NewAuditStore(sqlite.DB).Record(context.Background(), auth.AuditEvent{
-		EventType:  "login_link.issued",
+		EventType:  issuedEvent,
 		Outcome:    "success",
 		TargetType: "user",
 		TargetID:   user.ID,
@@ -711,7 +757,25 @@ func createLoginLink(cfg config.Config, rawEmail string, output io.Writer) error
 	query := loginURL.Query()
 	query.Set("login_token", token)
 	loginURL.RawQuery = query.Encode()
-	fmt.Fprintf(output, "fanout: login link for %s (valid 15 minutes, single use)\n  %s\n", email, loginURL.String())
+	fmt.Fprintf(output, "fanout: %s for %s (valid 15 minutes, single use)\n  %s\n", label, email, loginURL.String())
+	return nil
+}
+
+// applyConfiguredIngestToken seeds the first ingest token from configuration.
+// It logs the outcome by setting name and never the token or its hash.
+func applyConfiguredIngestToken(ctx context.Context, store *settings.Store, audit *auth.AuditStore, token string) error {
+	if token == "" {
+		return nil
+	}
+	applied, err := store.ApplyConfiguredIngestToken(ctx, token, audit)
+	if err != nil {
+		return err
+	}
+	if applied {
+		slog.Info("ingest token set from FANOUT_INGEST_TOKEN")
+	} else {
+		slog.Info("FANOUT_INGEST_TOKEN ignored because an ingest token already exists")
+	}
 	return nil
 }
 

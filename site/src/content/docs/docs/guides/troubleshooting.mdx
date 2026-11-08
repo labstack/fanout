@@ -153,7 +153,9 @@ docker exec fanout fanout login-link user@example.com
 ```
 
 The link expires after 15 minutes, works once, and is recorded in the
-authentication audit history. It is available in `local` auth mode only.
+authentication audit history. It is available in `local` auth mode only; OIDC
+installations use
+[`--break-glass`](/docs/concepts/authentication#oidc-break-glass-recovery).
 
 A configured SMTP relay that fails delivery returns an error. See
 [account recovery](/docs/concepts/authentication#recover-local-sign-in)

@@ -46,7 +46,8 @@ Local mode requires only a 32-character `FANOUT_AUTH_CODE_SECRET`. SMTP is
 optional: when all SMTP settings are present, users can request email codes;
 without them, an operator with access to the control database can mint a login
 link. OIDC mode instead requires an HTTPS issuer, a client, and an HTTPS
-`FANOUT_PUBLIC_URL`.
+`FANOUT_PUBLIC_URL`; set `FANOUT_AUTH_CODE_SECRET` as well to keep
+[break-glass recovery](#oidc-break-glass-recovery) available.
 
 After setup in local mode, send yourself a code if SMTP is configured and
 confirm it arrives. Credentials
@@ -89,9 +90,41 @@ one URL to stderr. The URL expires after 15 minutes, works once, and writes a
 distinct `login_link.redeemed` audit event when used. Running it while Fanout is
 online is supported by the control database's WAL and busy-timeout settings.
 
-Fix SMTP after regaining access if email-code login is expected. OIDC-mode
-recovery remains at the identity provider or OIDC configuration layer; local
-login links are unavailable in that mode.
+Fix SMTP after regaining access if email-code login is expected. Ordinary
+login links are unavailable in OIDC mode; use a break-glass link instead.
+
+### OIDC break-glass recovery
+
+When the identity provider is unavailable, an operator with access to the
+control database can issue a one-time link for an active administrator:
+
+```sh
+fanout login-link --break-glass admin@example.com
+```
+
+`FANOUT_AUTH_CODE_SECRET` must be set to at least 32 characters, on both the
+command and the server, because it protects the stored credential. OIDC mode
+does not require the secret at startup, so an installation that wants this
+recovery path must set it and restart Fanout before the outage. Without it the
+command fails with an error naming the variable and `/api/auth/link/verify`
+stays disabled.
+
+The command refuses other roles, suspended users, and local mode. The link
+expires after 15 minutes and works once. In OIDC mode `/api/auth/link/verify`
+accepts only these links, refuses an ordinary login link without consuming it,
+and re-checks that the account is still an active administrator. Issuing writes
+a `login_link.break_glass_issued` audit event and redeeming writes a
+`login_link.break_glass_redeemed` audit event. If the redemption event cannot be
+written, Fanout creates no session and the request fails; the link is spent, so
+issue a new one.
+
+`/api/auth/link/verify` is rate limited per client address. Behind a reverse
+proxy, set `FANOUT_TRUSTED_PROXY_CIDRS`; otherwise every request shares the
+proxy's address and one limit, and other traffic can block recovery.
+
+Fanout contacts the identity provider's discovery endpoint when the server
+starts, and exits if that fails. Break-glass access therefore needs a server
+that is already running; do not restart Fanout during the outage.
 
 ### User account API
 
@@ -276,8 +309,9 @@ access, including browser sessions and OAuth tokens, through
 |---|---|---|
 | Setup URL | Creates the first administrator | One-time, expires in 1 hour |
 | Login URL | Authenticates one existing active local user | One-time, expires in 15 minutes; mint with `fanout login-link` |
+| Break-glass URL | Authenticates one active administrator in OIDC mode | One-time, expires in 15 minutes; mint with `fanout login-link --break-glass` |
 | Browser session | Interactive access | Idle and absolute TTL; revoked on role, email, or status change |
-| Ingest token | OTLP ingest | Settings page |
+| Ingest token | OTLP ingest | Settings page; `FANOUT_INGEST_TOKEN` sets only the first token |
 | Metrics token | `/metrics` scrape | `FANOUT_METRICS_TOKEN` |
 | MCP OAuth tokens | MCP clients | 30-day access tokens, checked on every request; 90-day refresh tokens renewed on each use. Refresh rotation with replay-family revocation, admitting the same client's rotated token for one access-token lifetime so processes sharing a credential can refresh from stale copies. Users disconnect individual agents in Settings; admins can still revoke all of a user's access |
 

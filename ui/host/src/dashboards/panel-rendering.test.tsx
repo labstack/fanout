@@ -96,9 +96,17 @@ describe("panel rendering", () => {
     const got = analysis.analysisOption({ ...panel, viz: "scatter" }, { ...result, frame }, theme);
     const x = got.xAxis as { name?: string; splitLine: { lineStyle: { color: string } } };
     const y = got.yAxis as { name?: string; interval: number; splitLine: { lineStyle: { color: string } }; axisLabel: { formatter: (v: number) => string } };
-    expect(x.name).toBe("Requests"); expect(y.name).toBe("p95 (ms)"); expect(y.interval).toBe(600000);
+    expect(x.name).toBe("Requests"); // Ticks print the unit ("10 m"), so the name does not repeat a different one.
+    expect(y.name).toBe("p95"); expect(y.interval).toBe(600000);
     expect(y.axisLabel.formatter(y.interval)).toBe("10 m");
     expect(x.splitLine.lineStyle.color).toBe(theme.grid); expect(y.splitLine.lineStyle.color).toBe(theme.grid);
+  });
+  it("names scatter axes without a unit their ticks already print, whatever supplies the unit", () => {
+    // The y unit comes from the panel, the x unit from the column: neither leaks onto the other axis.
+    const frame: Frame = { columns: [{ name: "service", role: "dimension", type: "string" }, { name: "error_rate", role: "measure", type: "number", unit: "percent" }, { name: "p95", role: "measure", type: "number" }], values: [["a", "b"], [0.1, 0.4], [20, 900]], rows: 2 };
+    const got = analysis.analysisOption({ ...panel, viz: "scatter", unit: "ms" }, { ...result, frame }, chartThemeFor(false));
+    expect((got.xAxis as { name?: string }).name).toBe("Error rate");
+    expect((got.yAxis as { name?: string }).name).toBe("p95");
   });
   it("fills the heatmap and anchors the scale beneath its right edge", () => {
     const got = analysis.analysisOption({ ...panel, viz: "heatmap" }, result, chartThemeFor(false));

@@ -74,6 +74,27 @@ describe("Rail", () => {
     document.body.innerHTML = "";
   });
 
+  it("says when the collapsed rail's chats and dashboards could not load", async () => {
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      if (path === "/api/agent/threads" || path === "/api/dashboards") return json({ code: "unavailable", message: "down" }, 503);
+      return respond(input, init);
+    });
+    const { root, render } = mount({ collapsed: true });
+    await act(async () => render());
+    const items = async (label: string) => {
+      await act(async () => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click());
+      await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+      return () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(node => node.textContent);
+    };
+    const chats = await items("Chats");
+    await vi.waitFor(() => expect(chats()).toContain("Chats could not be loaded. Retry"));
+    expect(chats()).not.toContain("No chats yet");
+    const boards = await items("Dashboards");
+    await vi.waitFor(() => expect(boards()).toContain("Dashboards could not be loaded. Retry"));
+    await act(async () => root.unmount());
+  });
+
   it("reaches existing chats and dashboards from the collapsed rail", async () => {
     const { root, handlers, render } = mount({ collapsed: true });
     await act(async () => render());

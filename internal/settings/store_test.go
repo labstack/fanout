@@ -100,3 +100,136 @@ func TestIngestRejectsRetiredTokenEvenWithMatchingDigest(t *testing.T) {
 		t.Fatal("retired ingest token accepted")
 	}
 }
+
+func configuredIngestToken(fill string) string {
+	return "foi_" + strings.Repeat(fill, 43)
+}
+
+func ingestAuditCount(t *testing.T, store *Store) int {
+	t.Helper()
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'ingest_key.rotated'`).Scan(&count); err != nil {
+		t.Fatalf("count audit events: %v", err)
+	}
+	return count
+}
+
+func TestApplyConfiguredIngestTokenStoresOnlyHashOnEmptyInstall(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	token := configuredIngestToken("A")
+
+	applied, err := store.ApplyConfiguredIngestToken(ctx, token, auth.NewAuditStore(store.db))
+	if err != nil {
+		t.Fatalf("ApplyConfiguredIngestToken: %v", err)
+	}
+	if !applied {
+		t.Fatal("token was not applied to an empty install")
+	}
+	got, err := store.GetIngest(ctx)
+	if err != nil {
+		t.Fatalf("GetIngest: %v", err)
+	}
+	if got.TokenHash != HashIngestToken(token) || !CheckIngestToken(token, got.TokenHash) {
+		t.Fatal("stored hash does not verify the configured token")
+	}
+
+	var value, metadata string
+	if err := store.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, ingestKey).Scan(&value); err != nil {
+		t.Fatalf("read setting: %v", err)
+	}
+	if err := store.db.QueryRow(`SELECT metadata_json FROM auth_audit_events WHERE event_type = 'ingest_key.rotated'`).Scan(&metadata); err != nil {
+		t.Fatalf("read audit event: %v", err)
+	}
+	if strings.Contains(value, token) || strings.Contains(metadata, token) {
+		t.Fatal("raw token was persisted")
+	}
+	if !strings.Contains(metadata, `"configuration"`) {
+		t.Fatalf("audit metadata = %s, want configuration source", metadata)
+	}
+}
+
+func TestApplyConfiguredIngestTokenIgnoredOnceHashExists(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	audit := auth.NewAuditStore(store.db)
+	first := configuredIngestToken("A")
+
+	if _, err := store.ApplyConfiguredIngestToken(ctx, first, audit); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+
+	// A later restart with a different value changes nothing.
+	applied, err := store.ApplyConfiguredIngestToken(ctx, configuredIngestToken("B"), audit)
+	if err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	got, err := store.GetIngest(ctx)
+	if err != nil {
+		t.Fatalf("GetIngest: %v", err)
+	}
+	if applied || got.TokenHash != HashIngestToken(first) {
+		t.Fatal("a different configured value replaced the stored hash")
+	}
+	if count := ingestAuditCount(t, store); count != 1 {
+		t.Fatalf("audit events = %d, want 1", count)
+	}
+
+	// Rotation from the UI survives restarts that still carry the setting.
+	_, rotated, err := GenerateIngestToken()
+	if err != nil {
+		t.Fatalf("GenerateIngestToken: %v", err)
+	}
+	if err := store.SetIngest(ctx, Ingest{TokenHash: rotated}); err != nil {
+		t.Fatalf("SetIngest: %v", err)
+	}
+	applied, err = store.ApplyConfiguredIngestToken(ctx, first, audit)
+	if err != nil {
+		t.Fatalf("apply after rotation: %v", err)
+	}
+	got, err = store.GetIngest(ctx)
+	if err != nil {
+		t.Fatalf("GetIngest: %v", err)
+	}
+	if applied || got.TokenHash != rotated {
+		t.Fatal("configured value replaced a rotated token")
+	}
+}
+
+func TestApplyConfiguredIngestTokenFillsEmptyStoredHash(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	token := configuredIngestToken("A")
+	if err := store.SetIngest(ctx, Ingest{}); err != nil {
+		t.Fatalf("SetIngest: %v", err)
+	}
+
+	applied, err := store.ApplyConfiguredIngestToken(ctx, token, auth.NewAuditStore(store.db))
+	if err != nil {
+		t.Fatalf("ApplyConfiguredIngestToken: %v", err)
+	}
+	got, err := store.GetIngest(ctx)
+	if err != nil {
+		t.Fatalf("GetIngest: %v", err)
+	}
+	if !applied || got.TokenHash != HashIngestToken(token) {
+		t.Fatal("an empty stored hash must count as no token")
+	}
+}
+
+func TestApplyConfiguredIngestTokenFailsOnCorruptSetting(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	token := configuredIngestToken("A")
+	if err := store.Upsert(ctx, ingestKey, "not an ingest object"); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	applied, err := store.ApplyConfiguredIngestToken(ctx, token, auth.NewAuditStore(store.db))
+	if err == nil || applied || strings.Contains(err.Error(), token) {
+		t.Fatalf("applied = %v err = %v, want redacted failure", applied, err)
+	}
+	if count := ingestAuditCount(t, store); count != 0 {
+		t.Fatalf("audit events = %d, want 0", count)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	appauth "github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/secret"
 )
 
 const maxIngestBatchSize = 50_000
@@ -60,6 +61,11 @@ type Config struct {
 	// until durable publication. Zero is unbounded. A single request is admitted
 	// when no other request holds budget, even if it exceeds the limit.
 	IngestMaxInFlightBytes int `group:"ingest" env:"FANOUT_INGEST_MAX_IN_FLIGHT_BYTES" default:"268435456"`
+	// IngestToken sets the first ingest token when none is stored, so an automated
+	// install accepts telemetry as soon as it starts. Use foi_ plus 43 base64url
+	// characters. Only its hash is stored. It is ignored once a token exists, so a
+	// token rotated in the UI survives restarts.
+	IngestToken string `group:"ingest" env:"FANOUT_INGEST_TOKEN" secret:"true"`
 	// RollupInterval schedules analytical rollups; use a Go duration of at least 1s.
 	RollupInterval time.Duration `group:"storage" env:"FANOUT_ROLLUP_INTERVAL" default:"1m"`
 	// MCPEnabled serves the MCP endpoint at /mcp.
@@ -163,7 +169,7 @@ type Config struct {
 	// PublicURL sets the external browser origin, MCP token audience, and trusted MCP
 	// request origin. Required for OIDC; HTTPS is required with MCP.
 	PublicURL string `group:"server" env:"FANOUT_PUBLIC_URL"`
-	// AuthCodeSecret signs local sign-in codes; required in local mode with at least 32 characters.
+	// AuthCodeSecret signs sign-in codes and login links; needs at least 32 characters in local mode and to issue or redeem OIDC break-glass links.
 	AuthCodeSecret string `group:"auth" env:"FANOUT_AUTH_CODE_SECRET" secret:"true"`
 	// SelfSignup allows verified email addresses to create viewer accounts; requires local auth and SMTP.
 	SelfSignup bool `group:"auth" env:"FANOUT_SELF_SIGNUP" default:"false"`
@@ -225,6 +231,9 @@ func (c Config) LogStartup() {
 	if c.MetricsPublic {
 		slog.Warn("Prometheus metrics are publicly accessible", "path", "/metrics")
 	}
+	if strings.ToLower(strings.TrimSpace(c.AuthMode)) == "oidc" && c.AuthCodeSecret != "" && c.ValidateLoginLinkSecret() != nil {
+		slog.Warn("FANOUT_AUTH_CODE_SECRET is shorter than 32 characters; OIDC break-glass login links will be unavailable")
+	}
 	if c.SelfSignup {
 		slog.Info("self-signup is enabled", "role", appauth.RoleViewer)
 	}
@@ -282,6 +291,9 @@ func (c Config) Validate() error {
 	if c.IngestBatchSize <= 0 || c.IngestBatchSize > maxIngestBatchSize {
 		return fmt.Errorf("FANOUT_INGEST_BATCH_SIZE must be between 1 and %d, got %d", maxIngestBatchSize, c.IngestBatchSize)
 	}
+	if c.IngestToken != "" && !secret.ValidSecret(c.IngestToken, "foi_") {
+		return fmt.Errorf("FANOUT_INGEST_TOKEN must be foi_ followed by 43 base64url characters")
+	}
 	if c.RollupInterval < time.Second {
 		return fmt.Errorf("FANOUT_ROLLUP_INTERVAL must be at least 1s, got %s", c.RollupInterval)
 	}
@@ -328,8 +340,8 @@ func (c Config) Validate() error {
 		return fmt.Errorf("FANOUT_SESSION_ABSOLUTE_TTL must be positive and at least FANOUT_SESSION_IDLE_TTL")
 	}
 	if authMode == "local" {
-		if len(strings.TrimSpace(c.AuthCodeSecret)) < 32 {
-			return fmt.Errorf("FANOUT_AUTH_CODE_SECRET must be at least 32 characters")
+		if err := c.ValidateLoginLinkSecret(); err != nil {
+			return err
 		}
 	}
 	if anySet(c.SMTPHost, c.SMTPUser, c.SMTPPass, c.SMTPFrom) {
@@ -415,6 +427,17 @@ func (c Config) Validate() error {
 		if !anySet(c.TLSClientCAFile) {
 			return fmt.Errorf("FANOUT_HEALTHCHECK_CERT_FILE and FANOUT_HEALTHCHECK_KEY_FILE require FANOUT_TLS_CLIENT_CA_FILE")
 		}
+	}
+	return nil
+}
+
+// ValidateLoginLinkSecret reports whether FANOUT_AUTH_CODE_SECRET can protect
+// login links. Local mode requires this at startup. OIDC mode checks it only
+// when a break-glass link is issued or redeemed, so OIDC installs that never
+// set the secret keep starting.
+func (c Config) ValidateLoginLinkSecret() error {
+	if len(strings.TrimSpace(c.AuthCodeSecret)) < 32 {
+		return fmt.Errorf("FANOUT_AUTH_CODE_SECRET must be at least 32 characters")
 	}
 	return nil
 }

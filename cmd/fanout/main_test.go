@@ -13,6 +13,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -28,6 +29,7 @@ import (
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/server"
+	"github.com/labstack/fanout/internal/settings"
 	"github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -41,7 +43,7 @@ func TestParseCommandLine(t *testing.T) {
 		name        string
 		args        []string
 		wantVersion bool
-		wantEmail   string
+		wantLink    *loginLinkCommand
 		wantHealth  string
 		wantDerived bool
 		wantRepair  *repairCommand
@@ -51,7 +53,12 @@ func TestParseCommandLine(t *testing.T) {
 		{name: "version command", args: []string{"version"}, wantVersion: true},
 		{name: "version flag", args: []string{"--version"}, wantVersion: true},
 		{name: "short version flag", args: []string{"-v"}, wantVersion: true},
-		{name: "login link", args: []string{"login-link", "admin@example.com"}, wantEmail: "admin@example.com"},
+		{name: "login link", args: []string{"login-link", "admin@example.com"}, wantLink: &loginLinkCommand{email: "admin@example.com"}},
+		{name: "break-glass login link", args: []string{"login-link", "--break-glass", "admin@example.com"}, wantLink: &loginLinkCommand{email: "admin@example.com", breakGlass: true}},
+		{name: "break-glass flag after email", args: []string{"login-link", "admin@example.com", "--break-glass"}, wantLink: &loginLinkCommand{email: "admin@example.com", breakGlass: true}},
+		{name: "login link break-glass without email", args: []string{"login-link", "--break-glass"}, wantErr: true},
+		{name: "login link unknown flag", args: []string{"login-link", "--force", "admin@example.com"}, wantErr: true},
+		{name: "login link two emails", args: []string{"login-link", "a@example.com", "b@example.com"}, wantErr: true},
 		{name: "default healthcheck", args: []string{"healthcheck"}, wantDerived: true},
 		{name: "custom healthcheck", args: []string{"healthcheck", "http://fanout:8080/healthz"}, wantHealth: "http://fanout:8080/healthz"},
 		{name: "repair verify", args: []string{"repair", "verify"}, wantRepair: &repairCommand{action: "verify"}},
@@ -64,12 +71,15 @@ func TestParseCommandLine(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			showVersion, email, healthURL, derivedProbe, repair, err := parseCommandLine(test.args, io.Discard)
+			showVersion, loginLink, healthURL, derivedProbe, repair, err := parseCommandLine(test.args, io.Discard)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, test.wantErr)
 			}
-			if showVersion != test.wantVersion || email != test.wantEmail || healthURL != test.wantHealth || derivedProbe != test.wantDerived {
-				t.Fatalf("result = (%v, %q, %q, %v), want (%v, %q, %q, %v)", showVersion, email, healthURL, derivedProbe, test.wantVersion, test.wantEmail, test.wantHealth, test.wantDerived)
+			if showVersion != test.wantVersion || healthURL != test.wantHealth || derivedProbe != test.wantDerived {
+				t.Fatalf("result = (%v, %q, %v), want (%v, %q, %v)", showVersion, healthURL, derivedProbe, test.wantVersion, test.wantHealth, test.wantDerived)
+			}
+			if loginLink == nil != (test.wantLink == nil) || loginLink != nil && *loginLink != *test.wantLink {
+				t.Fatalf("login link = %#v, want %#v", loginLink, test.wantLink)
 			}
 			if repair == nil != (test.wantRepair == nil) || repair != nil && *repair != *test.wantRepair {
 				t.Fatalf("repair = %#v, want %#v", repair, test.wantRepair)
@@ -189,7 +199,7 @@ func TestCreateLoginLink(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := createLoginLink(cfg, " ADMIN@example.com ", &output); err != nil {
+	if err := createLoginLink(cfg, " ADMIN@example.com ", false, &output); err != nil {
 		t.Fatalf("createLoginLink: %v", err)
 	}
 	line := strings.TrimSpace(strings.Split(output.String(), "\n")[1])
@@ -216,6 +226,142 @@ func TestCreateLoginLink(t *testing.T) {
 	}
 	if events != 1 {
 		t.Fatalf("issued audit events = %d, want 1", events)
+	}
+}
+
+func breakGlassTestConfig(t *testing.T, role auth.Role, status auth.UserStatus) config.Config {
+	t.Helper()
+	cfg := config.Config{
+		AuthMode:       "oidc",
+		AuthCodeSecret: "0123456789abcdef0123456789abcdef",
+		DataDir:        t.TempDir(),
+		Addr:           ":7520",
+		PublicURL:      "https://fanout.example.com",
+	}
+	if err := os.MkdirAll(cfg.ControlDir(), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	sqlite, err := store.NewSQLite(cfg.ControlSQLitePath())
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	defer sqlite.Close()
+	users := auth.NewUserStore(sqlite.DB)
+	if _, err := users.CreateWithAudit("keeper@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
+		t.Fatalf("Create keeper: %v", err)
+	}
+	user, err := users.CreateWithAudit("user@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+	if _, err := users.UpdateWithAudit(user.ID, nil, nil, &role, &status, auth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
+		t.Fatalf("Update user: %v", err)
+	}
+	return cfg
+}
+
+func loginLinkState(t *testing.T, cfg config.Config) (links, issued, breakGlassIssued int) {
+	t.Helper()
+	sqlite, err := store.NewSQLite(cfg.ControlSQLitePath())
+	if err != nil {
+		t.Fatalf("reopen SQLite: %v", err)
+	}
+	defer sqlite.Close()
+	if err := sqlite.DB.QueryRow(`SELECT COUNT(*) FROM verifications`).Scan(&links); err != nil {
+		t.Fatalf("count verifications: %v", err)
+	}
+	if err := sqlite.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'login_link.issued'`).Scan(&issued); err != nil {
+		t.Fatalf("count issued: %v", err)
+	}
+	if err := sqlite.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'login_link.break_glass_issued'`).Scan(&breakGlassIssued); err != nil {
+		t.Fatalf("count break-glass issued: %v", err)
+	}
+	return links, issued, breakGlassIssued
+}
+
+func TestCreateBreakGlassLoginLinkForActiveAdministrator(t *testing.T) {
+	cfg := breakGlassTestConfig(t, auth.RoleAdmin, auth.UserStatusActive)
+	var output bytes.Buffer
+	if err := createLoginLink(cfg, "user@example.com", true, &output); err != nil {
+		t.Fatalf("createLoginLink: %v", err)
+	}
+	if !strings.Contains(output.String(), "break-glass") {
+		t.Fatalf("output = %q, want it to identify a break-glass link", output.String())
+	}
+	loginURL, err := url.Parse(strings.TrimSpace(strings.Split(output.String(), "\n")[1]))
+	if err != nil {
+		t.Fatalf("parse URL: %v", err)
+	}
+	sqlite, err := store.NewSQLite(cfg.ControlSQLitePath())
+	if err != nil {
+		t.Fatalf("reopen SQLite: %v", err)
+	}
+	defer sqlite.Close()
+	codes := auth.NewCodeStore(sqlite.DB, cfg.AuthCodeSecret)
+	if _, ok, err := codes.VerifyLoginLink(loginURL.Query().Get("login_token")); err != nil || ok {
+		t.Fatalf("VerifyLoginLink(break-glass) = (%v, %v), want (false, nil)", ok, err)
+	}
+	if email, ok, err := codes.VerifyBreakGlassLoginLink(loginURL.Query().Get("login_token")); err != nil || !ok || email != "user@example.com" {
+		t.Fatalf("VerifyBreakGlassLoginLink = (%q, %v, %v)", email, ok, err)
+	}
+	var issued, breakGlassIssued int
+	if err := sqlite.DB.QueryRow(`SELECT
+		COUNT(*) FILTER (WHERE event_type = 'login_link.issued'),
+		COUNT(*) FILTER (WHERE event_type = 'login_link.break_glass_issued')
+		FROM auth_audit_events`).Scan(&issued, &breakGlassIssued); err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	if issued != 0 || breakGlassIssued != 1 {
+		t.Fatalf("issued = %d, break-glass issued = %d, want 0 and 1", issued, breakGlassIssued)
+	}
+}
+
+func TestCreateBreakGlassLoginLinkRefusals(t *testing.T) {
+	const email = "user@example.com"
+	for _, tc := range []struct {
+		name    string
+		role    auth.Role
+		status  auth.UserStatus
+		mutate  func(*config.Config)
+		email   string
+		wantErr string
+	}{
+		{name: "viewer", role: auth.RoleViewer, status: auth.UserStatusActive, email: email, wantErr: "administrator"},
+		{name: "operator", role: auth.RoleOperator, status: auth.UserStatusActive, email: email, wantErr: "administrator"},
+		{name: "suspended administrator", role: auth.RoleAdmin, status: auth.UserStatusSuspended, email: email, wantErr: "suspended"},
+		{name: "empty secret", role: auth.RoleAdmin, status: auth.UserStatusActive, email: email, mutate: func(c *config.Config) { c.AuthCodeSecret = "" }, wantErr: "FANOUT_AUTH_CODE_SECRET"},
+		{name: "short secret", role: auth.RoleAdmin, status: auth.UserStatusActive, email: email, mutate: func(c *config.Config) { c.AuthCodeSecret = "short" }, wantErr: "FANOUT_AUTH_CODE_SECRET"},
+		{name: "local mode", role: auth.RoleAdmin, status: auth.UserStatusActive, email: email, mutate: func(c *config.Config) { c.AuthMode = "local" }, wantErr: "oidc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := breakGlassTestConfig(t, tc.role, tc.status)
+			if tc.mutate != nil {
+				tc.mutate(&cfg)
+			}
+			var output bytes.Buffer
+			err := createLoginLink(cfg, tc.email, true, &output)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want it to mention %q", err, tc.wantErr)
+			}
+			if output.Len() != 0 {
+				t.Fatalf("output = %q, want none", output.String())
+			}
+			if links, issued, breakGlassIssued := loginLinkState(t, cfg); links != 0 || issued != 0 || breakGlassIssued != 0 {
+				t.Fatalf("state = %d links, %d issued, %d break-glass issued; want none", links, issued, breakGlassIssued)
+			}
+		})
+	}
+}
+
+func TestCreateLoginLinkWithoutFlagStillRefusesOIDCMode(t *testing.T) {
+	cfg := breakGlassTestConfig(t, auth.RoleAdmin, auth.UserStatusActive)
+	var output bytes.Buffer
+	err := createLoginLink(cfg, "user@example.com", false, &output)
+	if err == nil || err.Error() != "login links are available only in local auth mode" {
+		t.Fatalf("error = %v", err)
+	}
+	if links, issued, breakGlassIssued := loginLinkState(t, cfg); links != 0 || issued != 0 || breakGlassIssued != 0 {
+		t.Fatalf("state = %d links, %d issued, %d break-glass issued; want none", links, issued, breakGlassIssued)
 	}
 }
 
@@ -618,5 +764,49 @@ func TestCheckHealthDerivedIgnoresEnvironmentProxy(t *testing.T) {
 				t.Fatalf("explicit %s probe must use the unreachable proxy, got %v", scheme, err)
 			}
 		})
+	}
+}
+
+func TestApplyConfiguredIngestTokenLogsWithoutToken(t *testing.T) {
+	sqlite, err := store.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	defer sqlite.Close()
+	settingsStore := settings.NewStore(sqlite.DB)
+	audit := auth.NewAuditStore(sqlite.DB)
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	first := "foi_" + strings.Repeat("A", 43)
+	second := "foi_" + strings.Repeat("B", 43)
+	if err := applyConfiguredIngestToken(context.Background(), settingsStore, audit, ""); err != nil {
+		t.Fatalf("apply without setting: %v", err)
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("logs without the setting = %q, want none", logs.String())
+	}
+	got, err := settingsStore.GetIngest(context.Background())
+	if err != nil || got.TokenHash != "" {
+		t.Fatalf("hash without the setting = %q err = %v", got.TokenHash, err)
+	}
+
+	if err := applyConfiguredIngestToken(context.Background(), settingsStore, audit, first); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	if err := applyConfiguredIngestToken(context.Background(), settingsStore, audit, second); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+
+	output := logs.String()
+	hash := settings.HashIngestToken(first)
+	if strings.Contains(output, first) || strings.Contains(output, second) || strings.Contains(output, hash) {
+		t.Fatalf("logs exposed token material: %s", output)
+	}
+	if strings.Count(output, "FANOUT_INGEST_TOKEN") != 2 {
+		t.Fatalf("logs must report both outcomes by setting name: %s", output)
 	}
 }

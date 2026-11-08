@@ -6,7 +6,8 @@ const units: Record<string, string> = { ms: "ms", ns: "ns", s: "s", us: "µs", b
 const productNames: Record<string, string> = { body_template: "message template", calls: "requests", spans: "requests", parquet_index: "traces" };
 
 /** Display only: frame column names, row keys and selections stay unchanged. */
-export function displayLabel(column: Column | string, panel?: Panel): string {
+/** Pass `withUnit: false` when the axis ticks already print the unit. */
+export function displayLabel(column: Column | string, panel?: Panel, { withUnit = true }: { withUnit?: boolean } = {}): string {
   const name = typeof column === "string" ? column : column.name;
   const explicitUnit = panel?.options?.columns?.find(c => c.field === name)?.unit
     ?? (typeof column === "string" ? undefined : column.unit)
@@ -21,5 +22,5 @@ export function displayLabel(column: Column | string, panel?: Panel): string {
   const unit = explicitUnit ?? suffix?.[1]?.toLowerCase();
   label = label.split("_").map((word, i) => (/^p\d+$/i.test(word) || abbreviations.has(word.toLowerCase()))
     ? (/^p\d+$/i.test(word) ? word.toLowerCase() : word.toUpperCase()) : i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word).join(" ");
-  return label + (unit && unit !== "none" && unit !== "count" ? ` (${units[unit] ?? unit})` : "");
+  return label + (withUnit && unit && unit !== "none" && unit !== "count" ? ` (${units[unit] ?? unit})` : "");
 }

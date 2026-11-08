@@ -12,7 +12,7 @@ LIMIT 1;
 -- name: GetUnusedLoginLink :one
 SELECT id, email, expires_at
 FROM verifications
-WHERE code_hash = ? AND purpose = 'login_link' AND used = 0
+WHERE code_hash = ? AND purpose = ? AND used = 0
 ORDER BY created_at DESC
 LIMIT 1;
 

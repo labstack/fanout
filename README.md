@@ -39,7 +39,7 @@ docker run --name fanout --restart unless-stopped -p 7520:7520 \
 ```
 
 Open the one-time setup URL printed by the container and create the first administrator. Fanout
-displays the ingest token exactly once; save it with your collector secrets. For later sign-in
+displays the ingest token exactly once, unless `FANOUT_INGEST_TOKEN` already set it; save it with your collector secrets. For later sign-in
 without SMTP, mint a 15-minute, single-use link against the running container's control database:
 
 ```sh
@@ -147,7 +147,7 @@ change requires a restart.
 | `FANOUT_ADDR` | `127.0.0.1:7520` | UI, API, MCP, and both OTLP transports |
 | `FANOUT_DATA_DIR` | `./data` | Parquet, query state, and control SQLite |
 | `FANOUT_AUTH_MODE` | `local` | Login link or SMTP, or `oidc` |
-| `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode, 32+ characters |
+| `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode and for OIDC break-glass links, 32+ characters |
 | `FANOUT_AI_PROVIDER` | — | Empty disables chat; `anthropic` or `openai` enables it |
 | `ANTHROPIC_API_KEY` | — | Required for Anthropic chat |
 | `OPENAI_API_KEY` | — | Required for OpenAI chat |
