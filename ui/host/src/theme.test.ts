@@ -1,5 +1,5 @@
 import { DEFAULT_THEME, defaultCssVariablesResolver, mergeMantineTheme } from "@mantine/core";
-import { contrastRatio, labstackDefaultBrand } from "@labstack/ui";
+import { contrastRatio, defaultBrand } from "@labstack/ui";
 import { describe, expect, it } from "vitest";
 import { fanoutCssVariables, fanoutTheme, chart } from "../../theme";
 import { accent, bad, fonts, info, ok, surfaces, typeScale, warn } from "../../tokens";
@@ -13,7 +13,7 @@ function variables(scheme: "light" | "dark") {
 }
 
 it("package-free tokens mirror the library default brand", () => {
-  const brand = labstackDefaultBrand;
+  const brand = defaultBrand;
   expect([...accent]).toEqual([...brand.accent]);
   expect({ ok: [...ok], warn: [...warn], bad: [...bad], info: [...info] }).toEqual(brand.colors);
   expect(surfaces).toEqual(brand.surfaces);
