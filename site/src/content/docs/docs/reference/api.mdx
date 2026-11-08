@@ -28,7 +28,8 @@ configuration:
 - `/api/agent/*`: only when `FANOUT_AI_PROVIDER` selects `anthropic` or
   `openai`, with that provider's required key. An empty provider disables chat.
 - `/api/auth/oidc/start` and `/api/auth/oidc/callback`: only in
-  `FANOUT_AUTH_MODE=oidc`.
+  `FANOUT_AUTH_MODE=oidc`. They return 503 `unavailable` with `Retry-After`
+  until provider discovery succeeds.
 
 Everything else is always registered. A path shown with `:name` or `*` is the
 pattern Echo matches on, not a literal URL.
