@@ -374,22 +374,21 @@ func (h *AuthHandler) LoginLink(c *echo.Context) error {
 		jitter()
 		return echo.NewHTTPError(http.StatusForbidden, "break-glass login requires an administrator")
 	}
+	redeemed := auth.AuditEvent{ActorUserID: user.ID, EventType: redeemedEvent, Outcome: "success", TargetType: "user", TargetID: user.ID}
+	if breakGlass {
+		// Break-glass bypasses the identity provider, so it is audited before
+		// any session exists. A session failure after this point leaves an
+		// audited redemption with no login, which is the safe direction.
+		if err := h.writeAudit(c, redeemed); err != nil {
+			slog.Error("auth: break-glass redemption audit failed", "user_id", user.ID, "err", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
+		}
+	}
 	if err := h.establishSession(c, user); err != nil {
 		slog.Error("auth: login link session establishment failed", "user_id", user.ID, "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
 	}
-	redeemed := auth.AuditEvent{ActorUserID: user.ID, EventType: redeemedEvent, Outcome: "success", TargetType: "user", TargetID: user.ID}
-	if breakGlass {
-		// Break-glass bypasses the identity provider, so a redemption that
-		// cannot be audited must not leave a usable session behind.
-		if err := h.writeAudit(c, redeemed); err != nil {
-			slog.Error("auth: break-glass redemption audit failed", "user_id", user.ID, "err", err)
-			if destroyErr := h.sessions.Destroy(c.Request().Context()); destroyErr != nil {
-				slog.Error("auth: break-glass session destroy failed", "user_id", user.ID, "err", destroyErr)
-			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
-		}
-	} else {
+	if !breakGlass {
 		h.recordAudit(c, redeemed)
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")

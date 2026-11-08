@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -955,6 +956,15 @@ func TestBreakGlassRedemptionFailsClosedWhenAuditWriteFails(t *testing.T) {
 	}
 	if got := s.countSessions(t); got != 0 {
 		t.Fatalf("stored sessions = %d, want 0", got)
+	}
+	// establishSession records the login first, so an untouched timestamp shows
+	// the audit failure stopped the request before any session was started.
+	var lastLogin sql.NullString
+	if err := s.db.DB.QueryRow(`SELECT logged_in_at FROM users WHERE id = ?`, user.ID).Scan(&lastLogin); err != nil {
+		t.Fatalf("query last login: %v", err)
+	}
+	if lastLogin.String != "" {
+		t.Fatalf("logged_in_at = %q, want no session establishment", lastLogin.String)
 	}
 }
 

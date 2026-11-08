@@ -163,7 +163,7 @@ in 15 minutes and works once. In OIDC mode, the server accepts only these links
 and re-checks that the account is still an active administrator. Issuing and
 redeeming write the distinct audit events `login_link.break_glass_issued` and
 `login_link.break_glass_redeemed`. If the redemption event cannot be written,
-Fanout discards the session and the request fails; the link is spent, so issue a
+Fanout creates no session and the request fails; the link is spent, so issue a
 new one.
 
 `/api/auth/link/verify` is rate limited per client address. Behind a reverse
