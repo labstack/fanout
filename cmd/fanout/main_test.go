@@ -13,7 +13,6 @@ import (
 	"errors"
 	"flag"
 	"io"
-	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -217,92 +216,6 @@ func TestCreateLoginLink(t *testing.T) {
 	}
 	if events != 1 {
 		t.Fatalf("issued audit events = %d, want 1", events)
-	}
-}
-
-func TestPrepareFirstAdministratorWithoutFirstAdminEmailKeepsSetup(t *testing.T) {
-	sqlite, err := store.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
-	defer sqlite.Close()
-	users := auth.NewUserStore(sqlite.DB)
-	setupRequired, err := prepareFirstAdministrator("", users)
-	if err != nil || !setupRequired {
-		t.Fatalf("prepareFirstAdministrator = (%v, %v), want (true, nil)", setupRequired, err)
-	}
-	if count, _ := users.CountUsers(); count != 0 {
-		t.Fatalf("users = %d, want 0", count)
-	}
-}
-
-func TestPrepareFirstAdministratorCreatesAdministratorWhoCanUseLoginLink(t *testing.T) {
-	cfg := config.Config{
-		AuthMode:        "local",
-		AuthCodeSecret:  "0123456789abcdef0123456789abcdef",
-		DataDir:         t.TempDir(),
-		Addr:            ":7520",
-		FirstAdminEmail: "First@Example.com",
-	}
-	if err := os.MkdirAll(cfg.ControlDir(), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	sqlite, err := store.NewSQLite(cfg.ControlSQLitePath())
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
-	users := auth.NewUserStore(sqlite.DB)
-	setupRequired, err := prepareFirstAdministrator(cfg.FirstAdminEmail, users)
-	if err != nil || setupRequired {
-		t.Fatalf("prepareFirstAdministrator = (%v, %v), want (false, nil)", setupRequired, err)
-	}
-	firstAdmin, err := users.GetByEmail("first@example.com")
-	if err != nil || firstAdmin.Role != auth.RoleAdmin || firstAdmin.Status != auth.UserStatusActive {
-		t.Fatalf("firstAdmin = %+v err = %v, want active admin", firstAdmin, err)
-	}
-	// A restart with the same setting is a no-op, and still issues no setup URL.
-	setupRequired, err = prepareFirstAdministrator(cfg.FirstAdminEmail, users)
-	if err != nil || setupRequired {
-		t.Fatalf("restart prepareFirstAdministrator = (%v, %v), want (false, nil)", setupRequired, err)
-	}
-	if count, _ := users.CountUsers(); count != 1 {
-		t.Fatalf("users = %d, want 1", count)
-	}
-	if err := sqlite.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	var output bytes.Buffer
-	if err := createLoginLink(cfg, "first@example.com", &output); err != nil {
-		t.Fatalf("createLoginLink for first administrator: %v", err)
-	}
-	if !strings.Contains(output.String(), "login_token=") {
-		t.Fatalf("login link output = %q", output.String())
-	}
-}
-
-func TestPrepareFirstAdministratorRefusesDifferentAddress(t *testing.T) {
-	sqlite, err := store.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
-	defer sqlite.Close()
-	users := auth.NewUserStore(sqlite.DB)
-	if _, err := users.CreateFirstAdminWithAudit("admin@example.com", "", auth.AuditEvent{EventType: "setup.completed", Outcome: "success"}); err != nil {
-		t.Fatalf("CreateFirstAdmin: %v", err)
-	}
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	setupRequired, err := prepareFirstAdministrator(" First@Example.com", users)
-	slog.SetDefault(previous)
-	if err != nil || setupRequired {
-		t.Fatalf("prepareFirstAdministrator = (%v, %v), want (false, nil)", setupRequired, err)
-	}
-	if _, err := users.GetByEmail("first@example.com"); !errors.Is(err, auth.ErrUserNotFound) {
-		t.Fatalf("different address lookup err = %v, want ErrUserNotFound", err)
-	}
-	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "FANOUT_FIRST_ADMIN_EMAIL ignored") || !strings.Contains(out, "email=first@example.com") {
-		t.Fatalf("refusal log = %q, want a warning naming first@example.com", out)
 	}
 }
 

@@ -39,9 +39,7 @@ docker run --name fanout --restart unless-stopped -p 7520:7520 \
 ```
 
 Open the one-time setup URL printed by the container and create the first administrator. Fanout
-displays the ingest token exactly once; save it with your collector secrets. To skip the setup URL,
-set `FANOUT_FIRST_ADMIN_EMAIL` and issue the first ingest token after signing in; see
-[first boot](https://fanout.run/docs/get-started/first-boot). For later sign-in
+displays the ingest token exactly once; save it with your collector secrets. For later sign-in
 without SMTP, mint a 15-minute, single-use link against the running container's control database:
 
 ```sh
