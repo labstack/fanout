@@ -123,14 +123,18 @@ docker TAG="local":
 # Tags are CalVer: vYYYY.M.N[-alpha|-beta|-rc]; N counts every release in the month. Pushing
 # the tag triggers release.yml, which builds the multi-architecture image,
 # mirrors it to Docker Hub, publishes native archives, and moves `latest`.
+# scripts/release-notes.sh writes the release's upgrade notes, marking batch
+# format changes, control migrations and `!` breaking changes.
 
 # Tag the next CalVer release and push it.
 release:
     ./scripts/release.sh
 
-# Exercise reserved-tag retries without creating remote refs.
+# Exercise reserved-tag retries without creating remote refs, and the upgrade
+# notes that mark format-changing releases.
 release-test:
     bash ./scripts/release_test.sh
+    bash ./scripts/release-notes_test.sh
 
 # Caller tags must never replace the pinned native binding.
 duckdb-wrapper-test:

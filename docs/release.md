@@ -27,6 +27,38 @@ tags remain GHCR-only.
 Deployments should resolve public tags to immutable registry digests. Keep live
 manifests and secret profiles outside this public repository.
 
+A tag without a suffix is a stable release; `-alpha`, `-beta` and `-rc` tags are
+prereleases. Because `latest` follows both, it is not a stable channel. The
+[upgrade policy](../site/src/content/docs/docs/guides/upgrade.mdx), published at
+<https://fanout.run/docs/guides/upgrade>, sets the notice period for breaking
+changes, the route and API deprecation rules, and the same-version restore
+requirement.
+
+## Upgrade notes
+
+Every release's notes start with an **Upgrade notes** section that
+`scripts/release-notes.sh` writes during the tag workflow's `verify` job,
+before anything is published. It compares the tag with the previous
+published, non-draft GitHub Release, which the workflow lists with
+`gh release list`. A tag whose workflow failed has no release and is skipped,
+so the next published release reports its changes. The section marks:
+
+- a batch format change, read from `batchMetadataVersion` in
+  `internal/telemetry/parquet.go`, as a **Format change** caution: the release
+  cannot read earlier telemetry;
+- control migrations added under `internal/db/migrations`, which run forward
+  at startup, as a **Control schema migration**;
+- otherwise, a **Storage** line stating that neither changed;
+- merged changes whose titles carry the Conventional Commits `!` marker, under
+  **Breaking changes**.
+
+The script fails the release when it cannot read the format version, so a
+format change is never published unmarked. `just release-test` covers it. The
+section is prepended to GitHub's generated changelog; maintainers add manual
+upgrade steps and deprecation notices below it. A format-changing or breaking
+pull request should say so in its title with `!` and describe the operator
+steps in its description, so they can be copied into the notes.
+
 ## Creating a release
 
 Run `just release` from a clean, current `main`. The script:

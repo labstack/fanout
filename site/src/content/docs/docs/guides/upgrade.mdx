@@ -1,31 +1,144 @@
 ---
 title: Upgrade
-description: Replace a Fanout release and handle storage format changes.
-summary: Back up first, retain control state, and follow the target release notes.
+description: Which Fanout releases are stable, how breaking and format-changing releases are announced, and how to replace a release.
+summary: Pin a version, read every release's upgrade notes, back up first, and restore only with the version that made the backup.
 read_when:
   - You are upgrading an existing instance.
+  - You are choosing which releases to run in production.
+  - You maintain scripts or clients against Fanout's HTTP routes, MCP tools or settings.
 status: preview
 ---
+
+## Release channels
+
+Fanout versions are CalVer tags, `vYYYY.M.N` with an optional maturity suffix.
+`N` counts every release in the month, whatever its suffix. Container image
+tags omit the leading `v`: release `v2026.9.5` is image tag `2026.9.5`.
+
+| Tag | Channel | Example |
+|---|---|---|
+| No suffix | Stable | `v2026.9.5` |
+| `-rc` | Prerelease: release candidate | `v2026.9.4-rc` |
+| `-beta` | Prerelease | `v2026.9.2-beta` |
+| `-alpha` | Prerelease | `v2026.9.0-alpha` |
+
+The tag of each
+[GitHub Release](https://github.com/labstack/fanout/releases) shows its channel.
+
+Every release, stable or prerelease, is a full GitHub Release with the same
+contents: Linux and macOS archives for amd64 and arm64, a `SHA256SUMS` file,
+GitHub build-provenance attestations for each archive and for `SHA256SUMS`, and
+a multi-architecture image on GHCR with a Docker Hub mirror of the same digest.
+[Releases](https://github.com/labstack/fanout/blob/main/docs/release.md#consumer-verification)
+shows how to verify them. Fix a problem in a published version with a new
+release number, never by replacing that version. A version's image tag can
+still be pushed again, so record the digest you deploy and compare it with the
+one published for the release.
+
+The `latest` image tag and the installer's default follow the newest release
+of either channel. They are not a stable channel. To run stable releases only,
+pin a release tag without a suffix (image tag `2026.9.5` for `v2026.9.5`), or
+the image digest it resolves to, and upgrade deliberately.
+
+## Read the upgrade notes
+
+Each GitHub Release starts with an **Upgrade notes** section. The release
+workflow writes it by comparing the tag with the previous published release.
+A tag whose release workflow failed has no release and is skipped, so its
+changes are reported by the next published release:
+
+- **Format change: batch format X to Y** (a caution callout) marks a release
+  that cannot read telemetry written by earlier releases. Follow
+  [when a release changes the batch format](#when-a-release-changes-the-batch-format).
+- **Control schema migration** lists the control database migrations the
+  release adds. They run forward at startup, so rolling back means restoring a
+  backup.
+- **Storage** states that the batch format is unchanged and no migrations were
+  added, so a missing marker is never ambiguous.
+- **Breaking changes** lists the merged changes whose titles carry the
+  Conventional Commits `!` marker, for example `feat(auth)!:`.
+
+Maintainers add any manual steps below these markers. The markers compare each
+release only with the one before it. When you skip releases, read the notes of
+every release between your version and the target.
+
+A release without a generated section predates it. Its notes are
+handwritten; read them for the same changes. For example,
+[v2026.11.0-alpha](https://github.com/labstack/fanout/releases/tag/v2026.11.0-alpha)
+changes the batch format from 4 to 5.
+
+## Breaking changes and notice
+
+A breaking change is one that needs action from an operator or client after
+upgrading. That includes removing or renaming an HTTP route, a JSON field or
+query parameter, an MCP tool or its arguments, or a configuration variable;
+changing a credential format; and changing the batch format.
+
+- **Prereleases** may ship a breaking change in any release, without notice.
+  The release's upgrade notes mark it.
+- **Stable releases** announce a breaking change in the notes of an earlier
+  stable release at least 30 days before a stable release ships it. The
+  announcement names what changes, its replacement, and the earliest release
+  that may change it.
+
+Additions are not breaking: new routes, tools, optional fields and settings
+can appear in any release.
+
+## Route and API deprecation
+
+Fanout does not serve an old and a new name side by side. A rename or removal
+changes the route registration, its clients, its authorization and the
+generated [HTTP routes](/docs/reference/api) and [MCP tools](/docs/reference/mcp)
+reference in one release, with no alias or fallback.
+
+Deprecation is therefore a notice, not a transition period:
+
+1. A stable release's upgrade notes announce the deprecated route, field, tool
+   or setting, with its replacement and the earliest release that removes it.
+2. Until that release, the deprecated contract keeps working unchanged.
+3. The removing release lists the change under **Breaking changes**.
+
+Protocol-defined contracts follow their own specifications rather than this
+schedule: OTLP ingest, the MCP protocol, OAuth and the `/.well-known` metadata
+paths. Product CalVer never appears in API paths or MCP tool names.
 
 ## Upgrade an instance
 
 1. Read the target [GitHub Release](https://github.com/labstack/fanout/releases)
-   and pin its binary or image tag. Check for batch-format and API changes.
-2. Take and verify a [cold backup](/docs/guides/backup-and-restore).
+   and every release you are skipping, and pin the target's binary or image
+   tag.
+2. Take and verify a [cold backup](/docs/guides/backup-and-restore). Record the
+   running version with it.
 3. Stop Fanout and wait for it to exit.
 4. Replace the binary or image. Keep the data directory unless the release
    requires the format-change procedure below.
 5. Start Fanout. Check `/readyz`, sign-in, configured OTLP transports and
    representative queries.
 
-Pending control SQLite migrations run forward at startup. A rollback after
-migration is not assumed safe. Restore the complete pre-upgrade backup with
-the previous binary when rollback is required.
+Pending control SQLite migrations run forward, in order, at startup, so one
+upgrade can cross several releases. Migrations have no down path. A rollback
+after migration is not assumed safe.
+
+## Roll back or restore
+
+Restore a backup only with **the version that created it**. Fanout does not
+record which release wrote a data directory, so it cannot warn about a
+mismatch:
+
+- A release reads only its own batch format and refuses to start on any other.
+- An earlier release is not designed to run against a control database that a
+  later release migrated.
+
+To roll back, stop Fanout, restore the complete pre-upgrade backup, and start
+the previous binary or image. To move to a newer version after a restore,
+verify the restored instance first, then upgrade with the steps above. See
+[back up and restore](/docs/guides/backup-and-restore).
 
 ## When a release changes the batch format
 
 [v2026.11.0-alpha](https://github.com/labstack/fanout/releases/tag/v2026.11.0-alpha)
-requires batch format 5 and cannot read format 4. For that upgrade:
+requires batch format 5 and cannot read format 4. For that upgrade, and any
+release whose notes carry a **Format change** marker:
 
 1. Stop Fanout and take a complete cold backup.
 2. Move `telemetry/` and `query/` out of the data directory. Keep them together
@@ -40,8 +153,8 @@ Old telemetry is unavailable in the upgraded instance. Query state rebuilds
 from the new telemetry. Do not copy unsupported batches back into it.
 See [storage](/docs/concepts/storage) for the current format contract.
 
-This release also renames API and MCP contracts without aliases. Update scripts
-and clients using the release notes and [HTTP routes](/docs/reference/api).
+v2026.11.0-alpha also renames API and MCP contracts without aliases. Update
+scripts and clients using the release notes and [HTTP routes](/docs/reference/api).
 
 ## When a release changes credential formats
 
