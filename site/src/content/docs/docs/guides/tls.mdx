@@ -23,6 +23,68 @@ export FANOUT_TLS_KEY_FILE=/etc/fanout/tls/key.pem
 That enables TLS 1.3 on the shared listener. Browser traffic and OTLP/HTTP
 use HTTPS; gRPC uses HTTP/2 negotiated through ALPN.
 
+### Require client certificates
+
+To accept connections only from clients holding a certificate from a CA you
+choose, add a PEM bundle of those CA certificates:
+
+```sh
+export FANOUT_TLS_CLIENT_CA_FILE=/etc/fanout/tls/client-ca.pem
+```
+
+The listener then requires and verifies a client certificate on every
+handshake, for the browser, API, MCP, OTLP/HTTP and gRPC alike. TLS 1.3 and
+ALPN are unchanged. A handshake without a certificate from a listed CA fails
+before any request is read. The setting requires `FANOUT_TLS_CERT_FILE` and
+`FANOUT_TLS_KEY_FILE`; an unreadable bundle, or one with no certificates, a
+non-certificate block or an invalid certificate, fails startup and names the path.
+
+The bundle is read once at startup, so restart Fanout after changing it. To
+rotate a CA without rejecting clients, list both the old and new CA in the
+bundle until every client has a certificate from the new one, then remove the
+old CA and restart again.
+
+A typical use is
+[Cloudflare Authenticated Origin Pulls](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/),
+where Cloudflare presents a client certificate on every connection to your
+origin. Use zone-level or per-hostname pulls: you upload a client certificate
+issued by your own CA to Cloudflare, and set `FANOUT_TLS_CLIENT_CA_FILE` to
+that CA. The certificate is exclusive to your account, so the origin accepts
+only connections that Cloudflare makes on behalf of your zone or hostname.
+Connections that bypass Cloudflare are rejected.
+
+:::caution
+Do not trust the Cloudflare-provided certificate used by
+[global pulls](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/set-up/global/).
+It is shared by all Cloudflare accounts and proves only that a connection came
+from Cloudflare's network, so any Cloudflare customer's zone could reach your origin.
+:::
+
+Collectors and agents that connect directly, rather than through that proxy,
+need their own client certificate from a CA in the bundle.
+
+#### Health checks
+
+`fanout healthcheck` (the container image's `HEALTHCHECK`) connects to the same
+listener, so it also needs a client certificate. Give the probe a certificate
+and key:
+
+```sh
+export FANOUT_HEALTHCHECK_CERT_FILE=/etc/fanout/tls/healthcheck.pem
+export FANOUT_HEALTHCHECK_KEY_FILE=/etc/fanout/tls/healthcheck-key.pem
+```
+
+If you uploaded your own CA's certificate for Authenticated Origin Pulls, issue
+the probe certificate from that same CA; the bundle already trusts it.
+Otherwise, issue it from a private CA you control and append that CA to the
+bundle. Keep any CA you append dedicated to Fanout clients: the listener
+accepts every certificate it issues.
+
+The probe presents the pair only on its derived HTTPS check of `FANOUT_ADDR`;
+an explicit `fanout healthcheck <url>` does not. Both settings need
+`FANOUT_TLS_CLIENT_CA_FILE`, and supplying only one fails. Without them, the
+probe's handshake is rejected and the health check fails.
+
 ## Behind a reverse proxy
 
 Terminate at the proxy and forward to Fanout's shared port (`7520` by default). Two settings have to

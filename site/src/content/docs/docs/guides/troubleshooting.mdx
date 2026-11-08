@@ -102,9 +102,11 @@ permission error.
 
 Work down this list in order:
 
-1. **Has setup finished?** Before the first administrator exists there is no
-   ingest token to check against, and ingest rejects everything. A collector
-   started ahead of setup fails until you complete it.
+1. **Has a token been issued?** Before the first ingest token exists there is
+   nothing to check against, and ingest rejects everything. Interactive setup
+   issues the first token; an administrator created from
+   `FANOUT_FIRST_ADMIN_EMAIL` issues it from **Connect telemetry → Ingest
+   token**. A collector started earlier fails until then.
 2. **Is it the right credential, in the right header?** The ingest token is
    `foi_`-prefixed and goes in `Authorization: Bearer`. Browser sessions and MCP
    tokens are not ingest credentials.

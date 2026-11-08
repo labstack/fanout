@@ -167,6 +167,9 @@ type Config struct {
 	AuthCodeSecret string `group:"auth" env:"FANOUT_AUTH_CODE_SECRET" secret:"true"`
 	// SelfSignup allows verified email addresses to create viewer accounts; requires local auth and SMTP.
 	SelfSignup bool `group:"auth" env:"FANOUT_SELF_SIGNUP" default:"false"`
+	// FirstAdminEmail creates this address as the first active administrator when the control
+	// database has no users, instead of printing the one-time setup URL; ignored once users exist.
+	FirstAdminEmail string `group:"auth" env:"FANOUT_FIRST_ADMIN_EMAIL"`
 	// SessionIdleTTL expires inactive sessions; use a Go duration of at least 5m.
 	SessionIdleTTL time.Duration `group:"auth" env:"FANOUT_SESSION_IDLE_TTL" default:"12h"`
 	// SessionAbsoluteTTL limits total session lifetime; it must be at least FANOUT_SESSION_IDLE_TTL.
@@ -202,8 +205,14 @@ type Config struct {
 	// TLSCertFile selects the TLS certificate file; requires FANOUT_TLS_KEY_FILE.
 	TLSCertFile string `group:"server" env:"FANOUT_TLS_CERT_FILE"`
 	// TLSKeyFile selects the TLS private key file; requires FANOUT_TLS_CERT_FILE.
-	TLSKeyFile     string `group:"server" env:"FANOUT_TLS_KEY_FILE"`
-	resolvedSizing sizingSource
+	TLSKeyFile string `group:"server" env:"FANOUT_TLS_KEY_FILE"`
+	// TLSClientCAFile selects a PEM CA bundle; when set, the listener requires client certificates signed by it. Requires FANOUT_TLS_CERT_FILE and FANOUT_TLS_KEY_FILE.
+	TLSClientCAFile string `group:"server" env:"FANOUT_TLS_CLIENT_CA_FILE"`
+	// HealthcheckCertFile selects the client certificate fanout healthcheck presents; requires FANOUT_HEALTHCHECK_KEY_FILE and FANOUT_TLS_CLIENT_CA_FILE.
+	HealthcheckCertFile string `group:"server" env:"FANOUT_HEALTHCHECK_CERT_FILE"`
+	// HealthcheckKeyFile selects the private key for FANOUT_HEALTHCHECK_CERT_FILE; requires FANOUT_HEALTHCHECK_CERT_FILE.
+	HealthcheckKeyFile string `group:"server" env:"FANOUT_HEALTHCHECK_KEY_FILE"`
+	resolvedSizing     sizingSource
 }
 
 // LogStartup reports the effective non-secret sizing and security-sensitive
@@ -257,6 +266,12 @@ func (c Config) ControlSQLitePath() string {
 func (c Config) TLSEnabled() bool {
 	return strings.TrimSpace(c.TLSCertFile) != "" &&
 		strings.TrimSpace(c.TLSKeyFile) != ""
+}
+
+// ClientCertificatesRequired reports whether the TLS listener requires and
+// verifies client certificates against FANOUT_TLS_CLIENT_CA_FILE.
+func (c Config) ClientCertificatesRequired() bool {
+	return c.TLSEnabled() && strings.TrimSpace(c.TLSClientCAFile) != ""
 }
 
 // Validate checks that config values are sane.
@@ -318,6 +333,11 @@ func (c Config) Validate() error {
 	if authMode == "local" {
 		if len(strings.TrimSpace(c.AuthCodeSecret)) < 32 {
 			return fmt.Errorf("FANOUT_AUTH_CODE_SECRET must be at least 32 characters")
+		}
+	}
+	if c.FirstAdminEmail != "" {
+		if _, err := appauth.NormalizeEmail(c.FirstAdminEmail); err != nil {
+			return fmt.Errorf("FANOUT_FIRST_ADMIN_EMAIL must be a valid email address")
 		}
 	}
 	if anySet(c.SMTPHost, c.SMTPUser, c.SMTPPass, c.SMTPFrom) {
@@ -392,6 +412,17 @@ func (c Config) Validate() error {
 	}
 	if anySet(c.TLSCertFile, c.TLSKeyFile) && !c.TLSEnabled() {
 		return fmt.Errorf("FANOUT_TLS_CERT_FILE and FANOUT_TLS_KEY_FILE must both be set")
+	}
+	if anySet(c.TLSClientCAFile) && !c.TLSEnabled() {
+		return fmt.Errorf("FANOUT_TLS_CLIENT_CA_FILE requires FANOUT_TLS_CERT_FILE and FANOUT_TLS_KEY_FILE")
+	}
+	if anySet(c.HealthcheckCertFile, c.HealthcheckKeyFile) {
+		if !anySet(c.HealthcheckCertFile) || !anySet(c.HealthcheckKeyFile) {
+			return fmt.Errorf("FANOUT_HEALTHCHECK_CERT_FILE and FANOUT_HEALTHCHECK_KEY_FILE must both be set")
+		}
+		if !anySet(c.TLSClientCAFile) {
+			return fmt.Errorf("FANOUT_HEALTHCHECK_CERT_FILE and FANOUT_HEALTHCHECK_KEY_FILE require FANOUT_TLS_CLIENT_CA_FILE")
+		}
 	}
 	return nil
 }

@@ -3,10 +3,15 @@ package ingest
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,8 +34,8 @@ import (
 )
 
 func TestSharedListenerProtocols(t *testing.T) {
-	for _, secure := range []bool{false, true} {
-		t.Run(map[bool]string{false: "plaintext", true: "TLS"}[secure], func(t *testing.T) {
+	for _, mode := range []string{"plaintext", "TLS", "mutual TLS"} {
+		t.Run(mode, func(t *testing.T) {
 			f := newHTTPIngestFixture(t, true)
 			g := grpc.NewServer(GRPCServerOptions(f.store)...)
 			RegisterOTLP(g, NewServer(config.Config{}, newTestSubmitter(f.spans, f.logs, f.metrics)))
@@ -39,14 +44,23 @@ func TestSharedListenerProtocols(t *testing.T) {
 			ts := httptest.NewUnstartedServer(nil)
 			ts.Config = httpserver.New("", app, f.handler, g)
 			creds := insecure.NewCredentials()
-			if secure {
+			if mode == "plaintext" {
+				ts.Start()
+			} else {
+				var clientCertificates []tls.Certificate
+				if mode == "mutual TLS" {
+					clientCAs, clientCertificate := newTestClientCA(t)
+					httpserver.RequireClientCertificates(ts.Config, clientCAs)
+					// StartTLS replaces the server's TLS config with ts.TLS.
+					ts.TLS = ts.Config.TLSConfig.Clone()
+					clientCertificates = []tls.Certificate{clientCertificate}
+				}
 				ts.EnableHTTP2 = true
 				ts.StartTLS()
 				roots := x509.NewCertPool()
 				roots.AddCert(ts.Certificate())
-				creds = credentials.NewTLS(&tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13})
-			} else {
-				ts.Start()
+				creds = credentials.NewTLS(&tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13, Certificates: clientCertificates})
+				ts.Client().Transport.(*http.Transport).TLSClientConfig.Certificates = clientCertificates
 			}
 			defer ts.Close()
 			conn, err := grpc.NewClient(ts.Listener.Addr().String(), grpc.WithTransportCredentials(creds))
@@ -126,6 +140,96 @@ func TestSharedListenerProtocols(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The listener must refuse gRPC and HTTP handshakes that present no client
+// certificate or one from an untrusted CA when client certificates are required.
+func TestSharedListenerRejectsMissingClientCertificate(t *testing.T) {
+	f := newHTTPIngestFixture(t, true)
+	g := grpc.NewServer(GRPCServerOptions(f.store)...)
+	RegisterOTLP(g, NewServer(config.Config{}, newTestSubmitter(f.spans, f.logs, f.metrics)))
+	defer g.Stop()
+	ts := httptest.NewUnstartedServer(nil)
+	ts.Config = httpserver.New("", http.NotFoundHandler(), f.handler, g)
+	clientCAs, _ := newTestClientCA(t)
+	httpserver.RequireClientCertificates(ts.Config, clientCAs)
+	ts.TLS = ts.Config.TLSConfig.Clone()
+	ts.EnableHTTP2 = true
+	ts.StartTLS()
+	defer ts.Close()
+	if ts.TLS.MinVersion != tls.VersionTLS13 || ts.TLS.ClientAuth != tls.RequireAndVerifyClientCert {
+		t.Fatalf("TLS config = min %x auth %v", ts.TLS.MinVersion, ts.TLS.ClientAuth)
+	}
+	_, untrusted := newTestClientCA(t)
+	for name, certificates := range map[string][]tls.Certificate{"none": nil, "untrusted": {untrusted}} {
+		t.Run(name, func(t *testing.T) {
+			roots := x509.NewCertPool()
+			roots.AddCert(ts.Certificate())
+			clientTLS := &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13, Certificates: certificates}
+			conn, err := grpc.NewClient(ts.Listener.Addr().String(), grpc.WithTransportCredentials(credentials.NewTLS(clientTLS.Clone())))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+f.token)
+			if _, err := collectortrace.NewTraceServiceClient(conn).Export(ctx, testTraceRequest()); status.Code(err) != codes.Unavailable {
+				t.Fatalf("gRPC without a trusted client certificate: %v", err)
+			}
+			transport := &http.Transport{TLSClientConfig: clientTLS.Clone(), ForceAttemptHTTP2: true}
+			defer transport.CloseIdleConnections()
+			resp, err := (&http.Client{Transport: transport, Timeout: 5 * time.Second}).Get(ts.URL + "/v1/traces")
+			if err == nil {
+				_ = resp.Body.Close()
+				t.Fatalf("HTTP without a trusted client certificate: %s", resp.Status)
+			}
+		})
+	}
+	select {
+	case <-f.spans:
+		t.Fatal("rejected handshake delivered telemetry")
+	default:
+	}
+}
+
+// newTestClientCA returns a pool holding a fresh CA and a client certificate
+// that CA issued.
+func newTestClientCA(t *testing.T) (*x509.CertPool, tls.Certificate) {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test client CA"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "test client"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	clientDER, err := x509.CreateCertificate(rand.Reader, clientTemplate, ca, &clientKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(ca)
+	return pool, tls.Certificate{Certificate: [][]byte{clientDER}, PrivateKey: clientKey}
 }
 
 type blockedExport struct{ started, release chan struct{} }
