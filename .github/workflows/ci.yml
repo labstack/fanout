@@ -181,15 +181,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Split by viewport so each half stays well inside the global timeout.
-          - group: smoke and accessibility (1100)
-            slug: smoke-1100
+          # The MCP host specs take most of the smoke time, so they run apart
+          # from the app viewports and each half stays well inside the timeout.
+          - group: smoke and accessibility (app)
+            slug: smoke-app
             skip_performance: "1"
-            args: --project=app-1100-light --project=app-1100-dark --project=mcp
-          - group: smoke and accessibility (1440)
-            slug: smoke-1440
+            args: --project=app-1100-light --project=app-1100-dark --project=app-1440-light --project=app-1440-dark
+          - group: smoke and accessibility (MCP)
+            slug: smoke-mcp
             skip_performance: "1"
-            args: --project=app-1440-light --project=app-1440-dark
+            args: --project=mcp
           - group: performance
             slug: performance
             skip_performance: ""
