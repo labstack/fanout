@@ -1,9 +1,9 @@
-import { createLabstackTheme } from "@labstack/ui";
+import { buildTheme } from "@labstack/ui";
 
 /* Fanout uses the shared library's default look unchanged: ink actions, the
  * violet accent, status ramps, surfaces, compact controls and Geist. Brand
  * inputs belong here only when Fanout needs to differ from that default. */
-const shared = createLabstackTheme();
+const shared = buildTheme();
 
 export const fanoutTheme = shared.theme;
 export const fanoutCssVariables = shared.cssVariablesResolver;

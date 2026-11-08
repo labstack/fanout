@@ -1,4 +1,4 @@
-import { DataState, Notice, PageHeader, labstackContentWidths } from "@labstack/ui";
+import { DataState, Notice, PageHeader, defaultContentWidths } from "@labstack/ui";
 import type { Message } from "@ag-ui/client";
 import { ActionIcon, Box, Button, Container, Group, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
 import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight, ArrowDown } from "@phosphor-icons/react";
@@ -245,7 +245,7 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
   return <Stack align="center" gap="md" pt={{ base: 32, sm: 88 }} pb="xl" ta="center">
     <BrandMark size="large" />
     <Title order={2} fz={24} fw={500} lh={1.25} maw={560}>What do you want to know about your system?</Title>
-    <Group justify="center" gap="xs" mt="xs" maw={labstackContentWidths.prose}>
+    <Group justify="center" gap="xs" mt="xs" maw={defaultContentWidths.prose}>
       {suggestions.map((suggestion) => <Button key={suggestion} variant="default" size="sm" onClick={() => void onSelect(suggestion)}>{suggestion}</Button>)}
     </Group>
   </Stack>;

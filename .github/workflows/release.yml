@@ -60,6 +60,25 @@ jobs:
               exit 1
             fi
           done <<< "${tags}"
+      # Before anything is published, so an unreadable batch format stops the
+      # release instead of leaving a format change unmarked.
+      - name: Write upgrade notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Compare with the previous published release, not the previous tag:
+          # a tag whose release failed has no notes to carry its changes.
+          gh release list --repo "${GITHUB_REPOSITORY}" --exclude-drafts --limit 1000 \
+            --json tagName --jq '.[].tagName' > "${RUNNER_TEMP}/published-tags"
+          bash scripts/release-notes.sh "${GITHUB_REF_NAME}" \
+            < "${RUNNER_TEMP}/published-tags" > "${RUNNER_TEMP}/upgrade-notes.md"
+          cat "${RUNNER_TEMP}/upgrade-notes.md"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: upgrade-notes
+          path: ${{ runner.temp }}/upgrade-notes.md
+          if-no-files-found: error
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -285,6 +304,10 @@ jobs:
           path: artifacts
           pattern: fanout_*
           merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: upgrade-notes
+          path: notes
       - name: Checksum every archive
         run: |
           set -euo pipefail
@@ -302,8 +325,11 @@ jobs:
         run: |
           set -euo pipefail
           # Maturity lives in the tag; keep this a full release so /releases/latest resolves.
+          # The upgrade notes from scripts/release-notes.sh are prepended to
+          # GitHub's generated changelog.
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
+            --notes "$(cat notes/upgrade-notes.md)" \
             --generate-notes \
             --verify-tag \
             artifacts/fanout_*.tar.gz artifacts/SHA256SUMS

@@ -11,3 +11,4 @@
 - [ ] User-facing behavior and configuration docs are current
 - [ ] No credentials, private telemetry, host details, or enterprise-only source are included
 - [ ] API, migration, ingest, MCP/AG-UI, or release-contract changes are called out
+- [ ] Breaking or batch-format changes carry `!` in the title, for the release's upgrade notes
