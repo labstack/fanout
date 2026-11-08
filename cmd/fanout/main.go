@@ -194,6 +194,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	smtpCfg := auth.SMTPConfig{
+		Host: cfg.SMTPHost,
+		Port: cfg.SMTPPort,
+		User: cfg.SMTPUser,
+		Pass: cfg.SMTPPass,
+		From: cfg.SMTPFrom,
+	}
+
 	// Start alert engine
 	var alertStore *alert.Store
 	var alertEngine *alert.Engine
@@ -204,6 +212,18 @@ func main() {
 			cfg.AlertEvaluationInterval,
 			cfg.AlertHistoryDays,
 		)
+		if cfg.SMTPConfigured() {
+			defaults, err := cfg.AlertEmailDefaults()
+			if err != nil {
+				slog.Error("alert email defaults invalid", "err", err)
+				os.Exit(1)
+			}
+			alertEngine.EnableEmail(alert.EmailConfig{
+				Send:        func(ctx context.Context, mail auth.AlertMail) error { return auth.SendAlert(ctx, smtpCfg, mail) },
+				Defaults:    defaults,
+				HourlyLimit: cfg.AlertEmailHourlyLimit,
+			})
+		}
 		go alertEngine.Run(ctx)
 		slog.Info("alert engine enabled", "interval", cfg.AlertEvaluationInterval)
 	}
@@ -299,13 +319,6 @@ func main() {
 	api.RegisterAlertRoutes(e, alertStore, alertEngine)
 
 	// Auth routes (web-only setup + email-code login)
-	smtpCfg := auth.SMTPConfig{
-		Host: cfg.SMTPHost,
-		Port: cfg.SMTPPort,
-		User: cfg.SMTPUser,
-		Pass: cfg.SMTPPass,
-		From: cfg.SMTPFrom,
-	}
 	codeStore := auth.NewCodeStore(sqlite.DB, cfg.AuthCodeSecret)
 	api.RegisterAuthRoutes(e, userStore, codeStore, setup, settingsStore, browserSessions, auditStore, smtpCfg, cfg)
 	oidcDiscovery, err := api.RegisterOIDCRoutes(ctx, e, cfg, userStore, identityStore, browserSessions, auditStore)

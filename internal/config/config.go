@@ -135,6 +135,10 @@ type Config struct {
 	AlertEvaluationInterval time.Duration `group:"alerts" env:"FANOUT_ALERTS_EVALUATION_INTERVAL" default:"30s"`
 	// AlertHistoryDays sets alert history retention in days.
 	AlertHistoryDays int `group:"alerts" env:"FANOUT_ALERTS_HISTORY_DAYS" default:"7"`
+	// AlertEmailDefaultTo is a comma-separated list of addresses that receive alerts from rules with no webhook and no email recipients of their own; requires SMTP.
+	AlertEmailDefaultTo string `group:"alerts" env:"FANOUT_ALERTS_EMAIL_DEFAULT_TO"`
+	// AlertEmailHourlyLimit caps the alert emails sent to one address in any rolling hour, across all rules. Notifications over the limit are suppressed, not delayed, and shown on the rule; 0 suppresses all alert email.
+	AlertEmailHourlyLimit int `group:"alerts" env:"FANOUT_ALERTS_EMAIL_HOURLY_LIMIT" default:"30"`
 	// AIProvider enables chat by selecting exactly anthropic or openai. Empty disables chat.
 	AIProvider string `group:"ai" env:"FANOUT_AI_PROVIDER" default:""`
 	// AIModel overrides the provider's default: claude-sonnet-5-5 for Anthropic
@@ -336,6 +340,9 @@ func (c Config) Validate() error {
 	if c.AlertHistoryDays < 0 {
 		return fmt.Errorf("FANOUT_ALERTS_HISTORY_DAYS must be >= 0, got %d", c.AlertHistoryDays)
 	}
+	if c.AlertEmailHourlyLimit < 0 {
+		return fmt.Errorf("FANOUT_ALERTS_EMAIL_HOURLY_LIMIT must be >= 0, got %d", c.AlertEmailHourlyLimit)
+	}
 	if c.MCPEnabled {
 		u, err := url.Parse(c.MCPResourceURL())
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "/mcp" || u.RawQuery != "" || u.Fragment != "" {
@@ -368,6 +375,14 @@ func (c Config) Validate() error {
 		}
 		if c.SMTPPort <= 0 {
 			return fmt.Errorf("FANOUT_SMTP_PORT must be > 0")
+		}
+	}
+	if anySet(c.AlertEmailDefaultTo) {
+		if !c.SMTPConfigured() {
+			return fmt.Errorf("FANOUT_ALERTS_EMAIL_DEFAULT_TO requires SMTP")
+		}
+		if _, err := c.AlertEmailDefaults(); err != nil {
+			return fmt.Errorf("FANOUT_ALERTS_EMAIL_DEFAULT_TO: %w", err)
 		}
 	}
 	if c.SelfSignup {
@@ -521,6 +536,14 @@ func (c Config) AIBaseURL() string {
 		return provider.defaultBaseURL
 	}
 	return strings.TrimRight(strings.TrimSpace(baseURL), "/")
+}
+
+// AlertEmailDefaults returns the normalized default alert email destination.
+func (c Config) AlertEmailDefaults() ([]string, error) {
+	if !anySet(c.AlertEmailDefaultTo) {
+		return nil, nil
+	}
+	return appauth.NormalizeRecipients(strings.Split(c.AlertEmailDefaultTo, ","))
 }
 
 func csvContains(value, target string) bool {

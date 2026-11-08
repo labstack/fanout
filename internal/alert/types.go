@@ -18,8 +18,16 @@ type Rule struct {
 	WebhookHeaders  string `json:"webhook_headers,omitempty"`
 	WebhookTemplate string `json:"webhook_template,omitempty"`
 	NotifyOnResolve bool   `json:"notify_on_resolve"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	// EmailRecipients are this rule's own addresses. Empty means none: the
+	// default destination then applies if the rule has no webhook either.
+	EmailRecipients []string `json:"email_recipients,omitempty"`
+	// EmailStatus reports the rule's latest email notification: sent, retrying,
+	// failed, suppressed, or unavailable. The server owns these three fields.
+	EmailStatus       string `json:"email_status,omitempty"`
+	EmailStatusDetail string `json:"email_status_detail,omitempty"`
+	EmailStatusAt     string `json:"email_status_at,omitempty"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 // Alert represents the current state of an alert instance for a (rule, service) pair.

@@ -11,8 +11,8 @@ SELECT * FROM alert_rules WHERE enabled = 1 ORDER BY created_at DESC;
 INSERT INTO alert_rules (
     id, name, description, enabled, service, namespace, expression,
     for_seconds, cooldown_s, repeat_interval_s, webhook_url,
-    webhook_headers, webhook_template, notify_on_resolve
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    webhook_headers, webhook_template, notify_on_resolve, email_recipients
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: ReplaceRule :one
@@ -20,7 +20,7 @@ UPDATE alert_rules SET
     name = ?, description = ?, enabled = ?, service = ?, namespace = ?,
     expression = ?, for_seconds = ?, cooldown_s = ?, repeat_interval_s = ?,
     webhook_url = ?, webhook_headers = ?, webhook_template = ?,
-    notify_on_resolve = ?, updated_at = datetime('now')
+    notify_on_resolve = ?, email_recipients = ?, updated_at = datetime('now')
 WHERE id = ?
 RETURNING *;
 

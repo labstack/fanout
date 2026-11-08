@@ -28,6 +28,14 @@ function ruleQuery(rule: Pick<Rule, "service" | "expression">): string {
 /** Rules read per-service rollups with error_rate from 0 to 1; Explore reads raw telemetry and shows percent. */
 const exploreNote = "Open in Explore charts raw telemetry, so values can differ slightly from a rule's rollups. Explore shows error rate as a percent: a rule's 0.05 is 5 there.";
 
+/** Email outcomes that need attention on a rule; a sent email does not. */
+const emailIssues: Record<string, { tone: "danger" | "warning"; label: string }> = {
+  failed: { tone: "danger", label: "Email failed" },
+  unavailable: { tone: "danger", label: "Email unavailable" },
+  suppressed: { tone: "warning", label: "Email suppressed" },
+  retrying: { tone: "warning", label: "Email retrying" },
+};
+
 /** Alert rules and their history (proposal 0004, section 4); works without chat. */
 export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
   const client = useQueryClient();
@@ -80,7 +88,8 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
           <Table.Tbody>{rules.data?.map(rule => {
             const now = active(rule);
             return <Table.Tr key={rule.id}>
-              <Table.Td><Text size="sm" fw={500}>{rule.name}</Text>{rule.description && <Text size="xs" c="dimmed">{rule.description}</Text>}</Table.Td>
+              <Table.Td><Text size="sm" fw={500}>{rule.name}</Text>{rule.description && <Text size="xs" c="dimmed">{rule.description}</Text>}
+                {rule.email_status && emailIssues[rule.email_status] && <Group gap={6} mt={4} role="status"><StatusBadge tone={emailIssues[rule.email_status].tone}>{emailIssues[rule.email_status].label}</StatusBadge>{rule.email_status_detail && <Text size="xs" c="dimmed">{rule.email_status_detail}</Text>}</Group>}</Table.Td>
               <Table.Td><Text size="sm">{rule.service || "All services"}</Text></Table.Td>
               <Table.Td><Text size="xs" ff="monospace">{rule.expression}</Text>
                 <Button size="compact-xs" variant="subtle" px={0} onClick={() => onExplore(ruleQuery(rule))}>Open in Explore</Button></Table.Td>
@@ -141,6 +150,6 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
 }
 
 function draftFields(rule: Rule): RuleDraft {
-  const { id: _id, created_at: _created, updated_at: _updated, ...draft } = rule;
+  const { id: _id, created_at: _created, updated_at: _updated, email_status: _status, email_status_detail: _detail, email_status_at: _at, ...draft } = rule;
   return draft;
 }

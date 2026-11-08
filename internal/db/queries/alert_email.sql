@@ -1,0 +1,43 @@
+-- name: InsertAlertEmailDelivery :exec
+INSERT INTO alert_email_deliveries (
+    id, notification_id, rule_id, alert_id, recipient, content, next_attempt_at, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListDueAlertEmailDeliveries :many
+SELECT * FROM alert_email_deliveries
+WHERE status = 'pending' AND next_attempt_at <= ?
+ORDER BY next_attempt_at, id
+LIMIT ?;
+
+-- name: ListOpenAlertEmailDeliveries :many
+SELECT * FROM alert_email_deliveries WHERE status IN ('pending', 'sending') ORDER BY id;
+
+-- name: ListAlertEmailDeliveriesByNotification :many
+SELECT * FROM alert_email_deliveries WHERE notification_id = ? ORDER BY id;
+
+-- name: ListSendingAlertEmailDeliveries :many
+SELECT * FROM alert_email_deliveries WHERE status = 'sending' ORDER BY id;
+
+-- name: ClaimAlertEmailDelivery :execrows
+UPDATE alert_email_deliveries SET status = 'sending', attempts = attempts + 1 WHERE id = ? AND status = 'pending';
+
+-- name: DeleteAlertEmailDelivery :exec
+DELETE FROM alert_email_deliveries WHERE id = ?;
+
+-- name: FinishAlertEmailDelivery :exec
+UPDATE alert_email_deliveries SET status = ?, last_error = ?, next_attempt_at = ? WHERE id = ?;
+
+-- name: RecordAlertEmailSend :exec
+INSERT INTO alert_email_sends (id, recipient, sent_at) VALUES (?, ?, ?);
+
+-- name: CountAlertEmailSendsSince :one
+SELECT COUNT(*) FROM alert_email_sends WHERE recipient = ? AND sent_at >= ?;
+
+-- name: PruneAlertEmailSends :exec
+DELETE FROM alert_email_sends WHERE sent_at < ?;
+
+-- name: PruneAlertEmailDeliveries :execresult
+DELETE FROM alert_email_deliveries WHERE status IN ('sent', 'failed', 'suppressed') AND created_at < ?;
+
+-- name: UpdateRuleEmailStatus :exec
+UPDATE alert_rules SET email_status = ?, email_status_detail = ?, email_status_at = ? WHERE id = ?;
