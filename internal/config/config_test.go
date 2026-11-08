@@ -306,6 +306,20 @@ func TestValidate(t *testing.T) {
 		{"trusted proxy invalid CIDR", func(c *Config) { c.TrustedProxyCIDRs = "private-network" }},
 		{"TLS partial cert", func(c *Config) { c.TLSCertFile = "server.pem" }},
 		{"TLS partial key", func(c *Config) { c.TLSKeyFile = "server-key.pem" }},
+		{"TLS client CA without TLS", func(c *Config) { c.TLSClientCAFile = "client-ca.pem" }},
+		{"TLS client CA without key", func(c *Config) { c.TLSCertFile = "server.pem"; c.TLSClientCAFile = "client-ca.pem" }},
+		{"healthcheck cert without key", func(c *Config) {
+			c.TLSCertFile, c.TLSKeyFile, c.TLSClientCAFile = "server.pem", "server-key.pem", "client-ca.pem"
+			c.HealthcheckCertFile = "probe.pem"
+		}},
+		{"healthcheck key without cert", func(c *Config) {
+			c.TLSCertFile, c.TLSKeyFile, c.TLSClientCAFile = "server.pem", "server-key.pem", "client-ca.pem"
+			c.HealthcheckKeyFile = "probe-key.pem"
+		}},
+		{"healthcheck pair without client CA", func(c *Config) {
+			c.TLSCertFile, c.TLSKeyFile = "server.pem", "server-key.pem"
+			c.HealthcheckCertFile, c.HealthcheckKeyFile = "probe.pem", "probe-key.pem"
+		}},
 	}
 
 	for _, tc := range tests {
@@ -412,6 +426,24 @@ func TestValidate(t *testing.T) {
 		}
 		if !c.TLSEnabled() {
 			t.Error("TLSEnabled = false, want true")
+		}
+		if c.ClientCertificatesRequired() {
+			t.Error("ClientCertificatesRequired = true without FANOUT_TLS_CLIENT_CA_FILE")
+		}
+	})
+
+	t.Run("TLS_client_CA_valid", func(t *testing.T) {
+		c := valid
+		c.TLSCertFile, c.TLSKeyFile, c.TLSClientCAFile = "server.pem", "server-key.pem", "client-ca.pem"
+		if err := c.Validate(); err != nil {
+			t.Errorf("client CA config should be valid: %v", err)
+		}
+		if !c.ClientCertificatesRequired() {
+			t.Error("ClientCertificatesRequired = false, want true")
+		}
+		c.HealthcheckCertFile, c.HealthcheckKeyFile = "probe.pem", "probe-key.pem"
+		if err := c.Validate(); err != nil {
+			t.Errorf("healthcheck client certificate config should be valid: %v", err)
 		}
 	})
 }
