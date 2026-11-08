@@ -74,11 +74,17 @@ export FANOUT_HEALTHCHECK_CERT_FILE=/etc/fanout/tls/healthcheck.pem
 export FANOUT_HEALTHCHECK_KEY_FILE=/etc/fanout/tls/healthcheck-key.pem
 ```
 
-If you uploaded your own CA's certificate for Authenticated Origin Pulls, issue
-the probe certificate from that same CA; the bundle already trusts it.
-Otherwise, issue it from a private CA you control and append that CA to the
-bundle. Keep any CA you append dedicated to Fanout clients: the listener
-accepts every certificate it issues.
+Issue the probe certificate from a private CA used only by this host, and append
+that CA to this host's `FANOUT_TLS_CLIENT_CA_FILE` bundle next to your
+Authenticated Origin Pulls CA. Keep any CA you append dedicated to Fanout
+clients: the listener accepts every certificate it issues. Reusing the
+Authenticated Origin Pulls CA for the probe is acceptable only if this is the
+sole host that trusts it.
+
+:::caution
+A probe key from a CA that several hosts trust would pass the client certificate
+check on all of them.
+:::
 
 The probe presents the pair only on its derived HTTPS check of `FANOUT_ADDR`;
 an explicit `fanout healthcheck <url>` does not. Both settings need
