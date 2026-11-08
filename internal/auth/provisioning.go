@@ -149,14 +149,15 @@ type UserChange struct {
 // UpdateProvisioned applies a directory update in one write transaction,
 // including the last-active-administrator check. A change to the current state
 // is reported with changed false and writes nothing, so it is safe to repeat.
-// Suspending also revokes the user's OAuth tokens, which a later reactivation
-// does not restore. The identity link is never touched.
+// The exception is repeating a suspension while a session or OAuth credential
+// is still live: those are removed and audited. The identity link is never
+// touched.
 func (s *UserStore) UpdateProvisioned(id string, change UserChange, source AuditEvent) (User, bool, error) {
 	event := source
 	event.Outcome = "success"
 	return s.applyUpdate(id, change.Email, change.DisplayName, change.Role, change.Status, &event, userUpdateOptions{
-		skipUnchanged:        true,
-		revokeOAuthOnSuspend: true,
+		skipUnchanged:     true,
+		convergeSuspended: true,
 		describe: func(before, after User, event *AuditEvent) {
 			event.EventType, event.Metadata = describeProvisionedUpdate(before, after, source.Metadata)
 		},
@@ -186,6 +187,10 @@ func describeProvisionedUpdate(before, after User, base map[string]any) (AuditEv
 
 	eventType := AuditEventType("user.updated")
 	switch {
+	case len(changed) == 0:
+		// Only a repeated suspension that found live access gets here.
+		eventType = "session.revoked"
+		fields["reason"] = "repeated_suspension"
 	case before.Status == UserStatusActive && after.Status != UserStatusActive:
 		eventType = "user.suspended"
 	case before.Status != UserStatusActive && after.Status == UserStatusActive:

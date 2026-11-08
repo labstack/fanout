@@ -86,8 +86,8 @@ roles with `PATCH /api/users/{id}/role` and `{"role":"viewer"}`. Suspend with
 `PATCH /api/users/{id}/status` and `{"status":"suspended"}`; restore with
 `{"status":"active"}`. Unknown fields and invalid statuses return `400`.
 Email, role and status changes revoke browser sessions. Suspension blocks local
-and OIDC sign-in and OAuth token use. Reactivation does not restore revoked
-sessions. The last active administrator cannot be demoted, suspended or deleted.
+and OIDC sign-in and revokes the user's OAuth tokens. Reactivation restores
+neither sessions nor tokens. The last active administrator cannot be demoted, suspended or deleted.
 
 `GET /api/users` returns a `users` array. `DELETE /api/users/{id}` removes an
 account and cascades to its sessions, OAuth grants and owned dashboards. Use

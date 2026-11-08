@@ -144,7 +144,8 @@ when there are no users.
   `{"status":"active"}`.
 
 Unknown fields return `400`. Email, role, and status changes revoke browser
-sessions. Suspension also blocks sign-in and OAuth token use. Demotion,
+sessions. Suspension also blocks sign-in and revokes the user's OAuth tokens
+and pending authorization codes; reactivation does not restore them. Demotion,
 suspension, and deletion cannot remove the last active administrator.
 The first-run `POST /api/auth/setup` request uses `display_name` alongside
 `email` and `setup_token`.
@@ -379,7 +380,12 @@ runs in the same write transaction as the update.
 Deactivation suspends the account. In one transaction it revokes the user's
 browser sessions, revokes their MCP OAuth access and refresh tokens, and deletes
 their pending OAuth authorization codes. Reactivation restores none of these, so
-the user signs in and connects MCP clients again.
+the user signs in and connects MCP clients again. Deactivating an account that
+is already suspended removes anything still live and writes a `session.revoked`
+event; if nothing is live it writes nothing.
+
+Requests to `/scim/v2` are logged without their query string, because a filter
+holds an email address or subject.
 
 Every change writes an audit event: `user.provisioned` and `identity.linked` on
 creation, then `user.suspended`, `user.reactivated`, `role.changed` or

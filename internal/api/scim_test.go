@@ -620,6 +620,195 @@ func TestSCIMDoesNotLogToken(t *testing.T) {
 	}
 }
 
+func TestSCIMFilterValuesAreNotLogged(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlite.Close() })
+	cfg := scimTestConfig()
+	users := auth.NewUserStore(sqlite.DB)
+	sessions := auth.NewBrowserSessions(sqlite.DB, 12*time.Hour, 7*24*time.Hour, false)
+	e := echo.New()
+	e.HTTPErrorHandler = HTTPErrorHandler
+	// The logger is outermost, as in production, so refused requests count.
+	e.Use(RequestLogger())
+	RegisterAuthMiddleware(e, users, sessions, auth.NewAuditStore(sqlite.DB), cfg)
+	RegisterSCIMRoutes(e, cfg, users, auth.NewIdentityStore(sqlite.DB))
+
+	for _, filter := range []string{`userName eq "person@example.com"`, `externalId eq "opaque-subject-value"`} {
+		target := scimUsersPath + "?filter=" + url.QueryEscape(filter)
+		if rec := serve(t, e, http.MethodGet, target, "", scimHeaders()); rec.Code != http.StatusOK {
+			t.Fatalf("filter = %d %s", rec.Code, rec.Body.String())
+		}
+		if rec := serve(t, e, http.MethodGet, target, "", nil); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated filter = %d", rec.Code)
+		}
+	}
+	logged := logs.String()
+	if !strings.Contains(logged, "uri="+scimUsersPath) {
+		t.Fatalf("request was not logged: %s", logged)
+	}
+	for _, secret := range []string{"person", "example.com", "opaque-subject-value", "filter"} {
+		if strings.Contains(logged, secret) {
+			t.Fatalf("%q reached the log: %s", secret, logged)
+		}
+	}
+}
+
+func TestLoggedRequestURI(t *testing.T) {
+	for _, tc := range []struct{ path, uri, want string }{
+		{"/api/auth/link/verify", "/api/auth/link/verify?token=secret&x=1", "/api/auth/link/verify?token=REDACTED&x=1"},
+		{"/api/traces", "/api/traces?limit=5", "/api/traces?limit=5"},
+		{scimUsersPath, scimUsersPath + "?filter=abc&token=def", scimUsersPath},
+	} {
+		if got := loggedRequestURI(tc.path, tc.uri); got != tc.want {
+			t.Errorf("loggedRequestURI(%q) = %q, want %q", tc.uri, got, tc.want)
+		}
+	}
+}
+
+// issueMCPGrant returns credentials for the signed-in user: request headers
+// carrying its access token and the form that refreshes it.
+func issueMCPGrant(t *testing.T, e *echo.Echo, cookie *http.Cookie) (map[string]string, string) {
+	t.Helper()
+	client := registerOAuthClient(t, e)
+	verifier, challenge := pkcePair()
+	code := approveAndGetCode(t, e, authorizeParams(client.ClientID, mcpReadScope, challenge), cookie)
+	tokens := decodeTokens(t, exchangeCode(t, e, client.ClientID, code, testRedirectURI, verifier))
+	form := url.Values{"grant_type": {"refresh_token"}, "client_id": {client.ClientID}, "refresh_token": {tokens["refresh_token"].(string)}}.Encode()
+	return map[string]string{"Authorization": "Bearer " + tokens["access_token"].(string)}, form
+}
+
+func assertMCPRejected(t *testing.T, e *echo.Echo, stage string, bearer map[string]string, form string) {
+	t.Helper()
+	if rec := serve(t, e, http.MethodPost, "/mcp", testReadMCPCall, bearer); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("%s: MCP access token = %d %s, want 401", stage, rec.Code, rec.Body.String())
+	}
+	rec := serve(t, e, http.MethodPost, "/oauth/token", form, formHeaders)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_grant") {
+		t.Fatalf("%s: refresh = %d %s, want invalid_grant", stage, rec.Code, rec.Body.String())
+	}
+}
+
+func (s *scimServer) count(t *testing.T, query string, args ...any) int {
+	t.Helper()
+	var count int
+	if err := s.db.DB.QueryRow(query, args...).Scan(&count); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	return count
+}
+
+// signedInMember creates an administrator's account and a member with a live
+// browser session.
+func (s *scimServer) signedInMember(t *testing.T) (auth.User, *http.Cookie, auth.User, *http.Cookie) {
+	t.Helper()
+	ownerResource := s.seed(t, "owner", "owner@example.com", "admin")
+	memberResource := s.seed(t, "member", "member@example.com", "admin")
+	owner, err := s.users.GetByID(ownerResource.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	member, err := s.users.GetByID(memberResource.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	return owner, oauthCookieForUser(t, s.e, owner), member, oauthCookieForUser(t, s.e, member)
+}
+
+func TestBrowserSuspensionRevokesMCPTokens(t *testing.T) {
+	s := newSCIMServer(t)
+	RegisterUserRoutes(s.e, s.users, auth.SMTPConfig{}, scimTestConfig())
+	_, ownerCookie, member, memberCookie := s.signedInMember(t)
+	probed, probedForm := issueMCPGrant(t, s.e, memberCookie)
+	unused, unusedForm := issueMCPGrant(t, s.e, memberCookie)
+
+	setStatus := func(status string) {
+		t.Helper()
+		headers := map[string]string{"Content-Type": "application/json", "Fanout-Request": "1"}
+		rec := serve(t, s.e, http.MethodPatch, "/api/users/"+member.ID+"/status", `{"status":"`+status+`"}`, headers, ownerCookie)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("set status %s = %d %s", status, rec.Code, rec.Body.String())
+		}
+	}
+	setStatus("suspended")
+	assertMCPRejected(t, s.e, "after suspension", probed, probedForm)
+	if got := s.count(t, `SELECT COUNT(*) FROM oauth_tokens WHERE user_id = ? AND revoked_at IS NULL`, member.ID); got != 0 {
+		t.Fatalf("live tokens after suspension = %d, want 0", got)
+	}
+	setStatus("active")
+	assertMCPRejected(t, s.e, "after reactivation", unused, unusedForm)
+}
+
+func TestSCIMRepeatDeactivationRemovesRemainingAccess(t *testing.T) {
+	s := newSCIMServer(t)
+	_, _, member, memberCookie := s.signedInMember(t)
+	bearer, form := issueMCPGrant(t, s.e, memberCookie)
+	client := registerOAuthClient(t, s.e)
+	_, challenge := pkcePair()
+	approveAndGetCode(t, s.e, authorizeParams(client.ClientID, mcpReadScope, challenge), memberCookie)
+
+	// An account suspended without revocation still holds all three.
+	if _, err := s.db.DB.Exec(`UPDATE users SET status = 'suspended' WHERE id = ?`, member.ID); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	remaining := map[string]string{
+		"sessions": `SELECT COUNT(*) FROM sessions WHERE user_id = ?`,
+		"tokens":   `SELECT COUNT(*) FROM oauth_tokens WHERE user_id = ? AND revoked_at IS NULL`,
+		"codes":    `SELECT COUNT(*) FROM oauth_authorization_codes WHERE user_id = ?`,
+	}
+	for name, query := range remaining {
+		if s.count(t, query, member.ID) == 0 {
+			t.Fatalf("fixture has no live %s", name)
+		}
+	}
+
+	path := scimUsersPath + "/" + member.ID
+	body := scimPatchBody(`{"op":"replace","path":"active","value":false}`)
+	if rec := s.do(t, http.MethodPatch, path, body); rec.Code != http.StatusOK || decodeSCIMResource(t, rec).Active {
+		t.Fatalf("repeat deactivation = %d %s", rec.Code, rec.Body.String())
+	}
+	for name, query := range remaining {
+		if got := s.count(t, query, member.ID); got != 0 {
+			t.Fatalf("live %s after repeat = %d, want 0", name, got)
+		}
+	}
+	assertMCPRejected(t, s.e, "after repeat", bearer, form)
+	if got := s.auditCount(t, "session.revoked", member.ID); got != 1 {
+		t.Fatalf("session.revoked events = %d, want 1", got)
+	}
+
+	if rec := s.do(t, http.MethodPatch, path, body); rec.Code != http.StatusOK {
+		t.Fatalf("second repeat = %d %s", rec.Code, rec.Body.String())
+	}
+	if got := s.auditCount(t, "session.revoked", member.ID); got != 1 {
+		t.Fatalf("a repeat with nothing live wrote an event: %d", got)
+	}
+}
+
+// Revocation is not the only defense: these credentials are never revoked.
+func TestSuspendedUserIsRejectedWithoutRevocation(t *testing.T) {
+	s := newSCIMServer(t)
+	_, _, member, memberCookie := s.signedInMember(t)
+	bearer, form := issueMCPGrant(t, s.e, memberCookie)
+	if _, err := s.db.DB.Exec(`UPDATE users SET status = 'suspended' WHERE id = ?`, member.ID); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	if got := s.count(t, `SELECT COUNT(*) FROM oauth_tokens WHERE user_id = ? AND revoked_at IS NULL`, member.ID); got == 0 {
+		t.Fatal("fixture expected live tokens")
+	}
+	if rec := serve(t, s.e, http.MethodGet, "/api/auth/me", "", nil, memberCookie); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("session = %d, want 401", rec.Code)
+	}
+	assertMCPRejected(t, s.e, "suspended without revocation", bearer, form)
+}
+
 func TestSCIMRoutesAbsentWithoutToken(t *testing.T) {
 	cfg := scimTestConfig()
 	cfg.SCIMToken = ""

@@ -347,3 +347,25 @@ func TestUpdateProvisionedSuspensionRevokesOAuthAndKeepsIdentity(t *testing.T) {
 		t.Fatalf("live tokens after reactivation = %d, want 0", got)
 	}
 }
+
+func TestAdministratorSuspensionRevokesOAuth(t *testing.T) {
+	db := fileSQLite(t)
+	users := NewUserStore(db.DB)
+	user, err := users.CreateWithAudit("member@example.com", "", RoleViewer, AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := db.DB.Exec(`INSERT INTO oauth_clients (client_id, client_name, redirect_uris_json, grant_types_json, response_types_json, token_endpoint_auth_method, created_at) VALUES ('client-1', 'Client', '[]', '[]', '[]', 'none', 1)`); err != nil {
+		t.Fatalf("insert client: %v", err)
+	}
+	if _, err := db.DB.Exec(`INSERT INTO oauth_tokens (token_hash, kind, client_id, user_id, scope, resource, expires_at, created_at, family_id) VALUES ('hash-1', 'access', 'client-1', ?, 's', 'res', 9999999999, 1, 'family-1')`, user.ID); err != nil {
+		t.Fatalf("insert token: %v", err)
+	}
+	status := UserStatusSuspended
+	if _, err := users.UpdateWithAudit(user.ID, nil, nil, nil, &status, AuditEvent{EventType: "user.suspended", Outcome: "success"}); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM oauth_tokens WHERE user_id = ? AND revoked_at IS NULL`, user.ID); got != 0 {
+		t.Fatalf("live tokens = %d, want 0", got)
+	}
+}

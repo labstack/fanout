@@ -203,10 +203,9 @@ type userUpdateOptions struct {
 	// session or token revocation and no audit event, so a provisioner can
 	// resend the same state.
 	skipUnchanged bool
-	// revokeOAuthOnSuspend revokes the user's OAuth tokens and authorization
-	// codes when the account leaves the active state, so a later reactivation
-	// cannot bring them back.
-	revokeOAuthOnSuspend bool
+	// convergeSuspended makes a repeated suspension of an already-suspended
+	// account remove any browser session or OAuth credential still live.
+	convergeSuspended bool
 	// describe fills in the audit event type and metadata, which depend on the
 	// row read inside the transaction.
 	describe func(before, after User, event *AuditEvent)
@@ -260,9 +259,6 @@ func (s *UserStore) applyUpdate(id string, email, displayName *string, role *Rol
 		}
 		existing.Status = *status
 	}
-	if opts.skipUnchanged && existing.Email == before.Email && existing.DisplayName == before.DisplayName && existing.Role == before.Role && existing.Status == before.Status {
-		return before, false, nil
-	}
 	if row.Role == "admin" && row.Status == string(UserStatusActive) && (existing.Status != UserStatusActive || existing.Role != "admin") {
 		admins, err := q.CountActiveAdmins(ctx)
 		if err != nil {
@@ -271,6 +267,20 @@ func (s *UserStore) applyUpdate(id string, email, displayName *string, role *Rol
 		if admins <= 1 {
 			return User{}, false, ErrLastActiveAdmin
 		}
+	}
+
+	// Access ends on every transition out of active, so a later reactivation
+	// cannot bring old credentials back.
+	removedAccess := int64(0)
+	repeatedSuspension := opts.convergeSuspended && status != nil && before.Status != UserStatusActive
+	if existing.Status != UserStatusActive && (before.Status == UserStatusActive || repeatedSuspension) {
+		if removedAccess, err = revokeUserAccess(ctx, conn, id); err != nil {
+			return User{}, false, err
+		}
+	}
+	unchanged := existing.Email == before.Email && existing.DisplayName == before.DisplayName && existing.Role == before.Role && existing.Status == before.Status
+	if opts.skipUnchanged && unchanged && removedAccess == 0 {
+		return before, false, nil
 	}
 
 	now := userTimestamp(time.Now())
@@ -289,7 +299,7 @@ func (s *UserStore) applyUpdate(id string, email, displayName *string, role *Rol
 		return User{}, false, fmt.Errorf("auth: update user: %w", err)
 	}
 	securityChanged := before.Email != existing.Email || before.Role != existing.Role || before.Status != existing.Status
-	if securityChanged {
+	if securityChanged || removedAccess > 0 {
 		if err := q.IncrementUserAuthVersion(ctx, generated.IncrementUserAuthVersionParams{UpdatedAt: now, ID: id}); err != nil {
 			return User{}, false, fmt.Errorf("auth: increment auth version: %w", err)
 		}
@@ -299,11 +309,6 @@ func (s *UserStore) applyUpdate(id string, email, displayName *string, role *Rol
 		u, err = q.GetUserByID(ctx, id)
 		if err != nil {
 			return User{}, false, fmt.Errorf("auth: reload user after revocation: %w", err)
-		}
-	}
-	if opts.revokeOAuthOnSuspend && before.Status == UserStatusActive && existing.Status != UserStatusActive {
-		if err := revokeUserOAuth(ctx, conn, id); err != nil {
-			return User{}, false, err
 		}
 	}
 	if event != nil {
@@ -451,7 +456,7 @@ func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
 	if _, err := conn.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
 		return fmt.Errorf("auth: delete user sessions: %w", err)
 	}
-	if err := revokeUserOAuth(ctx, conn, id); err != nil {
+	if _, err := revokeUserOAuth(ctx, conn, id); err != nil {
 		return err
 	}
 	if event != nil {
@@ -468,14 +473,42 @@ func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
 	return nil
 }
 
-func revokeUserOAuth(ctx context.Context, conn *sql.Conn, id string) error {
-	if _, err := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id = ?`, time.Now().UTC().Unix(), id); err != nil {
-		return fmt.Errorf("auth: revoke user OAuth tokens: %w", err)
+// revokeUserAccess ends every browser session and OAuth credential of a user
+// and reports how many were still live.
+func revokeUserAccess(ctx context.Context, conn *sql.Conn, id string) (int64, error) {
+	result, err := conn.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id)
+	if err != nil {
+		return 0, fmt.Errorf("auth: revoke user sessions: %w", err)
 	}
-	if _, err := conn.ExecContext(ctx, `DELETE FROM oauth_authorization_codes WHERE user_id = ?`, id); err != nil {
-		return fmt.Errorf("auth: delete user OAuth authorization codes: %w", err)
+	sessions, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("auth: count revoked sessions: %w", err)
 	}
-	return nil
+	credentials, err := revokeUserOAuth(ctx, conn, id)
+	if err != nil {
+		return 0, err
+	}
+	return sessions + credentials, nil
+}
+
+func revokeUserOAuth(ctx context.Context, conn *sql.Conn, id string) (int64, error) {
+	tokens, err := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, time.Now().UTC().Unix(), id)
+	if err != nil {
+		return 0, fmt.Errorf("auth: revoke user OAuth tokens: %w", err)
+	}
+	revoked, err := tokens.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("auth: count revoked OAuth tokens: %w", err)
+	}
+	codes, err := conn.ExecContext(ctx, `DELETE FROM oauth_authorization_codes WHERE user_id = ?`, id)
+	if err != nil {
+		return 0, fmt.Errorf("auth: delete user OAuth authorization codes: %w", err)
+	}
+	deleted, err := codes.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("auth: count deleted OAuth authorization codes: %w", err)
+	}
+	return revoked + deleted, nil
 }
 
 // CreateFirstAdminWithAudit atomically creates the first admin user.

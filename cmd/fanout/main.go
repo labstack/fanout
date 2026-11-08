@@ -17,7 +17,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -50,8 +49,6 @@ import (
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/labstack/fanout/internal/ui"
 )
-
-var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 
 // version is set at build time via -ldflags "-X main.version=...".
 var version = "dev"
@@ -245,31 +242,7 @@ func main() {
 		slog.Info("trusted proxy IP extraction enabled", "header", "X-Forwarded-For", "cidrs", cfg.TrustedProxyCIDRs)
 	}
 	e.Use(middleware.Recover())
-	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
-		LogURI:       true,
-		LogStatus:    true,
-		LogLatency:   true,
-		LogMethod:    true,
-		LogRemoteIP:  true,
-		LogUserAgent: true,
-		HandleError:  true,
-		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
-			uri := v.URI
-			if strings.Contains(uri, "token=") {
-				uri = tokenRedactRe.ReplaceAllString(uri, "token=REDACTED")
-			}
-			attrs := []any{"method", v.Method, "uri", uri, "status", v.Status, "latency", v.Latency}
-			if v.Error != nil {
-				attrs = []any{"method", v.Method, "route", c.Path(), "status", v.Status, "latency", v.Latency, "err", v.Error}
-			}
-			if v.Status >= 500 {
-				slog.Error("request", attrs...)
-			} else {
-				slog.Info("request", attrs...)
-			}
-			return nil
-		},
-	}))
+	e.Use(api.RequestLogger())
 
 	api.RegisterAuthMiddleware(e, userStore, browserSessions, auditStore, cfg)
 
