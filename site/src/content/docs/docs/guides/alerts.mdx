@@ -39,7 +39,9 @@ percent: `0.05` in a rule is `5` there.
 Read current states and delivery results under **History**.
 `FANOUT_ALERTS_HISTORY_DAYS` sets resolved-history retention in days (default 7).
 
-Viewers can read rules and history. Creating, editing, toggling, testing and
+Viewers can read rules and history, without a rule's delivery settings: webhook
+URL, headers and template, email recipients, and email failure detail are returned
+only to operators and administrators. Creating, editing, toggling, testing and
 deleting require an operator or administrator session; see
 [roles](/docs/reference/roles).
 
@@ -159,8 +161,7 @@ in `email_status` and `email_status_detail` on `GET /api/alerting/rules`:
 | `suppressed` | At least one recipient was over the hourly limit |
 | `unavailable` | The rule has recipients but SMTP is not configured |
 
-Viewers see `email_status` only. `email_recipients` and `email_status_detail` are
-returned to operators and administrators. The detail gives the failure class and
+Viewers see `email_status` only. `email_status_detail` gives the failure class and
 SMTP code, not the mail server's response text.
 
 For a rule with no webhook, the alert's delivery status under **History** carries

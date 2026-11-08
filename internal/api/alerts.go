@@ -83,13 +83,36 @@ func (h *alertHandler) ListRules(c *echo.Context) error {
 	manager := user != nil && HasCapability(*user, ManageAlerts)
 	for i := range rules {
 		rules[i] = h.engine.WithEmailState(rules[i])
-		// Readers learn that email is failing, not who receives it or why.
 		if !manager {
-			rules[i].EmailRecipients = nil
-			rules[i].EmailStatusDetail = ""
+			rules[i] = readerRule(rules[i])
 		}
 	}
 	return c.JSON(200, map[string][]alert.Rule{"rules": rules})
+}
+
+// readerRule is the view of a rule for principals who cannot manage alerts. It
+// is an allowlist, so a field added to Rule stays hidden until it is listed
+// here. Delivery settings are left out: webhook headers can hold credentials,
+// and recipients and failure detail identify people and mail servers. Readers
+// still see email_status, so a failing rule is visible to them.
+func readerRule(rule alert.Rule) alert.Rule {
+	return alert.Rule{
+		ID:              rule.ID,
+		Name:            rule.Name,
+		Description:     rule.Description,
+		Enabled:         rule.Enabled,
+		Service:         rule.Service,
+		Namespace:       rule.Namespace,
+		Expression:      rule.Expression,
+		ForSeconds:      rule.ForSeconds,
+		CooldownS:       rule.CooldownS,
+		RepeatIntervalS: rule.RepeatIntervalS,
+		NotifyOnResolve: rule.NotifyOnResolve,
+		EmailStatus:     rule.EmailStatus,
+		EmailStatusAt:   rule.EmailStatusAt,
+		CreatedAt:       rule.CreatedAt,
+		UpdatedAt:       rule.UpdatedAt,
+	}
 }
 
 // EmailOptions reports whether rules can deliver by email on this instance.

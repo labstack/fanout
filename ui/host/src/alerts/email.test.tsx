@@ -6,7 +6,8 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EmailOptions, Rule } from "./api";
 
-vi.mock("../auth", async original => ({ ...(await original<typeof import("../auth")>()), useViewer: () => ({ id: "u", email: "u@example.test", display_name: "U", status: "active", role: "operator" }) }));
+const viewer = vi.hoisted(() => ({ role: "operator" }));
+vi.mock("../auth", async original => ({ ...(await original<typeof import("../auth")>()), useViewer: () => ({ id: "u", email: "u@example.test", display_name: "U", status: "active", role: viewer.role }) }));
 import { AlertsPage } from "./page";
 
 const rule: Rule = { id: "r1", name: "Checkout errors", enabled: true, service: "checkout", expression: "error_rate > 0.05", for_seconds: 60, cooldown_s: 300, repeat_interval_s: 3600, notify_on_resolve: false, created_at: "", updated_at: "" };
@@ -24,6 +25,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   fetchMock.mockReset();
+  viewer.role = "operator";
   rules = [rule];
   options = available;
   fetchMock.mockImplementation(async (input, init) => {
@@ -112,6 +114,19 @@ describe("alert rule email", () => {
     const { ui, wait } = await render();
     await wait(() => ui.getByText(label));
     ui.getByText(detail);
+  });
+
+  it("renders the server's reduced rule for a read-only user", async () => {
+    viewer.role = "viewer";
+    rules = [{ ...rule, email_status: "failed" }];
+    const { ui, wait } = await render();
+    await wait(() => ui.getByText("Email failed"));
+    ui.getByText("Checkout errors");
+    ui.getByText("error_rate > 0.05");
+    expect(ui.queryByRole("button", { name: "Checkout errors actions" })).toBeNull();
+    expect(ui.queryByRole("button", { name: "New rule" })).toBeNull();
+    expect(ui.getByRole<HTMLInputElement>("switch", { name: "Enable Checkout errors" }).disabled).toBe(true);
+    expect(fetchMock.mock.calls.some(([, init]) => (init?.method ?? "GET") !== "GET")).toBe(false);
   });
 
   it("shows nothing on the rule when email was sent", async () => {

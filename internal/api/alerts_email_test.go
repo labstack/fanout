@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -128,9 +129,13 @@ func TestEmailOptionsReportTheDefaultDestinationWithoutItsAddress(t *testing.T) 
 	}
 }
 
-func TestRuleEmailRecipientsAndDetailAreHiddenFromViewers(t *testing.T) {
+func TestRuleDeliverySettingsAreHiddenFromViewers(t *testing.T) {
 	s := newAlertEmailServer(t, false)
-	if _, err := s.store.CreateRule(alert.Rule{Name: "Errors", Enabled: true, Expression: "true", EmailRecipients: []string{"private@example.com"}}); err != nil {
+	if _, err := s.store.CreateRule(alert.Rule{
+		Name: "Errors", Description: "Checkout errors", Enabled: true, Service: "checkout", Namespace: "prod", Expression: "true", NotifyOnResolve: true,
+		WebhookURL: "https://hooks.example.com/private", WebhookHeaders: `{"Authorization":"Bearer private-token"}`, WebhookTemplate: `{"private":"template"}`,
+		EmailRecipients: []string{"private@example.com"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	viewer, err := s.users.CreateWithAudit("alert-viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
@@ -142,17 +147,34 @@ func TestRuleEmailRecipientsAndDetailAreHiddenFromViewers(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("viewer list = %d %s", rec.Code, rec.Body)
 	}
-	for _, hidden := range []string{"private@example.com", "email_recipients", "email_status_detail"} {
+	for _, hidden := range []string{"private", "webhook_url", "webhook_headers", "webhook_template", "email_recipients", "email_status_detail"} {
 		if strings.Contains(rec.Body.String(), hidden) {
 			t.Fatalf("viewer response holds %q: %s", hidden, rec.Body)
 		}
 	}
-	if !strings.Contains(rec.Body.String(), `"email_status":"unavailable"`) {
+
+	// An exact key set, so a field added to Rule cannot reach viewers unnoticed.
+	var listed struct {
+		Rules []map[string]any `json:"rules"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil || len(listed.Rules) != 1 {
+		t.Fatalf("viewer list = %s, %v", rec.Body, err)
+	}
+	keys := make([]string, 0, len(listed.Rules[0]))
+	for key := range listed.Rules[0] {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	want := []string{"cooldown_s", "created_at", "description", "email_status", "enabled", "expression", "for_seconds", "id", "name", "namespace", "notify_on_resolve", "repeat_interval_s", "service", "updated_at"}
+	if !slices.Equal(keys, want) {
+		t.Fatalf("viewer keys = %v, want %v", keys, want)
+	}
+	if listed.Rules[0]["email_status"] != "unavailable" {
 		t.Fatalf("viewer lost the failure signal: %s", rec.Body)
 	}
 
 	manager := s.do(http.MethodGet, "/api/alerting/rules", "")
-	for _, shown := range []string{"private@example.com", "email_status_detail"} {
+	for _, shown := range []string{"webhook_url", "webhook_headers", "webhook_template", "email_recipients", "email_status_detail", "private-token"} {
 		if !strings.Contains(manager.Body.String(), shown) {
 			t.Fatalf("manager response lacks %q: %s", shown, manager.Body)
 		}
