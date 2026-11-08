@@ -1,11 +1,12 @@
 import { useComputedColorScheme } from "@mantine/core";
 import type { ReactNode } from "react";
-import { brand, chart, fonts } from "../../../../tokens";
+import { accent, fonts, surfaces } from "../../../../tokens";
+import { chart } from "../../../../theme";
 
 export function RowText({ text, template = false, highlight = "" }: { text: string; template?: boolean; highlight?: string }) {
   const dark = useComputedColorScheme("light") === "dark";
-  const accent = brand[dark ? 5 : 7];
-  const rgb = [1,3,5].map(i => parseInt(accent.slice(i,i+2),16)).join(", ");
+  const tint = accent[dark ? 5 : 7];
+  const rgb = [1,3,5].map(i => parseInt(tint.slice(i,i+2),16)).join(", ");
   const matches: number[] = [];
   if (highlight) {
     const lower = text.toLowerCase(), needle = highlight.toLowerCase();
@@ -26,7 +27,7 @@ export function RowText({ text, template = false, highlight = "" }: { text: stri
   let cursor = 0;
   if (template) for (const match of text.matchAll(/<\*>|<str>|<num>|<ip>|<time>/g)) {
     parts.push(...decorate(cursor,match.index));
-    parts.push(<span key={`chip-${match.index}`} data-template-chip style={{background:`rgba(${rgb}, .15)`,color:brand[dark ? 3 : 8],borderRadius:3,padding:"0 3px",fontSize:12}}>{decorate(match.index,match.index+match[0].length)}</span>);
+    parts.push(<span key={`chip-${match.index}`} data-template-chip style={{background:surfaces[dark ? "dark" : "light"].inset,color:chart[dark ? "dark" : "light"].text,borderRadius:3,padding:"0 3px",fontSize:12}}>{decorate(match.index,match.index+match[0].length)}</span>);
     cursor = match.index+match[0].length;
   }
   parts.push(...decorate(cursor,text.length));

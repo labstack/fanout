@@ -67,7 +67,7 @@ it.each([false,true])('uses real focus and ECharts highlight; Enter and mouse di
     const live=el.querySelector('[aria-live]')!;
     expect(live.textContent).toContain('checkout · previous');
     expect(live.textContent).toContain('1970-01-01T00:00:02.000Z');
-    expect(live.textContent).toContain('25.0ms');
+    expect(live.textContent).toContain('25 ms');
     await press(point,'Enter');
     expect(selected).toHaveBeenCalledOnce();expect(variable).not.toHaveBeenCalled();
     const keyboard=selected.mock.calls[0][0];

@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DEFAULT_THEME } from "@mantine/core";
 import { expect, it } from "vitest";
-import { fanoutTheme } from "./theme";
+import { fanoutTheme } from "../../theme";
 
 it("uses only defined theme colors in host props and Mantine palette references", () => {
   const palettes = new Set([...Object.keys(DEFAULT_THEME.colors), ...Object.keys(fanoutTheme.colors ?? {})]);

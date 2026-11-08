@@ -1,3 +1,4 @@
+import { fanoutTheme } from "../../../../theme";
 import { MantineProvider } from "@mantine/core";
 import { within } from "@testing-library/dom";
 import { act } from "react";
@@ -37,7 +38,7 @@ const resultFor = (name: string, text: string): PanelResult => ({
   frame: { columns: [{ name, type: "string", role: "dimension" }], values: [[text]], rows: 1 },
 });
 const render = async (panel: Panel, result: PanelResult, traceLinks?: "button") => {
-  await act(async () => root.render(<MantineProvider theme={{ colors: { bad: [...bad] } }}><RowPanel panel={panel} result={result} dark={false} height={200} traceLinks={traceLinks} /></MantineProvider>));
+  await act(async () => root.render(<MantineProvider theme={fanoutTheme}><RowPanel panel={panel} result={result} dark={false} height={200} traceLinks={traceLinks} /></MantineProvider>));
 };
 const marks = () => [...container.querySelectorAll("tbody mark")].map(mark => mark.textContent);
 
@@ -51,7 +52,7 @@ it.each(["rows", "formatted table"])("builds a %s trace href byte-identical to t
     const search = {...parseSearch(router.options.parseSearch!(window.location.search)), drill: JSON.stringify(target)};
     const expected = router.buildLocation({to: "/dashboards/$dashboardId", params: {dashboardId: "d"}, search: toSearchParams(search)});
     if (surface === "rows") await render(p, result);
-    else await act(async () => root.render(<MantineProvider><TableViz panel={p} result={result} height={200} /></MantineProvider>));
+    else await act(async () => root.render(<MantineProvider theme={fanoutTheme}><TableViz panel={p} result={result} height={200} /></MantineProvider>));
     const link = container.querySelector<HTMLAnchorElement>("a[href]");
     expect(link).not.toBeNull();
     expect(link!.href).toBe(new URL(expected.href, window.location.origin).href);
@@ -63,13 +64,13 @@ it.each(["text", "link", "button"])("names trace ID %s from its visible text and
   const result = resultFor("trace_id",id);
   await render({...panel,viz:"traces"}, surface === "text" ? result : {...result,from_ms:0,to_ms:60000}, surface === "button" ? "button" : undefined);
   const link = container.querySelector<HTMLElement>("[data-trace-id]")!;
-  expect(link.style.width).toBe("16ch");
+  expect(link.style.width).toBe("17ch");
   expect(link.style.overflow).toBe("hidden");
   expect(link.style.textOverflow).toBe("ellipsis");
   expect(link.style.whiteSpace).toBe("nowrap");
-  expect(link.textContent).toBe(id.slice(0,16));
+  expect(link.textContent).toBe(`${id.slice(0,16)}…`);
   expect(link.hasAttribute("aria-label")).toBe(false);
-  if (surface !== "text") expect(within(container).getByRole(surface, {name: id.slice(0,16)})).toBe(link);
+  if (surface !== "text") expect(within(container).getByRole(surface, {name: `${id.slice(0,16)}…`})).toBe(link);
   expect(link.title).toBe(id);
 });
 
@@ -113,8 +114,8 @@ it.each([" failed ", " "])("preserves the entire highlight term %j including whi
 it.each(["FATAL", "CRITICAL"])("uses the bad colour for %s and retains its full title with a short severity label", async severity => {
   await render(panel, resultFor("severity", severity));
   const badge = container.querySelector<HTMLElement>(".mantine-Badge-root");
-  expect(badge?.textContent).toBe(`◆ ${severity === "CRITICAL" ? "FATAL" : severity}`);
-  expect(badge?.title).toBe(severity);
+  expect(badge?.textContent).toBe(severity === "CRITICAL" ? "Fatal" : severity.charAt(0) + severity.slice(1).toLowerCase());
+  expect(badge?.closest<HTMLElement>("[title]")?.title).toBe(severity);
   expect(badge?.style.getPropertyValue("--badge-bg")).toContain("--mantine-color-bad-");
   expect(badge?.hidden).toBe(false);
 });
@@ -144,5 +145,5 @@ it("heads the trace duration without a unit because each cell names its own", as
   await render({ id: "p", title: "Traces", viz: "traces" }, traces);
   const header = container.querySelector("th")!;
   expect(header.textContent).toBe("Duration");
-  expect(container.querySelector("td")!.textContent).toContain("10m");
+  expect(container.querySelector("td")!.textContent).toContain("10 m");
 });

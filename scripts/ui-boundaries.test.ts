@@ -33,6 +33,7 @@ test.each([
   ["panels/test.ts", 'const x = import("echarts/core");'],
   ["panels/test.ts", 'import { X } from "../host/src/x";'],
   ["tokens.ts", 'import { X } from "react";'],
+  ["panels/test.ts", 'import { X } from "@labstack/ui";'],
   ["shared/test.ts", 'import { X } from "react";'],
 ])("rejects forbidden imports in %s: %s", (file, source) => {
   const result = check({ [file]: source });
@@ -42,6 +43,8 @@ test.each([
 
 test("allows workspace packages and package-free shared imports; skips comments and dependencies", () => {
   expect(check({
+    "theme.ts": 'import { createLabstackTheme } from "@labstack/ui";',
+    "panels/style.ts": 'import { contrastRatio } from "@labstack/ui";',
     "host/src/test.ts": 'import { X } from "react"; import { Y } from "../../panels/test";',
     "host/src/mcp-apps/test.ts": 'import { X } from "@mantine/core"; import { Y } from "../dashboards/test";',
     "panels/test.ts": 'export type { Y } from "./types"; import { X } from "../tokens"; // import "react";\n/* export { X } from "react"; */ const text = \'import "react";\';',

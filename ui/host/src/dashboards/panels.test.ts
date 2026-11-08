@@ -13,7 +13,7 @@ const series: Frame = {
 };
 
 describe("units", () => {
-  it.each([ ["per_second", "/s"], ["ms", "ms"], ["percent", "%"], ["ratio", "×"], ["count", ""], ["per_minute", "/min"], ["bytes", " B"], ["none", ""] ])("preserves small significant values for %s in values and axes", (unit, suffix) => {
+  it.each([ ["per_second", "/s"], ["ms", " ms"], ["percent", "%"], ["ratio", "×"], ["count", ""], ["per_minute", "/min"], ["bytes", " B"], ["none", ""] ])("preserves small significant values for %s in values and axes", (unit, suffix) => {
     for (const value of [0.03, 0.0004, -0.03, -0.0004]) {
       expect(formatValue(unit, value)).toBe(`${value}${suffix}`);
       expect(formatAxis(unit)(value)).toBe(`${value}${suffix}`);
@@ -21,27 +21,27 @@ describe("units", () => {
     expect(formatValue(unit, 1e-7)).not.toMatch(/^0(?:\D|$)/);
   });
   it("preserves small durations after seconds and nanoseconds conversion", () => {
-    expect(formatValue("s", 4e-7)).toBe("0.0004ms");
-    expect(formatValue("ns", 400)).toBe("0.0004ms");
+    expect(formatValue("s", 4e-7)).toBe("0.0004 ms");
+    expect(formatValue("ns", 400)).toBe("0.0004 ms");
   });
   it("formats by unit without mixing scales", () => {
-    expect(formatValue("ms", 850)).toBe("850ms");
-    expect(formatValue("ms", 600_000)).toBe("10m");
+    expect(formatValue("ms", 850)).toBe("850 ms");
+    expect(formatValue("ms", 600_000)).toBe("10 m");
     expect(formatValue("percent", 4.2)).toBe("4.20%");
     expect(formatValue("per_second", 1234)).toBe("1.2K/s");
     expect(formatValue("bytes", 1536)).toBe("1.5 KiB");
     expect(formatValue("count", null)).toBe("—");
-    expect(formatAxis("ms")(1500)).toBe("1.5s");
+    expect(formatAxis("ms")(1500)).toBe("1.5 s");
   });
   it("reads a duration axis in one unit", () => {
     const ticks = (unit: string, axis: { min: number; max: number; interval: number }) => Array.from({ length: Math.round((axis.max - axis.min) / axis.interval) + 1 }, (_, i) => formatAxis(unit, axis)(axis.min + i * axis.interval));
-    expect(ticks("ms", { min: 0, max: 10_000, interval: 5000 })).toEqual(["0s", "5s", "10s"]);
-    expect(ticks("ms", { min: 0, max: 1500, interval: 500 })).toEqual(["0s", "0.5s", "1s", "1.5s"]);
-    expect(ticks("ms", { min: 0, max: 300, interval: 100 })).toEqual(["0ms", "100ms", "200ms", "300ms"]);
+    expect(ticks("ms", { min: 0, max: 10_000, interval: 5000 })).toEqual(["0 s", "5 s", "10 s"]);
+    expect(ticks("ms", { min: 0, max: 1500, interval: 500 })).toEqual(["0 s", "0.5 s", "1 s", "1.5 s"]);
+    expect(ticks("ms", { min: 0, max: 300, interval: 100 })).toEqual(["0 ms", "100 ms", "200 ms", "300 ms"]);
     // A minute axis in thirds of a minute stays in seconds rather than printing 0.33m.
-    expect(ticks("ms", { min: 0, max: 100_000, interval: 20_000 })).toEqual(["0s", "20s", "40s", "60s", "80s", "100s"]);
-    expect(ticks("s", { min: 0, max: 600, interval: 300 })).toEqual(["0m", "5m", "10m"]);
-    expect(ticks("ns", { min: 0, max: 2e6, interval: 1e6 })).toEqual(["0ms", "1ms", "2ms"]);
+    expect(ticks("ms", { min: 0, max: 100_000, interval: 20_000 })).toEqual(["0 s", "20 s", "40 s", "60 s", "80 s", "100 s"]);
+    expect(ticks("s", { min: 0, max: 600, interval: 300 })).toEqual(["0 m", "5 m", "10 m"]);
+    expect(ticks("ns", { min: 0, max: 2e6, interval: 1e6 })).toEqual(["0 ms", "1 ms", "2 ms"]);
   });
   it("steps a bytes axis in whole binary units and reads it in one", () => {
     const axis = valueAxis(0, 300 * 2 ** 20, "bytes", 280);
@@ -65,7 +65,7 @@ describe("units", () => {
     const option = timeseriesOption({ id: "p", title: "p95", viz: "timeseries" }, { id: "p", status: "ok", elapsed_ms: 1, frame, from_ms: 0, to_ms: 3000 }, chartThemeFor(false), { width: 600, height: 300 }) as { yAxis: Axis | Axis[] };
     const axis = Array.isArray(option.yAxis) ? option.yAxis[0] : option.yAxis;
     const labels = Array.from({ length: Math.round((axis.max - axis.min) / axis.interval) + 1 }, (_, i) => axis.axisLabel.formatter(axis.min + i * axis.interval));
-    expect(new Set(labels.map(label => label.replace(/[\d.,-]/g, "")))).toEqual(new Set(["s"]));
+    expect(new Set(labels.map(label => label.replace(/[\d.,-]/g, "")))).toEqual(new Set([" s"]));
   });
 });
 

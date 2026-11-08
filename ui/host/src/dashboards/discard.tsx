@@ -1,5 +1,6 @@
-import { Alert, Button, Group, Text } from "@mantine/core";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { ConfirmDialog } from "@labstack/ui";
+import { Text } from "@mantine/core";
+import { useRef, useState, type KeyboardEvent } from "react";
 
 /**
  * Asks before a draft is thrown away. Escape asks, or closes when nothing
@@ -8,14 +9,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
  */
 export function useDiscard(dirty: boolean, onClose: () => void, what: string) {
   const [confirming, setConfirming] = useState(false);
-  const keep = useRef<HTMLButtonElement>(null);
   const before = useRef<HTMLElement | null>(null);
-  const dialog = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    if (!confirming) return;
-    dialog.current = keep.current?.closest<HTMLElement>("[role=dialog]") ?? null;
-    keep.current?.focus();
-  }, [confirming]);
   const request = () => {
     if (!dirty) { onClose(); return; }
     before.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -23,7 +17,7 @@ export function useDiscard(dirty: boolean, onClose: () => void, what: string) {
   };
   const resume = () => {
     setConfirming(false);
-    const target = before.current?.isConnected && before.current !== document.body ? before.current : dialog.current;
+    const target = before.current?.isConnected && before.current !== document.body ? before.current : null;
     requestAnimationFrame(() => target?.focus());
   };
   // Escape first reaches an editor, which closes its completion list; only an unhandled Escape gets here.
@@ -33,9 +27,8 @@ export function useDiscard(dirty: boolean, onClose: () => void, what: string) {
     if (event.target instanceof Element && event.target.getAttribute("aria-expanded") === "true") return;
     if (confirming) resume(); else request();
   };
-  const prompt = confirming && <Alert color="warn" title="Discard changes?" mb="sm">
-    <Text size="sm">Your changes to {what} have not been saved.</Text>
-    <Group gap="xs" mt="sm"><Button ref={keep} variant="default" onClick={resume}>Keep editing</Button><Button color="bad" onClick={onClose}>Discard changes</Button></Group>
-  </Alert>;
+  const prompt = confirming && <ConfirmDialog opened={confirming} onClose={resume} title="Discard changes?" confirmLabel="Discard changes" cancelLabel="Keep editing" tone="danger" onConfirm={onClose}>
+    Your changes to <Text span ff="monospace">{what}</Text> have not been saved.
+  </ConfirmDialog>;
   return { request, onKeyDown, prompt };
 }

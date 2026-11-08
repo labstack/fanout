@@ -1,7 +1,9 @@
+import { LoadingSkeleton } from "../loading-skeleton";
+import { DataState, Notice } from "@labstack/ui";
 import { logConstants } from "../../../panels/rows";
 import { useMergedRef } from "@mantine/hooks";
-import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
-import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, HourglassMedium, Info, ListMagnifyingGlass, Trash, WarningCircle, Wrench } from "@phosphor-icons/react";
+import { ActionIcon, Box, Button, Group, Loader, Menu, Paper, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
+import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, Trash, WarningCircle } from "@phosphor-icons/react";
 import type { Panel, Selection, VarValue } from "../../../panels/types";
 import type { PanelDisplayResult } from "./panel-result";
 import type { AnnotationsResponse } from "../../../panels/annotations";
@@ -15,13 +17,16 @@ import { Viz } from "./viz";
 import type { RowControls } from "./viz/table";
 import { PanelTooltipContext } from "./panel-fullscreen";
 
-export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, onEdit, staleAt, traceLinks, controls, suspended = false, menuRef }: {
+export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, onWiden, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, onEdit, staleAt, traceLinks, controls, suspended = false, menuRef, initialView = "Chart" }: {
+  initialView?: "Chart" | "Data" | "Spec";
   compare?: boolean; range?: string; panel: Panel; title: string; result?: PanelDisplayResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
   annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; traceLinks?: "button"; controls?: RowControls;
   onSelect?: (value: string) => void; onView?(): void; onCopyLink?: () => void; onExplain?: () => void; onFix?: () => void; onRetry?(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
   suspended?: boolean; menuRef?: Ref<HTMLButtonElement>; onEdit?(): void;
   onVariable?: (name: string, value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
-  zoomed?: boolean; onZoomReset?: () => void; onRangePending?(pending: boolean): void;
+  zoomed?: boolean; onZoomReset?: () => void;
+  /** Widens the page's time range; the empty state offers it only when given. */
+  onWiden?: () => void; onRangePending?(pending: boolean): void;
 }) {
   const [keyboardHint, setKeyboardHint] = useState<string>();
   const chartHint = useMemo(() => ({setHint: setKeyboardHint}), []);
@@ -59,7 +64,11 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, [staleAt]);
-  const [view, setView] = useState("Chart");
+  const tableOnly = ["logs", "traces", "table", "log_patterns"].includes(panel.viz);
+  const modes = ["Chart", "Data", "Spec"];
+  // A table-only panel's main view is its table; the view keeps one value, only its label differs.
+  const modeLabel = (mode: string) => panel.viz === "text" && mode === "Chart" ? "Content" : tableOnly && mode === "Chart" ? "Table" : mode;
+  const [view, setView] = useState<string>(initialView);
   const [mapView, setMapView] = useState<MapView>();
   const onMapView = useCallback((next: MapView) => setMapView(next), []);
   const hint = panel.click ? `click to filter by ${panel.click.set_variable}`
@@ -69,6 +78,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     : panel.viz === "table" && panel.drill === "traces" && !result?.frame ? undefined
     : panel.drill === "logs" ? "click for matching logs"
     : panel.drill === "traces" && ["table", "timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline"].includes(panel.viz) ? "click for exemplar traces" : undefined;
+  const loadingBody = !suspended && !result && panel.viz !== "text" && view === "Chart";
   const bodyHeight = Math.max(40, height - 88);
   const constants = [...new Set(logConstants(panel, result?.frame).map(c => c.value))];
   const subtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")}${constants.length ? ` · ${constants.join(" · ")}` : ""}${hint ? ` · ${hint}` : ""}`;
@@ -83,7 +93,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const refreshDetails = refreshError ? `${refreshAge ? `${refreshAge}. ` : ""}${refreshError}` : undefined;
   const refreshDescription = refreshDetails && refreshDetails.length > 200 ? `${refreshDetails.slice(0, 199)}…` : refreshDetails;
   const refreshDescriptionId = useId();
-  const busyReasonId = useId();
+
   const tooltipTarget = useRef<HTMLButtonElement>(null);
   const buttonRef = useMergedRef(menuRef, tooltipTarget);
   const [menuFocused, setMenuFocused] = useState(false);
@@ -119,13 +129,6 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     result?.annotation_scope?.limited ? "Annotation service scope is limited." : undefined,
   ].filter((text): text is string => Boolean(text)))];
   const body = useRef<HTMLDivElement>(null);
-  const [measuredBodyHeight, setMeasuredBodyHeight] = useState<number>();
-  const compactError = (measuredBodyHeight ?? bodyHeight) < 160;
-  useLayoutEffect(() => {
-    const el = body.current; if (!el) return;
-    const observer = new ResizeObserver(([entry]) => { if (entry) setMeasuredBodyHeight(entry.contentRect.height); });
-    observer.observe(el); return () => observer.disconnect();
-  }, []);
   const [fade, setFade] = useState<{bottom:number}>();
   useLayoutEffect(()=>{
     const el=body.current, parent=card.current;if(!el||!parent)return;
@@ -143,21 +146,21 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   return <Paper ref={card} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0, position:"relative" }} data-panel={panel.id} data-compact-views={compactViews}>
     <Group justify="space-between" wrap="nowrap" gap="xs" px={16} pt={12} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
       <Group gap={6} wrap="nowrap" miw={0} style={{flex:1}}>
-        <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate={compactViews ? undefined : true} style={compactViews ? {overflowWrap:"anywhere"} : undefined}>{title}</Text><Text data-panel-subtitle title={keyboardHint ?? subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={{position: "relative", ...(small ? {overflowWrap:"anywhere"} : {})}}>
+        <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={14} truncate={compactViews ? undefined : true} style={compactViews ? {overflowWrap:"anywhere"} : undefined}>{title}</Text><Text data-panel-subtitle title={keyboardHint ?? subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={{position: "relative", ...(small ? {overflowWrap:"anywhere"} : {})}}>
             {/* Preserve the subtitle's measured line box, including narrow cards. */}
             <span aria-hidden={keyboardHint ? true : undefined} style={{visibility: keyboardHint ? "hidden" : undefined}}>{subtitle}</span>
             {keyboardHint && <><span data-chart-hint aria-hidden="true" style={{position: "absolute", inset: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{compactHint(keyboardHint)}</span></>}
           </Text>
-          {panel.options?.highlight && <Text component="span" data-highlight-term title={`highlight: ${panel.options.highlight}`} fz={11} c="dimmed" style={{display:"inline-block",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",border:"1px solid var(--mantine-color-default-border)",borderRadius:4,padding:"0 5px"}}>highlight: {panel.options.highlight}</Text>}
+          {panel.options?.highlight && <Text component="span" data-highlight-term title={`highlight: ${panel.options.highlight}`} fz={12} c="dimmed" style={{display:"inline-block",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",border:"1px solid var(--mantine-color-default-border)",borderRadius:4,padding:"0 5px"}}>highlight: {panel.options.highlight}</Text>}
         </Box>
         {panelTimeLabel(panel) && <Text size="xs" c="dimmed" role="status">{panelTimeLabel(panel)}</Text>}
         {panel.description && <Tooltip label={panel.description} multiline w={260}><ActionIcon variant="transparent" color="gray" size="xs" aria-label={`${title} description`}><Info size={14} /></ActionIcon></Tooltip>}
         {loading && result && <Loader size={12} aria-label="Refreshing" />}
       </Group>
       <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
-      {!compactViews && panel.viz !== "text" && <Group gap={0} wrap="nowrap" role="group" aria-label={`${title} view`} style={{ border: "1px solid var(--mantine-color-default-border)", borderRadius: 5, overflow: "hidden" }}>
-        {["Chart", "Data", "Spec"].map(mode => <button key={mode} type="button" data-panel-view={mode} aria-pressed={view === mode} onClick={() => setView(mode)} style={{ border: 0, borderLeft: mode === "Chart" ? undefined : "1px solid var(--mantine-color-default-border)", padding: "2px 6px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", background: view === mode ? "var(--mantine-color-default)" : "transparent", color: view === mode ? "var(--mantine-primary-color-filled)" : "var(--mantine-color-dimmed)", fontWeight: view === mode ? 600 : 400, boxShadow: view === mode ? "inset 0 -2px var(--mantine-primary-color-filled)" : undefined }}>{mode}</button>)}
-      </Group>}
+      {!compactViews && panel.viz !== "text" && <Button.Group aria-label={`${title} view`}>
+        {modes.map(mode => <Button key={mode} size="compact-xs" variant="default" fw={view === mode ? 600 : 400} bg={view === mode ? "var(--mantine-color-accent-light)" : undefined} c={view === mode ? "var(--mantine-color-accent-text)" : undefined} data-panel-view={mode} aria-pressed={view === mode} onClick={() => setView(mode)}>{modeLabel(mode)}</Button>)}
+      </Button.Group>}
       {panel.viz === "service_map" && mapView?.canFit && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={mapView.overview ? `Return to readable ${title} view` : `Show whole ${title} graph`} onClick={mapView.fit}><ArrowsOut size={16} /></ActionIcon>}
       {zoomed && onZoomReset && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Reset ${title} zoom`} onClick={onZoomReset}><ArrowCounterClockwise size={16} /></ActionIcon>}
       <Menu position="bottom-end" withinPortal onChange={opened => {if (opened) closeTooltip();}}>
@@ -174,7 +177,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           {(compactViews || panel.viz === "text") && <>
             <Menu.RadioGroup value={view} onChange={setView}>
               <Box role="group" aria-label={`${title} view`}>
-                {(panel.viz === "text" ? ["Chart", "Spec"] : ["Chart", "Data", "Spec"]).map(mode => <Menu.RadioItem key={mode} value={mode} data-panel-view={mode} closeMenuOnClick>{panel.viz === "text" && mode === "Chart" ? "Content" : mode}</Menu.RadioItem>)}
+                {(panel.viz === "text" ? ["Chart", "Spec"] : modes).map(mode => <Menu.RadioItem key={mode} value={mode} data-panel-view={mode} closeMenuOnClick>{modeLabel(mode)}</Menu.RadioItem>)}
               </Box>
             </Menu.RadioGroup>
             <Menu.Divider />
@@ -195,28 +198,16 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         scrolling. It paints the card's own ground so the scrolled content has
         an opaque backdrop that spans it, which contrast checks need, and keeps
         the card's rounded bottom corners so that ground does not square them. */}
-    <Box ref={body} data-panel-body className="dashboard-panel-padding" tabIndex={view !== "Chart" ? 0 : undefined} style={{ flex: "1 1 0px", isolation: "isolate", contain: rows || view === "Data" ? "paint" : undefined, minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column", backgroundColor: "inherit", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>
-      {suspended ? <Center h="100%"><Text size="sm" c="dimmed">Shown in full-screen</Text></Center> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Loader size="sm" role="status" aria-label="Loading panel" /></Center>
-        : result?.status === "error" && result.reason === "busy" ? <Box data-panel-busy style={{height:"100%", maxHeight:"100%", minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:compactError ? "row" : "column", alignItems:"center", justifyContent:"center", gap:compactError ? 6 : 4}}>
-          <HourglassMedium size={18} color="var(--mantine-color-dimmed)" style={{flexShrink:0}} />
-          <Text size="sm" fw={500} style={{flexShrink:0}}>Not run yet</Text>
-          {!compactError && <Text size="xs" c="dimmed" ta="center" style={{minWidth:0, minHeight:0, overflow:"hidden", overflowWrap:"anywhere", flex:"0 1 auto"}}>{result.error}</Text>}
-          {onRetry && <Tooltip label={result.error} disabled={!compactError} multiline maw="min(320px, calc(100vw - 32px))" events={{hover: true, focus: true, touch: true}}>
-            <Button size="compact-xs" variant="light" color="gray" style={{flexShrink:0}} disabled={loading} aria-describedby={busyReasonId} onClick={onRetry}>Retry</Button>
-          </Tooltip>}
-          <span id={busyReasonId} hidden>{result.error}</span>
+    <Box ref={body} data-panel-body data-panel-loading={loadingBody || undefined} className="dashboard-panel-padding" tabIndex={view !== "Chart" ? 0 : undefined} style={{ flex: "1 1 0px", isolation: "isolate", contain: rows || view === "Data" ? "paint" : undefined, minHeight: 0, minWidth: 0, padding: "16px", overflow: !loadingBody && scrolls ? "auto" : "hidden", display: !loadingBody && (rows || view !== "Chart") ? "block" : "flex", flexDirection: "column", backgroundColor: "inherit", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>
+      {suspended ? <DataState state="empty" empty={{ title: "Shown in full-screen" }} /> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <DataState state="loading" loadingLabel={`Loading panel ${title || panel.id}`} skeleton={<LoadingSkeleton viz={panel.viz} />} />
+        : (result?.status === "error" || result?.status === "invalid") ? <Box data-panel-error={result.reason !== "busy" || undefined} data-panel-busy={result.reason === "busy" || undefined} style={{minWidth: 0, maxHeight: "100%", overflow: "auto", overflowWrap: "anywhere"}}>
+          <Notice live={false} tone={result.reason === "busy" ? "info" : "danger"} title={result.reason === "busy" ? "Not run yet" : result.status === "invalid" ? "This panel is invalid" : "This panel failed"} retryLabel="Retry" onRetry={retryable || result.reason === "busy" ? onRetry : undefined}>
+            <Text data-panel-error-message={result.reason !== "busy" || undefined} title={result.error} size="xs" style={{overflowWrap: "anywhere"}}>{result.error || "The query could not run."}</Text>
+            {result.problems?.map((problem, i) => <Text key={i} size="xs"><code>{problem.path}</code>{problem.message !== result.error && `: ${problem.message}`}{problem.hint && ` — ${problem.hint}`}</Text>)}
+          </Notice>
+          {fixable && agentAvailable && onFix && <Button size="compact-xs" variant="light" onClick={onFix}>Ask Fanout to fix it</Button>}
         </Box>
-        : (result?.status === "error" || result?.status === "invalid") ? <Box data-panel-error style={{height:"100%", maxHeight:"100%", minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:compactError ? "row" : "column", alignItems:"center", justifyContent:"center", gap:compactError ? 6 : 4}}>
-          <WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" style={{flexShrink:0}} />
-          {!compactError && <Text size="sm" fw={500} c="bad" style={{flexShrink:0}}>This panel failed</Text>}
-          <Text data-panel-error-message title={result.error} size="xs" c="dimmed" ta={compactError ? "left" : "center"} style={{minWidth:0, minHeight:0, overflow:"hidden", ...(compactError ? {flex:"1 1 0px", whiteSpace:"nowrap", textOverflow:"ellipsis"} : {overflowWrap:"anywhere", flex:"0 1 auto"})}}>{compactError ? `This panel failed: ${result.error ?? "Request failed"}` : result.error}</Text>
-          {retryable && onRetry && <Button size="compact-xs" variant="light" style={{flexShrink:0}} disabled={loading} onClick={onRetry}>Retry</Button>}
-          {fixable && agentAvailable && onFix && (compactError ? <Tooltip label="Ask Fanout to fix it" events={{hover: true, focus: true, touch: false}}><ActionIcon size={32} variant="light" aria-label="Ask Fanout to fix it" style={{flex:"0 0 32px"}} onClick={onFix}><Wrench size={16}/></ActionIcon></Tooltip> : <Button size="compact-xs" variant="light" style={{flexShrink:0}} onClick={onFix}>Ask Fanout to fix it</Button>)}
-        </Box>
-        : result?.status === "empty" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
-          <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
-          <Text size="sm" c="dimmed" ta="center" style={{overflowWrap:"anywhere"}}>{result.diagnosis || "No data in this time range."}</Text>
-        </Stack></Center>
+        : result?.status === "empty" ? <DataState state="empty" empty={{title: "No data in this time range", description: <Text size="sm" style={{overflowWrap: "anywhere"}}>{result.diagnosis || "Widen the time range to find matching telemetry."}</Text>, action: zoomed && onZoomReset ? <Button variant="default" size="compact-xs" onClick={onZoomReset}>Reset zoom</Button> : onWiden ? <Button variant="default" size="compact-xs" onClick={onWiden}>Widen time range</Button> : undefined}} />
         : <ChartHintContext.Provider value={chartHint}><Viz traceLinks={traceLinks} controls={controls} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} /></ChartHintContext.Provider>}
     </Box>
     {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, paddingTop: 8, background: "var(--mantine-color-body)", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>

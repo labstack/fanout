@@ -1,7 +1,8 @@
+import { DataState, Notice } from "@labstack/ui";
 import {mcpAppCSP} from "./mcp-app-csp";
 import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { Alert, Box, Button, Center, FocusTrap, Loader, Text, useComputedColorScheme } from "@mantine/core";
+import { Box, Button, FocusTrap, useComputedColorScheme } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { mcpAppContent, type MCPAppContent } from "./mcp-app-content";
 import { authorizedFetch } from "./auth";
@@ -146,7 +147,7 @@ function enforceMCPAppCSP(html: string, meta: unknown): string {
 
 export default function MCPAppFrame({ content: value }: { content: unknown }) {
   const content = mcpAppContent(value);
-  if (!content) return <Alert color="bad" m="md">This view could not be loaded. Please try again.</Alert>;
+  if (!content) return <Box m="md"><Notice tone="danger">This view could not be loaded. Please try again.</Notice></Box>;
   return <ValidatedMCPAppFrame content={content} />;
 }
 
@@ -302,8 +303,8 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
     }
   }
 
-  if (error) return <Alert color="bad" m="md">{error}</Alert>;
-  if (!html) return <Center mih={180} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Preparing view…</Text></Center>;
+  if (error) return <Box m="md"><DataState state="error" error={{ message: error }} /></Box>;
+  if (!html) return <DataState state="loading" loadingLabel="Preparing view…" />;
   // Keep the iframe in the same DOM position: reparenting or remounting reloads the app.
   return <FocusTrap active={displayMode === "fullscreen"}><Box data-app-fullscreen={displayMode === "fullscreen" ? "" : undefined}
     role={displayMode === "fullscreen" ? "dialog" : undefined} aria-modal={displayMode === "fullscreen" ? true : undefined} aria-label={displayMode === "fullscreen" ? "Fanout analysis view" : undefined}

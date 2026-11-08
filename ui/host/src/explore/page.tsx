@@ -1,4 +1,6 @@
-import { Alert, Box, Button, Group, SegmentedControl, Stack, Tabs, Text, Title, Tooltip } from "@mantine/core";
+import { LiveDataMeta } from "../live-data-meta";
+import { PageHeader, Notice } from "@labstack/ui";
+import { Box, Button, Group, SegmentedControl, Stack, Tabs, Text, Tooltip } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import type { DashboardSpec, Panel, Query, VarValue, Viz } from "../../../panels/types";
@@ -13,7 +15,7 @@ import { classifyPanelResult, type PanelDisplayResult } from "../dashboards/pane
 import { RangeMenu } from "../dashboards/toolbar";
 import { FanqlEditor } from "../fanql-editor/fanql-editor";
 import { SqlEditor } from "../sql-editor/sql-editor";
-import { completeFanql, formatFanql, parseFanql, type Formatted, type Notice, type Parsed, type VizCompat } from "./api";
+import { completeFanql, formatFanql, parseFanql, type Formatted, type Notice as QueryNotice, type Parsed, type VizCompat } from "./api";
 import { Builder, querySchema } from "./builder";
 import { SaveDialog, defaultTitle } from "./save-dialog";
 import { exploreTime, parseExploreSearch, toExploreParams, type ExploreSearch } from "./search";
@@ -83,6 +85,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const satisfied = (c: VizCompat) => c.requires.every(r => r === "min_max" ? base?.min !== undefined && base?.max !== undefined : (base?.thresholds?.length ?? 0) > 0);
   const compose = (draft: Panel) => context?.compose ? context.compose(draft) : draft;
   const vars = context?.vars ?? {};
+  const [runAt, setRunAt] = useState<number>();
   const [savingError, setSavingError] = useState<string>();
   const [savingPanel, setSavingPanel] = useState(false);
   const [saving, setSaving] = useState<Panel>();
@@ -103,7 +106,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const [builderInvalid, setBuilderInvalid] = useState(false);
   const formatter = useRef<{ abort?: AbortController; timer?: ReturnType<typeof setTimeout> }>({});
   const [problems, setProblems] = useState<Problem[]>([]);
-  const [notices, setNotices] = useState<Notice[]>([]);
+  const [notices, setNotices] = useState<QueryNotice[]>([]);
   const [error, setError] = useState<string>();
   // Enter on an empty editor runs nothing; it says why, once per Enter, while the editor stays empty.
   const [emptyRun, setEmptyRun] = useState(0);
@@ -190,6 +193,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         if (current.current[kind === "query" ? "text" : "sql"] === source) setProblems(result.problems ?? []);
         return;
       }
+      setRunAt(Date.now());
       setRun({ kind, source, window: windowKey, panel, result: classifyPanelResult(result, [explorePanelID]), canonical });
       // A SQL error that a retry cannot fix is a problem with the statement, shown at the editor.
       if (kind === "sql" && result.status === "error" && !result.retryable && current.current.sql === source) setProblems([{ path: "sql", message: result.error ?? "Query failed" }]);
@@ -304,14 +308,9 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   // Points open what makes makeDrill return a target; otherwise the chart offers no drill.
   const drills = run !== undefined && (run.panel.drill !== undefined || run.panel.viz === "service_map" || (run.result.frame?.columns.some(c => c.name === "trace_id") ?? false));
 
-  return <Stack gap="md" p="lg" maw={1400} data-explore>
-    <Group justify={context ? "flex-end" : "space-between"} align="flex-end">
-      {!context && <Stack gap={2}>
-        <Title order={2}>Explore</Title>
-        <Text size="sm" c="dimmed">Ask a question of your telemetry. Runs the same query path as dashboards.</Text>
-      </Stack>}
-      <RangeMenu time={time} onRange={range => pickWindow({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => pickWindow({ ...search, from, to })} />
-    </Group>
+  return <Stack gap="md" px={{base:"md",sm:"xl"}} pt="lg" pb="xl" maw={1600} mx="auto" data-explore>
+    {!context && <PageHeader title="Explore" description="Ask a question of your telemetry." meta={<LiveDataMeta time={time} updatedAt={run ? runAt : null} />} />}
+    <RangeMenu inHeader={!context} time={time} onRange={range => pickWindow({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => pickWindow({ ...search, from, to })} />
     <Tabs value={search.tab} onChange={value => void openTab(value === "sql" || value === "builder" ? value : "query")} keepMounted={false}>
       <Tabs.List>
         <Tabs.Tab value="query">Query</Tabs.Tab>
@@ -332,14 +331,14 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       </Tabs.Panel>
       <Tabs.Panel value="builder" pt="sm">
         <Stack gap="xs">
-          {!built && (problems.length > 0 || error) ? <Alert color="bad" title="This query cannot open in the Builder" data-builder-blocked>
+          {!built && (problems.length > 0 || error) ? <Box data-builder-blocked><Notice tone="danger" title="This query cannot open in the Builder">
             {problems.length > 0 ? <Stack gap={2} mb="xs">{problems.map((problem, index) => <Text key={index} size="sm">{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</Text>)}</Stack> : <Text size="sm" mb="xs">{error}</Text>}
             <Button size="compact-sm" variant="default" onClick={() => void openTab("query")}>Fix it in the Query tab</Button>
-          </Alert> : <>
-            {schema.error && <Alert color="warn" title="Fields could not be loaded">
+          </Notice></Box> : <>
+            {schema.error && <Notice tone="warning" title="Fields could not be loaded">
               {built ? "Only the fields this query uses are offered until the field list loads. " : ""}{schema.error.message}
               <Button size="compact-xs" variant="default" ml="xs" loading={schema.isFetching} onClick={() => void schema.refetch()}>Retry</Button>
-            </Alert>}
+            </Notice>}
             {built && (schema.data ?? schema.error) ? <Builder query={built} schema={schema.data ?? querySchema(built)} variables={(variables ?? []).map(v => v.name)} labels={labels} onChange={edit} onInvalid={setBuilderInvalid} />
               : !schema.error && <Text size="sm" c="dimmed">Loading fields…</Text>}
           </>}
@@ -350,7 +349,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       <Tabs.Panel value="sql" pt="sm">
         {!sql.trim() && <Text size="xs" c="dimmed" mb="xs" data-sql-hint>{text.trim() ? "SQL runs on its own; the FanQL query is not converted. " : ""}Write one SELECT over spans, logs or metrics that filters time with <code>$__window(time_column)</code>, for example <code>SELECT service, count(*) AS spans FROM spans WHERE $__window(start_time) GROUP BY service</code>.</Text>}
         <SqlEditor value={sql} onChange={value => { setSql(value); setProblems([]); }} onRun={() => void execute("sql", sql)} onEscape={() => runButton.current?.focus()} schema={schema.data} problems={search.tab === "sql" ? problems : []} label={context ? "Panel SQL" : "Explore SQL"} />
-        {search.tab === "sql" && problems.length > 0 && <Alert color="bad" mt="xs" title="The SQL has problems"><ul>{problems.map((problem, index) => <li className="sql-problem" key={index}>{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul></Alert>}
+        {search.tab === "sql" && problems.length > 0 && <Notice tone="danger" title="The SQL has problems"><ul>{problems.map((problem, index) => <li className="sql-problem" key={index}>{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul></Notice>}
       </Tabs.Panel>
     </Tabs>
     <Group justify="space-between">
@@ -382,8 +381,8 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       {!canSave && <span id={saveHelp} hidden>{saveReason}</span>}
       </Group>
     </Group>
-    {error && <Alert color="bad" title="The query could not run">{error}</Alert>}
-    {savingError && <Alert color="bad" title="Not saved">{savingError}</Alert>}
+    {error && <Notice tone="danger" title="The query could not run">{error}</Notice>}
+    {savingError && <Notice tone="danger" title="Not saved">{savingError}</Notice>}
     <Box ref={resultBox}>
       {run ? <Stack gap="xs">
         <Text size="sm" fw={600} role="status">{running ? "Running the query…" : run.kind !== kind ? `Result of the last ${run.kind === "sql" ? "SQL" : "FanQL"} run` : run.source !== source ? "Result of the last run · query has changed" : run.window !== windowKey ? "Result of the last run · time range has changed" : run.canonical ? <>Ran as <code>{run.canonical}</code></> : "Result"}</Text>

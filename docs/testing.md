@@ -341,19 +341,11 @@ Keep stories and fixtures under their existing catalog locations. Both productio
 Vite builds reject any runtime import of `src/catalog`, `.storybook`, or a story
 file. Knip excludes those local review inputs from its production analysis.
 
-Known accessibility exceptions are recorded in `src/catalog/accessibility.ts`:
-the shipping shell and dashboard/settings screens nest main landmarks; the
-panel loader labels a span without a role; and the light-theme degraded-health
-label measures 3.27:1 on white. The last two exceptions target only those elements;
-all other contrast and ARIA checks remain active. Settings also exempts only
-the existing hover-underlined Sending telemetry and MCP connection links from `link-in-text-block`
-until its resting-state link treatment is fixed. The selected chat timestamp
-also has a targeted contrast exception (3.9:1 on its light selection background). These exceptions preserve the
-shipping UI within this catalog-only change and should be removed when the
-product markup and semantic ink are corrected. Alerts exempts only its blank
-actions-column header from `empty-table-header`; Logs exempts only expandable
-table rows from `aria-conditional-attr` because they use `aria-expanded` without
-a treegrid. Other table and ARIA checks stay active.
+Catalog surfaces have no accessibility exceptions; every story uses the
+standard rules.
+Nested main landmarks, panel loading labels, Settings links and unnamed alert
+actions headers no longer need exceptions. Chromium validation must run on a host
+that permits the browser's Mach port registration.
 
 ## FanQL performance checks
 

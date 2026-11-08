@@ -62,10 +62,13 @@ test("default system overview shows all six self-observation scenarios within tw
   const full = hosts.locator("tbody tr").filter({ has: page.locator('td[data-field="host"]').getByText("disk-full-host", { exact: true }) });
   await expect(full.locator('[data-field="filesystem_percent"]')).toHaveText("95.0%");
   await expect(full.locator('[data-field="mountpoint"]')).toHaveText("/data");
-  await expect(full.locator('[data-field="status"]')).toHaveText(/◆.*95/);
+  // A danger badge: its glyph is an icon, so the text is the value alone.
+  await expect(full.locator('[data-field="status"]')).toHaveText("95");
+  await expect(full.locator('[data-field="status"] svg')).toHaveCount(1);
   const stopped = hosts.locator("tbody tr").filter({ has: page.locator('td[data-field="host"]').getByText("stopped-host", { exact: true }) });
   await expect(stopped.locator('[data-field="reporting"]')).toHaveText("not reporting");
-  await expect(stopped.locator('[data-field="status"]')).toHaveText(/◆.*100/);
+  await expect(stopped.locator('[data-field="status"]')).toHaveText("100");
+  await expect(stopped.locator('[data-field="status"] svg')).toHaveCount(1);
 
   const map = page.locator(cardSelector("service_map"));
   await map.scrollIntoViewIfNeeded();

@@ -83,8 +83,8 @@ it.each(["light", "dark"] as const)("renders complete status badges and numeric 
       } }} />
     </MantineProvider>));
     const badge = node.querySelector<HTMLElement>('td[data-field="status"] > *')!;
-    expect(badge.textContent).toBe("○ 53.41");
-    expect(node.querySelector('td[data-field="rate"]')?.textContent).toBe("○ 1.27%");
+    expect(badge.textContent).toBe("53.41");
+    expect(node.querySelector('td[data-field="rate"]')?.textContent).toBe("1.27%");
     expect(node.querySelector('td[data-field="count"]')?.textContent).toBe(formatValue(undefined, 1234567.89));
     for (const [field, value] of [["host", host], ["attributes", json]]) {
       const cell = node.querySelector<HTMLElement>(`td[data-field="${field}"]`)!;

@@ -1,12 +1,11 @@
-import { Alert, Badge, Box, Button, Group, Paper, Stack, Text, VisuallyHidden } from "@mantine/core";
+import { DataState, Notice, StatusBadge } from "@labstack/ui";
+import { Badge, Box, Button, Group, Paper, Stack, Switch, Tabs, Text, VisuallyHidden } from "@mantine/core";
 import { Tooltip } from "@mantine/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Result, TraceDetail, TraceSpan } from "../../../../contracts";
 import { chartTheme, seriesSlot, statusHex } from "../../../../chart";
-import { series } from "../../../../tokens";
+import { series } from "../../../../theme";
 import { duration } from "../../../../format";
-import { filledTextOn } from "../../../../theme";
-import { EmptyState } from "./components";
 import { ListBullets } from "@phosphor-icons/react";
 import { Waterfall } from "./waterfall";
 import { SpanDetails, type SpanLoader } from "./span-details";
@@ -16,6 +15,7 @@ import type { PanelResult } from "../../../../panels/types";
 /** Spans open their details below the chart unless the caller handles span clicks itself. */
 export function TraceDetailView({ result, dark, onSpan, loadSpan }: { result: Result<TraceDetail>; dark: boolean; onSpan?: (span: TraceSpan) => void; loadSpan?: SpanLoader }) {
   const [view, setView] = useState("waterfall");
+  const [showCriticalPath, setShowCriticalPath] = useState(true);
   const [picked, setPicked] = useState<TraceSpan>();
   const select = onSpan ?? setPicked;
   const data = result.data;
@@ -25,15 +25,17 @@ export function TraceDetailView({ result, dark, onSpan, loadSpan }: { result: Re
   } }), [data.logs]);
   const loadedMs = useMemo(() => spanBounds(data.spans).total, [data.spans]);
   return <Stack gap="sm">
-    <Group><Text fw={600}>{data.trace_id}</Text><Text c={data.has_error ? "bad" : "dimmed"}>{data.has_error ? "■ Error" : "● OK"}</Text></Group>
+    <Group><Text fw={600} ff="monospace" size="sm">{data.trace_id}</Text><StatusBadge tone={data.has_error ? "danger" : "success"}>{data.has_error ? "Error" : "OK"}</StatusBadge></Group>
     {data.spans.length > 0 ? <>
-      <Group role="group" aria-label="Trace view"><Button aria-pressed={view === "waterfall"} variant={view === "waterfall" ? "light" : "subtle"} onClick={() => setView("waterfall")}>Waterfall</Button><Button aria-pressed={view === "flame"} variant={view === "flame" ? "light" : "subtle"} onClick={() => setView("flame")}>Flame graph</Button></Group>
+      <Tabs value={view} onChange={value => value && setView(value)} keepMounted={false}><Group justify="space-between"><Tabs.List aria-label="Trace view"><Tabs.Tab value="waterfall">Waterfall</Tabs.Tab><Tabs.Tab value="flame">Flame graph</Tabs.Tab></Tabs.List><Switch label="Critical path" description="Solid band inside each bar" disabled={view !== "waterfall"} checked={showCriticalPath} onChange={event => setShowCriticalPath(event.currentTarget.checked)} /></Group>
       {/* Beside the chart it qualifies: a truncated trace draws only the spans that loaded. */}
-      {data.truncated && <Alert color="warn" data-trace-truncated>This trace is truncated: {data.spans.length} of {data.span_count} spans, {data.services.length} of {data.service_count} services.{loadedMs < data.duration_ms ? ` The timeline shows the loaded spans: ${duration(loadedMs)} of the trace's ${duration(data.duration_ms)}.` : ""}</Alert>}
-      {view === "waterfall" ? <Waterfall spans={data.spans} dark={dark} onSpan={select} selected={picked?.span_id} /> : <FlameGraph spans={data.spans} dark={dark} onSpan={select} traceMs={data.truncated ? data.duration_ms : undefined} />}
+      {data.truncated && <Box data-trace-truncated><Notice tone="warning">This trace is truncated: {data.spans.length} of {data.span_count} spans, {data.services.length} of {data.service_count} services.{loadedMs < data.duration_ms ? ` The timeline shows the loaded spans: ${duration(loadedMs)} of the trace's ${duration(data.duration_ms)}.` : ""}</Notice></Box>}
+      <Tabs.Panel value="waterfall" pt="sm"><Waterfall showCriticalPath={showCriticalPath} spans={data.spans} dark={dark} onSpan={select} selected={picked?.span_id} /></Tabs.Panel>
+      <Tabs.Panel value="flame" pt="sm"><FlameGraph spans={data.spans} dark={dark} onSpan={select} traceMs={data.truncated ? data.duration_ms : undefined} /></Tabs.Panel>
+      </Tabs>
       {picked && <SpanDetails key={picked.span_id} traceId={data.trace_id} span={picked} load={loadSpan} onClose={() => setPicked(undefined)} />}
-    </> : <Text c="dimmed">No spans were found for this trace.</Text>}
-    <Text fw={600}>Correlated logs</Text>{data.logs.length ? <Box style={{ overflow: "auto", minWidth: 0 }}><LogsViz foldConstants={false} panel={{ id: "correlated_logs", title: "Correlated logs", viz: "logs" }} result={logResult} dark={dark} height={320} /></Box> : <EmptyState tall icon={<ListBullets size={20} weight="duotone" />} title="No correlated logs">No logs in this window carry the selected trace ID.</EmptyState>}
+    </> : <DataState state="empty" empty={{ title: "No spans were found for this trace." }} />}
+    <Text fw={600}>Correlated logs</Text>{data.logs.length ? <Box style={{ overflow: "auto", minWidth: 0 }}><LogsViz foldConstants={false} panel={{ id: "correlated_logs", title: "Correlated logs", viz: "logs" }} result={logResult} dark={dark} height={320} /></Box> : <DataState state="empty" empty={{ icon: <ListBullets size={20} weight="duotone" />, title: "No correlated logs", description: "No logs in this window carry the selected trace ID." }} />}
   </Stack>;
 }
 
@@ -78,7 +80,7 @@ function FlameGraph({ spans, dark, onSpan, traceMs }: { spans: TraceSpan[]; dark
           const content = <Text component="span" size="xs" fw={700} truncate>{compact ? "" : span.operation}{width >= 12 ? ` · ${duration(span.duration_ms)}` : ""}</Text>;
           const geometry = { position: "absolute" as const, left: `${left}%`, top: lane * 36 + 6, width: `${Math.max(width, .35)}%`, height: 30, overflow: "hidden", minWidth: 3 };
           return <Tooltip key={span.span_id} label={`${span.service} · ${span.operation} · ${duration(span.duration_ms)}`} withArrow events={{ hover: true, focus: true, touch: false }}>
-            <Button variant="filled" color={color} c={filledTextOn(color)} aria-label={label} px={compact ? 2 : "xs"} size="compact-xs" onClick={() => onSpan(span)} style={geometry}>{content}</Button>
+            <Button variant="filled" color={color} aria-label={label} px={compact ? 2 : "xs"} size="compact-xs" onClick={() => onSpan(span)} style={geometry}>{content}</Button>
           </Tooltip>;
         })}
       </Box>

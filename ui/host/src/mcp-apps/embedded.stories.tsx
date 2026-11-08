@@ -6,7 +6,6 @@ import { health, panels, results } from "../catalog/fixtures";
 import { FragmentView } from "../dashboards/fragment-view";
 
 import { QueryFrame } from "../catalog/query-frame";
-import { healthRules } from "../catalog/accessibility";
 
 const meta = {
   id: "embedded-analysis", title: "Embedded/Analysis views", component: FragmentView,
@@ -18,6 +17,6 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 const fragment = (id: string): PanelFragment => ({ ...health, dashboard: { ...health.dashboard, panels: panels.filter(panel => panel.id === id) }, results: results.filter(result => result.id === id) });
-export const Health: Story = { parameters: { a11y: { config: { rules: healthRules } } }, play: async ({ canvas }) => { await expect(await canvas.findByRole("region", { name: "Service health: degraded; 4 services" })).toBeVisible(); } };
+export const Health: Story = { play: async ({ canvas }) => { await expect(await canvas.findByRole("region", { name: "Service health: degraded; 4 services" })).toBeVisible(); } };
 export const Latency: Story = { args: { fragment: fragment("latency") } };
 export const Dependencies: Story = { args: { fragment: fragment("topology") } };

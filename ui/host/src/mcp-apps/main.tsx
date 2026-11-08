@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { PanelApp } from "./panel-app";
 import "@mantine/core/styles.css";
+import "@labstack/ui/styles.css";
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "../dashboards/dashboard.css";

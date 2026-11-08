@@ -15,7 +15,7 @@ it.each([1,2,3])("caps %s-service fit at natural scale and centres it",n=>{
 });
 it("starts a dense 20-service fanout at the readable floor with its entry centred",()=>{
  const nodes=[node("gateway"),...Array.from({length:19},(_,i)=>node(`service-${i}-backend`))],m={nodes,edges:nodes.slice(1).map(n=>edge("gateway",n.id))};
- const fit=fitServiceMap(layoutServiceMapRaw(m,size),m,size);expect(fit.scale).toBe(.9);expect(fit.contentHeight).toBeGreaterThan(220);
+ const fit=fitServiceMap(layoutServiceMapRaw(m,size),m,size);expect(fit.scale).toBe(.95);expect(fit.contentHeight).toBeGreaterThan(220);
  const root=fit.nodes.find(n=>n.entry)!;expect(root.y+root.height/2+fit.initialView.y).toBeCloseTo(size.height/2);expect(root.y+fit.initialView.y).toBeGreaterThanOrEqual(0);expect(root.y+root.height+fit.initialView.y).toBeLessThanOrEqual(220);
  const leaves=fit.nodes.filter(n=>!n.entry).sort((a,b)=>a.y-b.y);
  for(let i=0;i<leaves.length;i++){expect(leaves[i].height).toBeCloseTo(20*fit.scale);if(i)expect(leaves[i].y-leaves[i-1].y).toBeGreaterThanOrEqual(24*fit.scale-.01);}
@@ -34,7 +34,7 @@ it("keeps dense fanout labels in their boxes and allows pan then Fit",async()=>{
  const viewport=host.querySelector<HTMLElement>('[data-service-viewport]')!,content=host.querySelector<HTMLElement>('[data-service-content]')!,initial=content.style.transform;
  for(const card of host.querySelectorAll<HTMLElement>('[data-service-node]')) {
   const line=card.querySelector<HTMLElement>('[data-service-text]')!,fontSize=parseFloat(line.style.fontSize);
-  expect(fontSize).toBeGreaterThanOrEqual(11);
+  expect(fontSize).toBeGreaterThanOrEqual(12);
   expect(parseFloat(line.style.lineHeight)).toBeGreaterThanOrEqual(1.3); // Bundled Geist Mono ascent + descent / em.
   expect(parseFloat(card.style.height)).toBeGreaterThanOrEqual(fontSize*parseFloat(line.style.lineHeight)+2-.01);
  }

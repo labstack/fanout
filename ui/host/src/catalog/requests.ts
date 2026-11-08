@@ -5,6 +5,7 @@ import { answer, answeredMessages, dashboard, dashboardSummary, health, healthCo
 
 export type Scenario = {
   signedOut?: boolean;
+  signInError?: boolean;
   chatDisabled?: boolean;
   setup?: boolean;
   empty?: boolean;
@@ -121,6 +122,8 @@ export function makeService(scenario: Scenario = {}, staticFetch: typeof fetch =
       : json({ results: rows });
     if (path === "/api/auth/status" && method === "GET") return json({ ...runtime, setup_required: Boolean(scenario.setup), agent_available: !scenario.chatDisabled });
     if (path === "/api/auth/me" && method === "GET") return scenario.signedOut || scenario.setup ? json({}, 401) : json(viewer);
+    if (path === "/api/auth/code/send" && method === "POST") return json({ code_sent: true });
+    if (path === "/api/auth/code/verify" && method === "POST") return scenario.signInError ? json({ code: "invalid_code", message: "Invalid or expired code. Request a new code." }, 401) : json({ status: "authenticated" });
     if (path === "/api/agent/threads" && method === "GET") {
       const query = (url.searchParams.get("q") ?? "").toLowerCase();
       return json({ items: [...threads.values()].filter(thread => thread.title.toLowerCase().includes(query)).map(({ messages: _messages, ...summary }) => summary), next_cursor: null });

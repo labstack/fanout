@@ -1,9 +1,11 @@
-import { Alert, Box, Button, Center, Code, Container, Group, Loader, Paper, PinInput, Stack, Text, TextInput, Title } from "@mantine/core";
-import { ArrowLeft, ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
+import { AuthFrame, DataState, EmailCodeSignIn, Notice, PageHeader, type SignInPending } from "@labstack/ui";
+import { Anchor, Button, Code, Group, Stack, Text, TextInput } from "@mantine/core";
+import { ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { createContext, FormEvent, ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { browserViewerFromMe, BrowserViewer, oauthReturnTo, unauthorizedEvent } from "./auth-session";
-import { BrandLockup } from "./brand";
+import { BrandMark } from "./brand";
+import { docs } from "../../links";
 
 export { authorizedFetch, logout } from "./auth-session";
 
@@ -58,34 +60,6 @@ async function jsonRequest(path: string, body?: unknown) {
   return payload;
 }
 
-function AuthSurface({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
-  return <Box
-    mih="100dvh"
-    style={{
-      // Tokens rather than literals: the old mint wash was left over from the
-      // teal palette, and --mantine-color-white is white in both schemes, so
-      // the sign-in page stayed light while the rest of the app went dark.
-      background: "radial-gradient(circle at 50% -12%, var(--mantine-color-brand-light), transparent 38%), linear-gradient(180deg, var(--mantine-color-default-hover), var(--mantine-color-body) 62%)",
-    }}
-  >
-    <Center mih="100dvh" px="md" py={48}>
-      <Container size={wide ? 680 : 480} w="100%">
-        <Paper
-          radius={28}
-          p={{ base: 24, sm: 40 }}
-          style={{
-            background: "var(--mantine-color-body)",
-            border: "1px solid var(--mantine-color-default-border)",
-            boxShadow: "var(--mantine-shadow-xl)",
-          }}
-        >
-          {children}
-        </Paper>
-      </Container>
-    </Center>
-  </Box>;
-}
-
 // The setup credential is delivered in the URL printed at first boot. Reading
 // it stays pure so a re-invoked state initializer cannot lose it; stripping it
 // from the address bar happens in an effect, so it does not linger in history,
@@ -115,11 +89,12 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [codeSent, setCodeSent] = useState(false);
   const [resendAt, setResendAt] = useState(0);
   const [now, setNow] = useState(() => Date.now());
+  const [signInPending, setSignInPending] = useState<SignInPending>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [setupResult, setSetupResult] = useState<SetupResult | null>(null);
   const [copied, setCopied] = useState(false);
-  const codeRef = useRef<HTMLDivElement>(null);
+  const emailInput = useRef<HTMLInputElement>(null);
   const returnTo = oauthReturnTo();
   const authenticated = viewer === "user";
 
@@ -190,14 +165,6 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }, [resendAt]);
   const resendWait = Math.max(0, Math.ceil((resendAt - now) / 1000));
 
-  // A rejected code empties the boxes, which leaves the caret in the last one
-  // with nowhere to type. Focus goes back to the first digit once the request
-  // has settled, because the boxes are disabled while it is in flight.
-  useEffect(() => {
-    if (!codeSent || busy || !error) return;
-    codeRef.current?.querySelector("input")?.focus();
-  }, [busy, codeSent, error]);
-
   async function copyText(value: string) {
     try {
       await navigator.clipboard.writeText(value);
@@ -208,23 +175,22 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }
 
   if (setupResult?.ingest_token) {
-    return <AuthSurface wide><Stack gap="lg">
-      <BrandLockup />
-      <div><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Setup complete</Text><Title order={1} mt="xs" fz={{ base: 28, sm: 32 }} lh={1.08}>Save your ingest token</Title></div>
+    return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>} size="lg"><Stack gap="lg">
+      <PageHeader eyebrow="Setup complete" title="Save your ingest token" />
       <Text c="dimmed">Fanout shows this token once. Store it with your collector secrets before continuing.</Text>
       <Stack gap="xs"><Text size="sm" fw={600}>OTLP endpoint</Text><Code block>{setupResult.suggested_endpoint ?? window.location.origin}</Code></Stack>
       <Stack gap="xs"><Text size="sm" fw={600}>Header</Text><Code block>{setupResult.ingest_header_name ?? "Authorization"}: Bearer {setupResult.ingest_token}</Code></Stack>
-      {error && <Alert color="bad" radius="md">{error}</Alert>}
+      {error && <Notice tone="danger">{error}</Notice>}
       <Group grow align="stretch">
         <Button variant="light" radius="md" leftSection={copied ? <Check size={16} weight="bold" /> : <Copy size={16} />} onClick={() => void copyText(`${setupResult.ingest_header_name ?? "Authorization"}: Bearer ${setupResult.ingest_token}`)}>{copied ? "Copied" : "Copy header"}</Button>
         <Button radius="md" rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setViewer("user"); setSetupResult(null); void refreshAccount(); }}>Continue to Fanout</Button>
       </Group>
       <Button variant="subtle" size="compact-xs" onClick={() => void copyText(setupResult.ingest_token ?? "")}>Copy token only</Button>
-    </Stack></AuthSurface>;
+    </Stack></AuthFrame>;
   }
 
-  if (!sessionReady || !statusReady || loginToken) return <Center mih="100dvh"><Loader size="sm" /></Center>;
-  if (!status) return <AuthSurface><Stack gap="lg"><BrandLockup /><Title order={1}>Fanout is unavailable</Title><Alert color="bad" radius="md">{error || "Authentication status could not be loaded."}</Alert></Stack></AuthSurface>;
+  if (!sessionReady || !statusReady || loginToken) return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>}><DataState state="loading" loadingLabel="Loading sign-in" rows={4} /></AuthFrame>;
+  if (!status) return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>}><Stack gap="lg"><PageHeader title="Fanout is unavailable" /><Notice tone="danger">{error || "Authentication status could not be loaded."}</Notice></Stack></AuthFrame>;
   if (authenticated && returnTo) return null;
   if (authenticated) return <RuntimeStatusContext.Provider value={status}>
     <ViewerContext.Provider value={account ?? { id: "", email, display_name: displayName, status: "active", role: "" }}>{children}</ViewerContext.Provider>
@@ -232,20 +198,17 @@ export default function AuthGate({ children }: { children: ReactNode }) {
 
   if (status && !status.setup_required && status.auth_mode === "oidc") {
     const target = returnTo ? `/api/auth/oidc/start?return_to=${encodeURIComponent(returnTo)}` : "/api/auth/oidc/start";
-    return <AuthSurface><Stack gap={28}>
-      <BrandLockup />
-      <Stack gap={10}>
-        <Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Secure workspace</Text>
-        <Title order={1} fz={{ base: 28, sm: 32 }} lh={1.08}>Sign in</Title>
-        <Text c="dimmed" size="md" lh={1.6}>Use your organization&apos;s identity provider to continue.</Text>
-      </Stack>
-      {error && <Alert color="bad" radius="md">{error}</Alert>}
+    return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>}><Stack gap={28}>
+      <PageHeader title="Sign in to Fanout" description="Use your organization’s identity provider to continue." />
+      {error && <Notice tone="danger">{error}</Notice>}
       <Button component="a" href={target} size="md" radius="md" rightSection={<ArrowRight size={17} weight="bold" />}>Continue with SSO</Button>
-    </Stack></AuthSurface>;
+    </Stack></AuthFrame>;
   }
 
   async function sendCode() {
+    if (busy || !status?.smtp_configured || (codeSent && resendWait > 0)) return;
     setBusy(true);
+    setSignInPending(codeSent ? "resend" : "send");
     setError("");
     try {
       await jsonRequest("/api/auth/code/send", { email });
@@ -257,11 +220,14 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
       setBusy(false);
+      setSignInPending(null);
     }
   }
 
   async function verifyCode(value: string) {
+    if (busy || value.length !== 6) return;
     setBusy(true);
+    setSignInPending("verify");
     setError("");
     try {
       await jsonRequest("/api/auth/code/verify", { email, code: value });
@@ -278,12 +244,14 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
+      setSignInPending(null);
     }
   }
 
   function changeEmail() {
     setCodeSent(false);
     setCode("");
+    setResendAt(0);
     setError("");
   }
 
@@ -292,16 +260,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     setBusy(true);
     setError("");
     try {
-      if (status?.setup_required) {
-        const result = await jsonRequest("/api/auth/setup", { email, display_name: displayName, setup_token: setupToken }) as SetupResult;
-        if (result.ingest_token) setSetupResult(result); else { setViewer("user"); void refreshAccount(); }
-      } else if (!codeSent) {
-        await sendCode();
-        return;
-      } else {
-        await verifyCode(code);
-        return;
-      }
+      const result = await jsonRequest("/api/auth/setup", { email, display_name: displayName, setup_token: setupToken }) as SetupResult;
+      if (result.ingest_token) setSetupResult(result); else { setViewer("user"); void refreshAccount(); }
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -309,48 +269,31 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     }
   }
 
-  // The code step is its own page: it says a code was sent above the fold
-  // rather than in the smallest line on the screen, and it computes its copy
-  // first so an empty description holds no space.
-  const onCodeStep = codeSent && !status?.setup_required;
-  const heading = status?.setup_required ? "Create the first admin" : onCodeStep ? "Check your email" : status?.self_signup ? "Sign in or create an account" : "Sign in";
-  const description = status?.setup_required ? "Use the one-time token printed by the Fanout process."
-    : !status?.smtp_configured ? "Email delivery is not configured. Ask the operator to run fanout login-link with your email address."
-      : onCodeStep ? `We sent a code to ${email}.`
-        : status?.self_signup ? "Enter your email to sign in or create a viewer account. No password needed."
-          : "Enter your email and we’ll send a short verification code. No password needed.";
+  if (!status.setup_required) return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>}>
+    <fieldset disabled={!status.smtp_configured} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+      <EmailCodeSignIn
+        step={codeSent ? "code" : "email"}
+        title="Sign in to Fanout"
+        description={!status.smtp_configured ? "Email delivery is not configured. Ask the operator to run fanout login-link with your email address." : status.self_signup ? "We'll email you a 6-digit code. New here? This creates your account." : "We'll email you a 6-digit code."}
+        email={email} onEmailChange={setEmail} inputRef={emailInput} onSendCode={() => { if (emailInput.current?.reportValidity()) void sendCode(); }}
+        code={code} onCodeChange={setCode} onVerify={value => void verifyCode(value)}
+        onChangeEmail={changeEmail} onResend={() => void sendCode()} resendIn={resendWait}
+        pending={signInPending} error={error || undefined}
+        stepLabels={false} expiresInMinutes={5}
+        codeNote={<Text size="xs" c="dimmed">Codes expire in 5 minutes. Check your spam folder if the email hasn’t arrived.</Text>}
+        labels={{ continue: "Continue with email", verify: "Verify code", resend: "Resend code", changeEmail: "Change email", codeSent: () => <>Enter the code sent to <Text span inherit fw={700}>{email}</Text>.</>, resendIn: countdown => `Resend in ${countdown}` }}
+      />
+    </fieldset>
+  </AuthFrame>;
 
-  return <AuthSurface><Stack gap={28}>
-    <BrandLockup />
-    <Stack gap={10}>
-      <Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">
-        {status?.setup_required ? "One-time setup" : "Secure workspace"}
-      </Text>
-      <Title order={1} fz={{ base: 28, sm: 32 }} lh={1.08}>{heading}</Title>
-      {description && <Text c="dimmed" size="md" lh={1.6} maw={390}>{description}</Text>}
-    </Stack>
+  return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>}><Stack gap={28}>
+    <PageHeader eyebrow="One-time setup" title="Create the first admin" description="Use the one-time token printed by the Fanout process." />
     <form onSubmit={submit}><Stack gap="md">
-      <TextInput label="Email" placeholder="you@company.com" type="email" required value={email} onChange={(event) => setEmail(event.currentTarget.value)} disabled={codeSent} variant="filled" radius="md" size="md" autoFocus={!codeSent} />
-      {status?.setup_required && <TextInput label="Display name" placeholder="Your display name" value={displayName} onChange={(event) => setDisplayName(event.currentTarget.value)} variant="filled" radius="md" size="md" />}
-      {status?.setup_required && <TextInput label="Setup token" placeholder="from the setup URL printed at startup" required value={setupToken} onChange={(event) => setSetupToken(event.currentTarget.value)} autoComplete="one-time-code" variant="filled" radius="md" size="md" />}
-      {onCodeStep && <Stack gap="xs">
-        <Text size="sm" fw={600}>Verification code</Text>
-        <Box ref={codeRef}><PinInput length={6} type="number" oneTimeCode autoFocus value={code} onChange={setCode} onComplete={(value) => void verifyCode(value)} disabled={busy} error={Boolean(error)} size="md" radius="md" aria-label="Verification code" getInputProps={(index) => ({ "aria-label": `Digit ${index + 1}` })} /></Box>
-        <Group justify="space-between" gap="xs">
-          <Text c="dimmed" size="xs">Sent to {email}</Text>
-          <Button variant="subtle" size="compact-xs" leftSection={<ArrowLeft size={12} weight="bold" />} onClick={changeEmail} disabled={busy}>Change email</Button>
-        </Group>
-        <Group justify="space-between" gap="xs">
-          <Text c="dimmed" size="xs">Codes expire in 5 minutes</Text>
-          <Button variant="subtle" size="compact-xs" onClick={() => void sendCode()} disabled={busy || resendWait > 0}>{resendWait > 0 ? `Resend in ${resendWait}s` : "Resend code"}</Button>
-        </Group>
-      </Stack>}
-      {error && <Alert color="bad" radius="md">{error}</Alert>}
-      {/* The sixth digit still submits on its own, but a partial paste, a short
-          autofill or a cleared field has to leave something to press. */}
-      {onCodeStep
-        ? <Button type="submit" size="md" radius="md" mt={4} loading={busy} disabled={busy || code.length < 6} rightSection={<ArrowRight size={17} weight="bold" />}>Verify code</Button>
-        : <Button type="submit" size="md" radius="md" mt={4} loading={busy} disabled={!status || (!status.setup_required && !status.smtp_configured)} leftSection={status?.setup_required ? <UserPlus size={17} weight="bold" /> : undefined} rightSection={!status?.setup_required ? <ArrowRight size={17} weight="bold" /> : undefined}>{status?.setup_required ? "Create admin" : "Send code"}</Button>}
+      <TextInput label="Email" placeholder="you@company.com" type="email" required value={email} onChange={event => setEmail(event.currentTarget.value)} autoFocus />
+      <TextInput label="Display name" placeholder="Your display name" value={displayName} onChange={event => setDisplayName(event.currentTarget.value)} />
+      <TextInput label="Setup token" placeholder="from the setup URL printed at startup" required value={setupToken} onChange={event => setSetupToken(event.currentTarget.value)} autoComplete="one-time-code" />
+      {error && <Notice tone="danger">{error}</Notice>}
+      <Button type="submit" loading={busy} leftSection={<UserPlus size={17} weight="bold" />}>Create admin</Button>
     </Stack></form>
-  </Stack></AuthSurface>;
+  </Stack></AuthFrame>;
 }

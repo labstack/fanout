@@ -142,7 +142,7 @@ it("clears the keyboard preview when a mouse brush commits through the same zoom
   await act(async()=>end({areas:[{coordRange:[1000,4000]}]}));
   expect(view.zoom).toHaveBeenCalledExactlyOnceWith(1000,4000);expect(view.el.textContent).not.toContain('Zoom to range');
 });
-it.each([['2026-10-08','18:46:00 – 18:48:30 UTC · 2m 30s'],['2026-10-07','2026-10-07 18:46:00 – 18:48:30 UTC · 2m 30s']])("shows a compact range label with full ISO in its title for %s",async(date,label)=>{
+it.each([['2026-10-08','18:46:00 – 18:48:30 UTC · 2 m 30 s'],['2026-10-07','2026-10-07 18:46:00 – 18:48:30 UTC · 2 m 30 s']])("shows a compact range label with full ISO in its title for %s",async(date,label)=>{
   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-08T20:00:00Z'));
   const from=Date.parse(date+'T18:46:00Z'),next={...option,series:[{...option.series[0],data:[[from,1],[from+30000,2],[from+150000,3],[from+180000,4]]}]};
   const view=await mount(next);await view.draw(next,{from,to:from+210000});const plot=await view.focus();await key(plot,'ArrowRight',{shiftKey:true});

@@ -14,8 +14,8 @@ function number(value: number, formatter = plain): string {
 function panelDuration(value: number, unit: string): string {
   const ms = unit === "s" ? value * 1000 : unit === "ns" ? value / 1e6 : value;
   // Keep the original unit if conversion underflows, rather than printing zero.
-  if (value !== 0 && ms === 0) return `${small(value)}${unit}`;
-  return ms !== 0 && Math.abs(ms) < 1 ? `${small(ms)}ms` : duration(ms);
+  if (value !== 0 && ms === 0) return `${small(value)} ${unit}`;
+  return ms !== 0 && Math.abs(ms) < 1 ? `${small(ms)} ms` : duration(ms);
 }
 
 const byteUnits = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -65,9 +65,10 @@ export function formatAxis(unit?: string, axis?: { min: number; max: number; int
     const extent = Math.max(Math.abs(axis.min), Math.abs(axis.max)) * factor, step = axis.interval * factor;
     // The largest unit the axis reaches whose ticks still read in two decimals.
     const [scale, suffix] = durationScales.find(([size]) => extent >= size && Math.abs(step / size * 100 - Math.round(step / size * 100)) < 1e-6) ?? [1, "ms"];
-    return (value: number) => Number.isFinite(value) ? `${number(value * factor / scale)}${suffix}` : "—";
+    return (value: number) => Number.isFinite(value) ? `${number(value * factor / scale)} ${suffix}` : "—";
   }
   return (value: number) => {
+    if ((!unit || unit === "count") && Math.abs(value) >= 1000) return number(value, compact);
     if (unit === "ms" || unit === "s" || unit === "ns") return formatValue(unit, value).replace(/(\.\d*?)0+([a-z]*)$/, "$1$2").replace(/\.([a-z]*)$/, "$1");
     return formatValue(unit, value);
   };

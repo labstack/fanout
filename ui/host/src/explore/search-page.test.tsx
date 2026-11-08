@@ -150,8 +150,10 @@ describe("SearchPage", () => {
     const { ui, wait, search } = await render(logsPreset);
     await wait(() => expect(document.querySelectorAll("[data-search-page] tbody tr")).toHaveLength(1));
     const row = document.querySelector<HTMLElement>("[data-search-page] tbody tr")!;
+    expect(within(row).getByRole("button", {name: "it's done"})).toBeTruthy();
     await act(async () => row.click());
-    expect(row.getAttribute("aria-expanded")).toBe("true");
+    expect(within(row).getByRole("button", {name: "it's done"})).toBeTruthy();
+    expect(row.querySelector("button[aria-expanded]")?.getAttribute("aria-expanded")).toBe("true");
     await wait(() => expect(document.querySelector("[data-log-details]")?.textContent).toContain("pod-1"));
     const sql: string = bodies("/api/queries/run").at(-1).dashboard.panels[0].sql;
     expect(sql).toContain("coalesce(body, '') = 'it''s done'");

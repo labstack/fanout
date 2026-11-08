@@ -1,4 +1,5 @@
 import { within } from "@testing-library/dom";
+import { shortcutsEvent } from "../shortcuts-event";
 import { MantineProvider } from "@mantine/core";
 import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
@@ -60,7 +61,7 @@ const settle = async (client: QueryClient) => {
     expect(idleCycles).toBeGreaterThanOrEqual(2);
     if (client.getQueryData(["dashboard", "d1"])) expect(document.querySelector('[aria-label="Refresh now"]')).not.toBeNull();
     expect(document.querySelector('[aria-label="Refresh now"][disabled]')).toBeNull();
-    expect(document.querySelector('[data-panel] [aria-label="Loading panel"],[data-panel] [aria-label="Refreshing"]')).toBeNull();
+    expect(document.querySelector('[data-panel-body] > [role="status"],[data-panel] [aria-label="Refreshing"]')).toBeNull();
   }, {timeout: 3000, interval: 5});
 };
 async function key(target: HTMLElement, key: string, extra: KeyboardEventInit = {}) {
@@ -158,9 +159,9 @@ describe("DashboardPage", () => {
     await key(close,'f');await vi.waitFor(()=>expect(onSearch).toHaveBeenCalledExactlyOnceWith({view:undefined},true));
     await rerender(onSearch.mock.lastCall![0]);await closed();
   });
-  it("uses a keyboard icon with an accessible shortcut tooltip", async () => {
-    const {host}=await render();const help=host.querySelector<HTMLButtonElement>('[aria-label="Keyboard shortcuts (?)"]')!;
-    expect(help).not.toBeNull();expect(help.textContent).toBe("");expect(help.querySelector("svg")).not.toBeNull();
+  it("keeps keyboard shortcuts out of the dashboard toolbar", async () => {
+    const {host}=await render();
+    expect(host.querySelector('[aria-label="Keyboard shortcuts (?)"]')).toBeNull();
   });
   it("pauses the live batch timer while selecting and resumes the chosen interval on cancel",async()=>{
     panelResponse=async()=>json({results:[{id:'latency',status:'ok',frame,elapsed_ms:1}]});
@@ -172,7 +173,8 @@ describe("DashboardPage", () => {
       const notes=host.querySelectorAll('[data-range-paused]');expect(notes).toHaveLength(1);
       expect(notes[0].closest('[aria-label="Dashboard controls"]')).not.toBeNull();
       expect((notes[0] as HTMLElement).style.position).not.toBe('absolute');
-      expect(notes[0].previousElementSibling?.textContent).toMatch(/^Updated /);
+      expect(host.querySelector('header')?.textContent).toMatch(/Updated /);
+      expect(host.querySelector('[aria-label="Dashboard controls"]')?.textContent).not.toMatch(/Updated /);
       expect(host.textContent?.match(/Paused while selecting/g)).toHaveLength(1);
       await act(async()=>vi.advanceTimersByTimeAsync(60000));await settle(client);expect(queryBodies).toHaveLength(before);
       await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label^="Cancel range"]')!.click());
@@ -216,16 +218,16 @@ describe("DashboardPage", () => {
     expect(document.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true);
     await key(close,"Escape");await closed();await vi.waitFor(()=>expect(document.activeElement).toBe(toolbar));
   });
-  it("opens discoverable shortcut help and returns focus to its toolbar button", async () => {
-    const { host } = await render();
-    const help = host.querySelector<HTMLButtonElement>('[aria-label="Keyboard shortcuts (?)"]')!;
-    expect(help.querySelector("svg")).not.toBeNull();
-    help.focus(); await act(async () => help.click());
+  it("opens shortcut help from the header help menu and returns focus", async () => {
+    await render();
+    const trigger = document.createElement("button"); document.body.append(trigger); trigger.focus();
+    await act(async () => { window.dispatchEvent(new Event(shortcutsEvent)); });
     const dialog = document.querySelector('[role="dialog"]')!;
     expect(dialog.textContent).toContain("Shift+Left/Right"); expect(dialog.textContent).toContain("Without a focused panel, f does nothing.");
     const close = dialog.querySelector<HTMLElement>("button")!;
     await act(async () => { close.focus(); close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
-    await closed(); await vi.waitFor(() => expect(document.activeElement).toBe(help));
+    await closed(); await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+    trigger.remove();
   });
   it("returns focus to History after Escape closes its drawer", async () => {
     const { client } = await render();
@@ -321,7 +323,12 @@ describe("DashboardPage", () => {
     },{interval:5,timeout:3000});
     const viewport = host.querySelector<HTMLElement>("[data-service-viewport]")!;
     expect(viewport).not.toBeNull();
-    for (const node of host.querySelectorAll<HTMLElement>("[data-service-node]")) expect(parseFloat(node.style.top)+parseFloat(node.style.height)).toBeLessThanOrEqual(180);
+    // The 12px text floor can require a taller pan canvas at this width.
+    const content = viewport.querySelector<HTMLElement>("[data-service-content]")!;
+    for (const node of host.querySelectorAll<HTMLElement>("[data-service-node]")) {
+      expect(parseFloat(node.style.top)+parseFloat(node.style.height)).toBeLessThanOrEqual(parseFloat(content.style.height));
+      expect(parseFloat(node.querySelector<HTMLElement>("[data-service-text]")!.style.fontSize)).toBeGreaterThanOrEqual(12);
+    }
     await act(async () => {
       viewport.dispatchEvent(new PointerEvent("pointerdown", {button:0,clientX:0,clientY:0,bubbles:true}));
       for (const y of [45,90]) viewport.dispatchEvent(new PointerEvent("pointermove", {clientX:30,clientY:y,bubbles:true}));
@@ -400,14 +407,14 @@ describe("DashboardPage", () => {
 
   it("answers a missing dashboard instead of showing another", async () => {
     const { host } = await render({}, "missing");
-    await vi.waitFor(() => expect(host.textContent).toContain("This dashboard isn't here"), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(within(host).getByRole("heading", {name: "This dashboard isn't here", level: 2})).toBeTruthy(), { interval: 5, timeout: 3000 });
   });
 
   it("shows an empty dashboard list and opens chat with a starter prompt", async () => {
     listResponse = async () => json({ dashboards: [] });
     const { host, onOpen } = await render({}, "");
-    await vi.waitFor(() => expect(host.textContent).toContain("No dashboards yet"), { interval: 5, timeout: 3000 });
-    await vi.waitFor(() => expect(host.textContent).not.toContain("Loading your dashboard"), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(within(host).getByRole("heading", {name: "No dashboards yet", level: 2})).toBeTruthy(), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(host.textContent).not.toContain("Loading dashboard"), { interval: 5, timeout: 3000 });
     const byText = (label: string) => [...host.querySelectorAll("button")].find(b => b.textContent === label);
     await act(async () => { byText("Create with AI")!.click(); });
     expect(app.openChat).toHaveBeenCalledWith(expect.stringMatching(/^Build me a dashboard for /));
@@ -418,7 +425,7 @@ describe("DashboardPage", () => {
     app.agentAvailable = false;
     listResponse = async () => json({ dashboards: [] });
     const { host } = await render({}, "");
-    await vi.waitFor(() => expect(host.textContent).toContain("No dashboards yet"), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(within(host).getByRole("heading", {name: "No dashboards yet", level: 2})).toBeTruthy(), { interval: 5, timeout: 3000 });
     expect([...host.querySelectorAll("button")].map(b => b.textContent)).toEqual(["New dashboard"]);
     await act(async () => { host.querySelector("button")!.click(); });
     await vi.waitFor(() => expect(document.body.querySelector("[role=dialog]")?.textContent).toContain("Dashboard name"), { interval: 5, timeout: 3000 });
@@ -429,7 +436,7 @@ describe("DashboardPage", () => {
     const { host } = await render({}, "");
     await vi.waitFor(() => expect(host.textContent).toContain("Dashboards could not be loaded"), { interval: 5, timeout: 3000 });
     await vi.waitFor(() => expect(host.textContent).toContain("List failed"), { interval: 5, timeout: 3000 });
-    await vi.waitFor(() => expect(host.textContent).not.toContain("Loading your dashboard"), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(host.textContent).not.toContain("Loading dashboard"), { interval: 5, timeout: 3000 });
   });
 
   it("loads an explicit dashboard without waiting for its list", async () => {
@@ -798,7 +805,7 @@ it("waits for rendered idle even when query notifications lag network idle", asy
     const {host}=await render();
     const refresh=host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]');
     expect(refresh).not.toBeNull();expect(refresh!.disabled).toBe(false);
-    expect(host.querySelector('[aria-label="Loading panel"],[aria-label="Refreshing"]')).toBeNull();
+    expect(host.querySelector('[data-panel-body] > [role="status"],[aria-label="Refreshing"]')).toBeNull();
     expect(host.textContent).toContain("120");
   } finally { notifyManager.setScheduler(callback => setTimeout(callback, 0)); }
 });

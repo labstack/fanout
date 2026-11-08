@@ -8,8 +8,9 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serviceMapModel } from "../../../panels/rollups";
 import { chartThemeFor } from "../../../panels/compile";
-import { relativeLuminance } from "../../../theme";
+import { relativeLuminance } from "@labstack/ui";
 import { typeScale } from "../../../tokens";
+
 import { ServiceMapViz } from "./viz/service-map";
 import { fitServiceMap, layoutServiceMapRaw, serviceCardLabels, serviceMapStructure } from "./viz/service-map-layout";
 import { PanelCard } from "./panel-card";
@@ -112,7 +113,7 @@ it("measures usable client bounds and refits on resize without changing the LR l
 it("drops optional metrics before names and bounds labels without changing the full tooltip", () => {
   const node = {...model().nodes[0],id:"recommendation",request_rate:1.2,error_rate:3.4};
   expect(serviceCardLabels(node,{width:140,scale:.85,compact:true}).metric).toBe("");
-  expect(serviceCardLabels({...node,id:"cart"},{width:300,scale:1}).metric).toContain("3.4% err");
+  expect(serviceCardLabels({...node,id:"cart"},{width:300,scale:1}).metric).toContain("3.40% err");
 });
 
 describe("shared map interactions", () => {
@@ -136,7 +137,7 @@ describe("shared map interactions", () => {
     for (const edge of host.querySelectorAll('svg > g > path')) {
       expect(Number(edge.getAttribute("stroke-width"))).toBeGreaterThanOrEqual(1);
       expect(Number(edge.getAttribute("stroke-width"))).toBeLessThanOrEqual(4);
-      expect(edge.querySelector("title")?.textContent).toContain("calls");
+      expect(edge.querySelector("title")?.textContent).toContain("requests");
       expect(edge.querySelector("text")).toBeNull();
     }
     await act(async () => button("frontend").focus()); expect(document.activeElement).toBe(button("frontend"));
@@ -262,7 +263,6 @@ it("reveals floor-sized labels that fit their boxes when zooming a dense fitted 
   expect(parseFloat(text.style.fontSize)*zoom+2).toBeLessThanOrEqual(parseFloat(card.style.height)*zoom);
 });
 
-
 it("accepts worker geometry, retains it during topology changes and ignores cancelled results",async()=>{
   const workers: {onmessage?: (event:{data:ReturnType<typeof layoutServiceMapRaw>})=>void;postMessage:ReturnType<typeof vi.fn>;terminate:ReturnType<typeof vi.fn>}[]=[];
   vi.stubGlobal("Worker",class {onmessage?: (event:{data:ReturnType<typeof layoutServiceMapRaw>})=>void;postMessage=vi.fn();terminate=vi.fn();constructor(){workers.push(this);}});
@@ -355,7 +355,7 @@ it("removes service-map collector instrumentation in production", async () => {
     const region = host.querySelector('[role="region"]')!;
     expect(region.querySelectorAll("button")).toHaveLength(30);
     for (const node of region.querySelectorAll("*")) {
-      expect([...node.attributes].map(attr => attr.name).filter(name => name.startsWith("data-") && !name.startsWith("data-mantine-"))).toEqual([]);
+      expect([...node.attributes].map(attr => attr.name).filter(name => name.startsWith("data-") && !name.startsWith("data-mantine-") && !["data-variant", "data-size", "data-with-left-section", "data-position"].includes(name))).toEqual([]);
     }
   } finally { vi.unstubAllEnvs(); }
 });
@@ -386,18 +386,18 @@ it.each([[30, 21], [12, 9]])("keeps realistic-name metrics in titles and stable 
 });
 it.each([
   [0, 0, "0/s"], [-1, 0, "0/s"], [1e-300, 0, "<0.01/s"], [999999, 0, "999K/s"], [1e300, 0, "999K/s"],
-  [1, .0004, "0.1% err"], [1, 99.9, "99.9% err"], [1, 100, "100% err"], [1, 1e300, "100% err"],
+  [1, .0004, "<0.01% err"], [1, 99.9, "99.9% err"], [1, 100, "100.0% err"], [1, 1e300, "100.0% err"],
 ])("bounds card formats rate=%s error=%s", (rate, error, expected) => {
   const node = serviceMapModel(fanout(2), {from_ms:0,to_ms:3600000}).nodes[0];
-  const labels = mapLayout.serviceCardLabels({...node, request_rate:rate, error_rate:error}, {width:82,scale:1});
+  const labels = mapLayout.serviceCardLabels({...node, request_rate:rate, error_rate:error}, {width:110,scale:1});
   expect(labels.metric).toBe(expected);
-  expect(labels.metric.length).toBeLessThanOrEqual(9);
+  expect(labels.metric.length).toBeLessThanOrEqual(11);
 });
 
 it("preserves zero error in the full-card metric pair", () => {
   const node = serviceMapModel(fanout(2), {from_ms:0,to_ms:3600000}).nodes[0];
   const labels = mapLayout.serviceCardLabels({...node, error_rate:0}, {width:400,scale:1});
-  expect(labels.metric).toContain("0% err");
+  expect(labels.metric).toContain("0.00% err");
 });
 
 });

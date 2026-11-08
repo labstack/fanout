@@ -1,8 +1,7 @@
-import { alertRules } from "../catalog/accessibility";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect } from "storybook/test";
 import { Product, pageParameters } from "../catalog/product";
-const meta = { id: "pages-alerts", title: "Pages/Alerts", component: Product, args: { path: "/alerts" }, parameters: { ...pageParameters, a11y: { config: { rules: alertRules } } } } satisfies Meta<typeof Product>;
+const meta = { id: "pages-alerts", title: "Pages/Alerts", component: Product, args: { path: "/alerts" }, parameters: { ...pageParameters, } } satisfies Meta<typeof Product>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Ready: Story = { play: async ({ canvas }) => {

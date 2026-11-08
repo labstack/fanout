@@ -18,7 +18,7 @@ it("uses the dashboard logs table for correlated logs with compact times and com
     const table = node.querySelector(".dashboard-table")!;
     expect(table).not.toBeNull();
     expect(table.querySelector('td[data-field="time"]')?.textContent).toBe(formatTimestamp(Date.parse(log.time)));
-    expect(table.querySelector('td[data-field="severity"]')?.textContent).toContain("◆ ERROR");
+    expect(table.querySelector('td[data-field="severity"]')?.textContent).toContain("Error");
     expect(table.querySelector<HTMLElement>('td[data-field="service"] > *')?.style.whiteSpace).toBe("nowrap");
   } finally { await act(async () => root.unmount()); node.remove(); }
 });
@@ -29,6 +29,17 @@ it.each([false, true].flatMap(dark => [false, true].map(external => ({dark, exte
   try {
     const onSpan = external ? vi.fn() : undefined;
     await act(async () => root.render(<MantineProvider forceColorScheme={dark ? "dark" : "light"}><QueryClientProvider client={new QueryClient()}><TraceDetailView result={traceFixture} dark={dark} onSpan={onSpan} /></QueryClientProvider></MantineProvider>));
+    const tabs = within(node).getByRole("tablist", {name: "Trace view"});
+    const waterfall = within(tabs).getByRole("tab", {name: "Waterfall"});
+    const flame = within(tabs).getByRole("tab", {name: "Flame graph"});
+    expect(waterfall.getAttribute("aria-selected")).toBe("true");
+    expect(flame.getAttribute("aria-selected")).toBe("false");
+    for (const tab of [waterfall, flame]) {
+      expect(tab.hasAttribute("aria-pressed")).toBe(false);
+      const panel = document.getElementById(tab.getAttribute("aria-controls")!);
+      expect(panel?.getAttribute("role")).toBe("tabpanel");
+      expect(panel?.getAttribute("aria-labelledby")).toBe(tab.id);
+    }
     expect(node.textContent).toContain("correlated failure"); expect(node.textContent).toContain("1 of 3 spans");
     expect(node.querySelector('[aria-label^="cart on checkout took"]')).not.toBeNull();
     await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
@@ -39,8 +50,13 @@ it.each([false, true].flatMap(dark => [false, true].map(external => ({dark, exte
     await act(async () => frame.click());
     // Without a caller's handler a span opens its details below the chart.
     if (onSpan) { expect(onSpan).toHaveBeenCalledWith(span); expect(node.querySelector("[data-span-details]")).toBeNull(); }
-    else expect(node.querySelector("[data-span-details]")?.textContent).toContain("Error");
-    expect([...node.querySelectorAll("button")].find(b => b.textContent === "Flame graph")?.getAttribute("aria-pressed")).toBe("true");
+    else {
+      const metadata = node.querySelector('dl[aria-label="Span metadata"]');
+      expect(metadata?.querySelector("dt")?.textContent).toBe("Status");
+      expect(metadata?.querySelector("dd")?.textContent).toContain("Error");
+      expect([...metadata!.querySelectorAll("dd")].some(value => value.textContent === span.span_id)).toBe(true);
+    }
+    expect([...node.querySelectorAll("button")].find(b => b.textContent === "Flame graph")?.getAttribute("aria-selected")).toBe("true");
     expect(node.textContent).not.toMatch(/Explain|Investigate|fix it/);
   } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
 });
@@ -116,7 +132,7 @@ it("keeps flame ticks on one line and folds services past the palette into one l
     await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><TraceDetailView result={{ ...traceFixture, data: { ...traceFixture.data, spans } }} dark={false} /></QueryClientProvider></MantineProvider>));
     await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
     const ticks = [...node.querySelectorAll<HTMLElement>("[data-flame-graph] > div:first-child > *")];
-    expect(ticks.at(-1)?.textContent).toBe("50m 20s");
+    expect(ticks.at(-1)?.textContent).toBe("50 m 20 s");
     expect(ticks.every(tick => tick.style.whiteSpace === "nowrap")).toBe(true);
     const legend = [...node.querySelectorAll("[data-flame-legend] > *")].map(item => item.textContent);
     expect(legend).toEqual(["svc0", "svc1", "svc2", "svc3", "svc4", "svc5", "2 other services: svc6, svc7"]);

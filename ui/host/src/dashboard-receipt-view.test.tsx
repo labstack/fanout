@@ -1,19 +1,34 @@
+import { savedReceipt, invalidReceipt, correctedReceipt, savedInvalidReceipt } from "./catalog/fixtures";
 import { createRootRoute, createRoute, createRouter, RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import type { BuildReceipt } from "./dashboard-receipt";
 import { MantineProvider } from "@mantine/core";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { DashboardReceiptView } from "./dashboard-receipt-view";
 import { receiptForTurn } from "./dashboard-receipt";
 import { build, call, user, result, saved } from "../tests/dashboard-receipts";
 
-function view(receipt:BuildReceipt, running=false) {
- const route=createRootRoute({component:()=> <DashboardReceiptView receipt={receipt} running={running} awaitingAnswer={running}/>});
+function view(receipt:BuildReceipt, running=false, initialExpanded=false) {
+ const route=createRootRoute({component:()=> <DashboardReceiptView receipt={receipt} running={running} awaitingAnswer={running} initialExpanded={initialExpanded}/>});
  const dashboard=createRoute({getParentRoute:()=>route,path:'/dashboards/$dashboardId',component:()=>null});
  const router=createRouter({routeTree:route.addChildren([dashboard]),history:createMemoryHistory({initialEntries:['/']})});
  return <MantineProvider><RouterProvider router={router}/></MantineProvider>;
 }
+it.each([
+ ["Saved",savedReceipt,false,false], ["Details",savedReceipt,false,true],
+ ["Building",{...savedReceipt,saved:undefined},true,false], ["Invalid Panel",invalidReceipt,false,false],
+ ["Corrected",correctedReceipt,false,false], ["Saved with invalid panel",savedInvalidReceipt,false,false],
+] as const)("renders valid receipt markup for %s before and after disclosure",async (_name,receipt,running,expanded)=>{
+ const error=vi.spyOn(console,"error").mockImplementation(()=>undefined);
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+ try {await act(async()=>root.render(view(receipt,running,expanded)));
+ const assertMarkup=()=>{expect(host.querySelector("p div,p ul,p ol,button button")).toBeNull();expect(error.mock.calls.filter(args=>/cannot (?:be|contain)|descendant|validateDOMNesting/.test(args.join(" ")))).toEqual([]);};
+ assertMarkup();
+ await act(async()=>host.querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());assertMarkup();
+ if(receipt===invalidReceipt){const rows=[...host.querySelectorAll("[data-build-receipt] div")];expect(rows.some(row=>row.textContent==="Preview · p95 latency: Ok · 24 ms")).toBe(true);}
+ }finally{await act(async()=>root.unmount());host.remove();error.mockRestore();}
+});
 it('renders one quiet status, safe chips, exact saved-version link and keyboard details', async () => {
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  try {
@@ -28,7 +43,7 @@ it('renders one quiet status, safe chips, exact saved-version link and keyboard 
   await act(async()=>details.click());expect(details.getAttribute('aria-expanded')).toBe('true');
   expect(host.textContent?.match(/(?:Saved v|saved version |saved v)2/g)).toHaveLength(1);
   expect(host.textContent).toContain('Unknown field');expect(host.textContent).toContain('Preview');
-  expect(host.textContent).toContain('Preview · Latency: ok');expect(host.textContent).toContain('Save · Latency: ok');
+  expect(host.textContent).toContain('Preview · Latency: Ok');expect(host.textContent).toContain('Save · Latency: Ok');
   expect(host.textContent).not.toContain('Preview · latency:');expect(host.textContent).not.toContain('Save · latency:');
  }finally{await act(async()=>root.unmount());host.remove();}
 });
@@ -38,7 +53,7 @@ it('shows unchanged panel titles in a rename-only save receipt',async()=>{
  const host=document.createElement('div');const root=createRoot(host);
  try{await act(async()=>root.render(view(receiptForTurn(messages,'u')!)));
  await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
- expect(host.textContent).toContain('Save · P95 by operation: ok');expect(host.textContent).not.toContain('p95_by_operation');
+ expect(host.textContent).toContain('Save · P95 by operation: Ok');expect(host.textContent).not.toContain('p95_by_operation');
  }finally{await act(async()=>root.unmount());}
 });
 it.each(['P95 by operation',undefined])('shows one correction chip per panel with title %s and no spec paths',async title=>{
@@ -53,7 +68,7 @@ it.each(['P95 by operation',undefined])('shows one correction chip per panel wit
  expect(chips.querySelectorAll('[title]')).toHaveLength(1);expect(chips.textContent).toBe(`Fixed ${label}`);
  await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
  expect(host.textContent).toContain(`Fixed ${label}: Invalid sort`);expect(host.textContent).toContain(`Fixed ${label}: Invalid grouping`);
- expect(host.textContent).toContain(`Preview · ${label}: ok`);
+ expect(host.textContent).toContain(`Preview · ${label}: Ok`);
  expect(host.textContent).not.toContain('query.sort');expect(host.textContent).not.toContain('panels[');
  }finally{await act(async()=>root.unmount());}
 });
@@ -95,4 +110,30 @@ it('lists a failed attempt as retried in Details beside the proven save',async()
  await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
  expect(host.textContent).toContain('Save attempt 1: retried');expect(host.textContent).toContain('Save: complete');expect(host.textContent).not.toContain('Save: failed');
  }finally{await act(async()=>root.unmount());}
+});
+
+it('uses milliseconds for short checks and singular counts', async () => {
+ const receipt=receiptForTurn(build(),'u')!;
+ receipt.saved!.receipt.save_check.elapsed_ms=24;
+ receipt.saved!.receipt.save_check.panels[0].rows=1;
+ const host=document.createElement('div');const root=createRoot(host);
+ try { await act(async()=>root.render(view(receipt))); await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
+ expect(host.textContent).toContain('Checked in 24 ms'); expect(host.textContent).toContain('1 row'); expect(host.textContent).not.toContain('1 rows');
+ } finally {await act(async()=>root.unmount());}
+});
+
+it.each([invalidReceipt, savedInvalidReceipt])('shows invalid panels once, with danger status and no fabricated execution metrics', async receipt => {
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try {await act(async()=>root.render(view(receipt,false,true)));
+ expect(host.textContent?.match(/Unknown field: request_total/g)).toHaveLength(1);
+ expect(host.querySelector('[role="status"]')?.textContent).toContain('1 invalid panel');
+ for(const row of [...host.querySelectorAll('div')].filter(el=>el.textContent?.startsWith('Preview · Requests:') || el.textContent?.startsWith('Save · Requests:'))) {
+   if(row.querySelector('div')) continue;
+   expect(row.textContent).not.toMatch(/0 ms|0 rows/);
+ }
+ const invalid=[...host.querySelectorAll('.mantine-Badge-root')].filter(el=>el.textContent==='Invalid');
+ expect(invalid.length).toBeGreaterThan(0);
+ for(const badge of invalid) expect(badge.getAttribute('style')).toContain('--mantine-color-red');
+ if(!receipt.saved) expect(host.textContent).not.toContain('Save verification');
+ } finally {await act(async()=>root.unmount());host.remove();}
 });

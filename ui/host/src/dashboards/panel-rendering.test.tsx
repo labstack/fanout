@@ -36,7 +36,7 @@ describe("panel rendering", () => {
       const option = gaugeOption({ ...panel, viz: "gauge", unit: "percent", min: 0, max: 10, thresholds: [{ value: 1, status: "warn" }, { value: 5, status: "bad" }] }, 1.72, theme, "percent", size);
       expect(option.series).toEqual([]);
       const texts=(option.graphic as {type:string;style:{text:string;fontSize:number}}[]).filter(g=>g.type==="text");
-      expect(texts.map(g=>g.style.text)).toEqual(expect.arrayContaining(["1.72%","0.00%","10.0%","■ Warn"]));
+      expect(texts.map(g=>g.style.text)).toEqual(expect.arrayContaining(["1.72%","0.00%","10.0%","■ Degraded"]));
       expect(texts.find(g=>g.style.text==="1.72%")!.style.fontSize).toBeGreaterThanOrEqual(28);
     }
   });
@@ -87,7 +87,7 @@ describe("panel rendering", () => {
   });
   it("supplies a four-state icon legend in place of the unknown note", async () => {
     const host = await render(<Viz panel={{ ...panel, viz: "state_timeline" }} result={result} dark={false} height={248} group="g" />);
-    expect(host.querySelector('[aria-label="State legend"]')?.textContent).toBe("● OK■ Warn◆ Bad○ Unknown");
+    expect(host.querySelector('[aria-label="State legend"]')?.textContent).toBe("● Healthy■ Degraded◆ Unhealthy○ Unknown");
     expect(host.textContent).not.toContain("Gaps and gray");
   });
   it.each([false, true])("uses round duration intervals and recessive grids (dark=%s)", dark => {
@@ -96,8 +96,8 @@ describe("panel rendering", () => {
     const got = analysis.analysisOption({ ...panel, viz: "scatter" }, { ...result, frame }, theme);
     const x = got.xAxis as { name?: string; splitLine: { lineStyle: { color: string } } };
     const y = got.yAxis as { name?: string; interval: number; splitLine: { lineStyle: { color: string } }; axisLabel: { formatter: (v: number) => string } };
-    expect(x.name).toBe("Calls"); expect(y.name).toBe("P95 (ms)"); expect(y.interval).toBe(600000);
-    expect(y.axisLabel.formatter(y.interval)).toBe("10m");
+    expect(x.name).toBe("Requests"); expect(y.name).toBe("p95 (ms)"); expect(y.interval).toBe(600000);
+    expect(y.axisLabel.formatter(y.interval)).toBe("10 m");
     expect(x.splitLine.lineStyle.color).toBe(theme.grid); expect(y.splitLine.lineStyle.color).toBe(theme.grid);
   });
   it("fills the heatmap and anchors the scale beneath its right edge", () => {
@@ -204,4 +204,36 @@ it("measures legend labels with the chart font and uses safe full-name tooltips"
  const got = timeseriesOption(panel, { ...result, frame: data }, chartThemeFor(false), { width: 700, height: 300, measureText });
  expect(measureText).toHaveBeenCalledTimes(7); expect((got.grid as { top: number }).top).toBe(42);
  expect((got.legend as { tooltip: { renderMode: string } }).tooltip.renderMode).toBe("html");
+});
+
+
+it.each([
+  ["timeseries", "chart"], ["bar", "chart"], ["histogram", "chart"], ["scatter", "chart"],
+  ["table", "table"], ["logs", "table"], ["traces", "table"], ["log_patterns", "table"],
+  ["stat", "stat"], ["gauge", "gauge"], ["heatmap", "heatmap"],
+  ["health", "health"], ["service_map", "graph"], ["state_timeline", "chart"],
+] as const)("announces %s loading with a hidden %s placeholder and a visible title", async (viz, shape) => {
+  const host = await render(<PanelCard panel={{ ...panel, viz }} title="Requests" loading height={300} group="g" editing={false} agentAvailable={false} />);
+  const body = host.querySelector('[data-panel-body]')!;
+  const status = within(body as HTMLElement).getByRole("status");
+  expect(status.textContent).toBe("Loading panel Requests");
+  const placeholder = status.querySelector('[aria-hidden="true"][inert]')!;
+  expect(placeholder.querySelector(`[data-skeleton-shape="${shape}"]`)).not.toBeNull();
+  expect(within(host).getByText("Requests").closest('[data-panel-body]')).toBeNull();
+  if (shape === "chart") expect(placeholder.querySelector('[data-skeleton-axis]')).not.toBeNull();
+  if (shape === "table") {
+    expect(placeholder.querySelectorAll('[data-skeleton-row="header"]')).toHaveLength(1);
+    expect(placeholder.querySelectorAll('[data-skeleton-row="body"]')).toHaveLength(5);
+  }
+});
+
+it.each([false, true])("renders client-side text without a result while loading=%s", async loading => {
+  const host = await render(<PanelCard panel={{ ...panel, viz: "text", content: "Local panel notes" }} title="Notes" loading={loading} height={300} group="g" editing={false} agentAvailable={false} />);
+  expect(host.textContent).toContain("Local panel notes");
+  expect(host.querySelector('[data-panel-body] [role="status"]')).toBeNull();
+});
+
+it("uses the panel id in the loading label when its title is empty", async () => {
+  const host = await render(<PanelCard panel={panel} title="" loading height={300} group="g" editing={false} agentAvailable={false} />);
+  expect(within(host).getByRole("status").textContent).toBe("Loading panel p");
 });

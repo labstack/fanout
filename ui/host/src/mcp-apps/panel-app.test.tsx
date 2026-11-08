@@ -30,7 +30,7 @@ async function mount() {
 it.each([false, true])("renders panels.html fixtures with bridge theme changes and no host fetch (dark=%s)", async dark => {
   const fetch = vi.spyOn(globalThis, "fetch"); const view = await mount();
   try {
-    expect(view.node.querySelector('[aria-label="Loading panel view"]')).not.toBeNull();
+    expect(view.node.querySelector('[role="status"]')?.textContent).toContain("Loading panel view");
     await act(async () => { await bridge.app.ontoolresult!({ structuredContent: { ...fixture(), trace: traceFixture }, content: [] }); await bridge.app.onhostcontextchanged!({ theme: dark ? "dark" : "light" }); });
     expect(document.documentElement.getAttribute("data-mantine-color-scheme")).toBe(dark ? "dark" : "light");
     expect(view.node.querySelector('[data-panel="p"]')).not.toBeNull(); expect(view.node.textContent).toContain("No logs for checkout");
@@ -44,10 +44,16 @@ it.each([{ data: {} }, { ...fixture(), vars: { service: 123 } }, { ...fixture(),
   const view = await mount();
   try {
     await act(async () => { await bridge.app.ontoolresult!({ structuredContent, content: [] }); });
-    expect(view.node.querySelector('[role="alert"]')?.textContent).toBe("This view could not be loaded. Please try again.");
+    expect(noticeText(view.node.querySelector('[role="alert"]'))).toBe("This view could not be loaded. Please try again.");
     expect(view.node.querySelector('[data-panel]')).toBeNull();
   } finally { await view.cleanup(); }
 });
+function noticeText(node: Element | null) {
+  if (!node) return undefined;
+  const copy=node.cloneNode(true) as Element;
+  copy.querySelectorAll("style").forEach(style=>style.remove());
+  return copy.textContent;
+}
 it("sanitizes tool and bridge errors and recovers with a new valid fragment", async () => {
   const view = await mount();
   try {
@@ -56,7 +62,7 @@ it("sanitizes tool and bridge errors and recovers with a new valid fragment", as
     await act(async () => { await bridge.app.ontoolresult!({ structuredContent: fixture(), content: [] }); });
     expect(view.node.textContent).toContain("No logs for checkout");
     await act(async () => bridge.app.onerror!(new Error("private bridge error")));
-    expect(view.node.querySelector('[role="alert"]')?.textContent).toBe("This view could not be refreshed. Please try again.");
+    expect(noticeText(view.node.querySelector('[role="alert"]'))).toBe("This view could not be refreshed. Please try again.");
     expect(view.node.textContent).toContain("No logs for checkout");
     expect(view.node.querySelector('[data-panel="p"]')).not.toBeNull();
   } finally { await view.cleanup(); }
@@ -65,10 +71,10 @@ it("waits for the bridge and sanitizes connection errors", async () => {
   bridge.connected = false;
   const view = await mount();
   try {
-    expect(view.node.querySelector('[aria-label="Loading panel view"]')).not.toBeNull();
+    expect(view.node.querySelector('[role="status"]')?.textContent).toContain("Loading panel view");
     bridge.connectionError = new Error("private connection error");
     await act(async () => view.root.render(<PanelApp />));
-    expect(view.node.querySelector('[role="alert"]')?.textContent).toBe("This view could not be loaded. Please try again.");
+    expect(noticeText(view.node.querySelector('[role="alert"]'))).toBe("This view could not be loaded. Please try again.");
   } finally { await view.cleanup(); }
 });
 
@@ -130,7 +136,7 @@ it("announces host cancellation and accepts a later result", async () => {
   const view = await mount();
   try {
     await act(async () => bridge.app.ontoolcancelled!({ reason: "user action" }));
-    expect(view.node.querySelector('[role="alert"]')?.textContent).toBe("View cancelled.");
+    expect(noticeText(view.node.querySelector('[role="alert"]'))).toBe("View cancelled.");
     await act(async () => bridge.app.ontoolresult!({ structuredContent: fixture(), content: [] }));
     expect(view.node.querySelector('[role="alert"]')).toBeNull();
   } finally { await view.cleanup(); }
@@ -144,7 +150,7 @@ it("presents no-data guidance from structured or text tool errors", async () => 
       { isError: true, content: [{ type: "text" as const, text: JSON.stringify(problem) }] },
     ]) {
       await act(async () => bridge.app.ontoolresult!(result));
-      expect(view.node.querySelector('[role="alert"]')?.textContent).toBe(problem.error.message);
+      expect(noticeText(view.node.querySelector('[role="alert"]'))).toBe(problem.error.message);
     }
   } finally { await view.cleanup(); }
 });

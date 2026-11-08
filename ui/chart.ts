@@ -1,7 +1,7 @@
-/* Chart and status helpers shared by the browser host and the embedded views.
- * Pure functions over ./tokens only: this directory has no node_modules, so
- * nothing here may import a package. */
-import { bad, chart, info, ok, series, warn } from "./tokens";
+/* Chart and status helpers shared by the browser host and embedded views.
+ * Canvas and SVG use the same resolved library chart scheme as Mantine. */
+import { bad, info, ok, warn } from "./tokens";
+import { chart, series } from "./theme";
 
 /* "unknown" is neutral, not alarming: an empty window has nothing to grade, and
    painting it red claims a failure as confidently as green claimed health. */
@@ -15,7 +15,7 @@ export function healthColor(health: string) {
 /* A chart is drawn into a canvas or SVG that cannot read CSS custom
    properties, so these hand ECharts resolved values from the same ramps
    Mantine gets. The shade differs by scheme for the same reason the accent
-   does: the palette's own hue reads on Ayu, a darker stop is needed on white. */
+   does: a lighter stop reads on the dark ground, a darker one on white. */
 export function chartTheme(dark: boolean) {
   return chart[dark ? "dark" : "light"];
 }

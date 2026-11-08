@@ -174,7 +174,7 @@ it("renders an error for an omitted result and allows a manual retry", async () 
       expect(host.current.results.has("loaded")).toBe(true);
       expect(host.current.results.get("a")).toMatchObject({status:"error",error:"No result was returned for this panel; refresh to retry."});
       expect(host.node.textContent).toContain("No result was returned for this panel; refresh to retry.");
-      expect(host.node.querySelector('[aria-label="Loading panel"]')).toBeNull();
+      expect(host.node.querySelector('[data-panel-body] > [role="status"]')).toBeNull();
     });
     await act(async () => host.current.refetch());
     await waitForHook(() => { expect(host.current.fetching).toBe(true); expect(wire.panels).toHaveBeenCalledTimes(2); });
@@ -294,7 +294,7 @@ it.each([new Error("Network disconnected"),new DOMException("Request aborted","A
         expect(card.textContent).not.toContain("Ask Fanout to fix it");
         expect([...card.querySelectorAll("button")].some(button=>button.textContent==="Retry")).toBe(true);
       }
-      expect(host.node.querySelector('[aria-label="Loading panel"],[aria-label="Refreshing"]')).toBeNull();
+      expect(host.node.querySelector('[data-panel-body] > [role="status"],[aria-label="Refreshing"]')).toBeNull();
     });
     const before=wire.panels.mock.calls.length;
     wire.panels.mockImplementation((body:QueryBody)=>Promise.resolve(body.panels!.map(resultFor)));
@@ -333,7 +333,7 @@ it("loads a newly visible panel normally after a different lazy batch failed", a
     wire.panels.mockResolvedValue([resultFor("c")]);
     await host.show(["c"]);
     await waitForHook(() => { expect(wire.panels.mock.lastCall![0].panels).toEqual(["c"]); expect(host.current.fetching).toBe(false); expect(host.current.results.get("c")?.status).toBe("ok"); });
-    expect(host.node.querySelector('[aria-label="Loading panel"]')).toBeNull();
+    expect(host.node.querySelector('[data-panel-body] > [role="status"]')).toBeNull();
     expect(host.current.results.get("a")?.error).toBe("Offline");
   } finally { await host.dispose(); }
 });

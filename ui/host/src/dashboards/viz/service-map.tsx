@@ -1,10 +1,12 @@
+import { DataState, StatusBadge } from "@labstack/ui";
+import { Group } from "@mantine/core";
 import { Text, VisuallyHidden } from "@mantine/core";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { chartThemeFor } from "../../../../panels/compile";
 import { analysisSummary } from "../../../../panels/analysis";
 import { healthGlyph, serviceMapModel } from "../../../../panels/rollups";
 import { formatValue } from "../../../../panels/units";
-import { brand, fonts, typeScale } from "../../../../tokens";
+import { accent, fonts, typeScale } from "../../../../tokens";
 import type { AnalysisProps } from "./analysis-chart";
 import ServiceMapWorker from "./service-map.worker?worker&inline";
 import { fitServiceMap, layoutServiceMapRaw, nodeMetrics, serviceCardLabels, serviceMapLineHeight, serviceMapStructure, type MapLayout } from "./service-map-layout";
@@ -46,7 +48,7 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
     return () => { active = false; worker.terminate(); };
   }, [structure.key, measured]);
   const graph = useMemo(() => cached ? fitServiceMap(cached.layout, cached.key === structure.key ? model : cached.model, size) : { nodes: [], edges: [], scale: 1, compact:true, contentWidth: size.width, contentHeight: size.height, uncalledLabel: undefined,initialView:{x:0,y:0} }, [cached, model, size, structure.key]);
-  const theme = chartThemeFor(dark), ring = brand[dark ? 4 : 7], id = useId().replaceAll(":", "");
+  const theme = chartThemeFor(dark), ring = accent[dark ? 4 : 7], id = useId().replaceAll(":", "");
   const active = hover ?? focused;
   const maxZoom = Math.max(12, 1 / graph.scale);
   const maxRate = Math.max(1e-9, ...model.edges.map(e => e.request_rate ?? e.calls));
@@ -56,9 +58,9 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
     const xs = [...graph.nodes.flatMap(node => [node.x, node.x + node.width]), ...points.map(point => point.x)];
     const ys = [...graph.nodes.flatMap(node => [node.y, node.y + node.height]), ...points.map(point => point.y)];
     if (graph.uncalledLabel) {
-      const labelWidth = measureText?.("No traced calls in this window", `${typeScale.micro}px ${fonts.display}`) ?? 29 * typeScale.micro * .6;
+      const labelWidth = measureText?.("No traced calls in this window", `${typeScale.small}px ${fonts.display}`) ?? 29 * typeScale.small * .6;
       xs.push((graph.contentWidth - labelWidth / textZoom) / 2, (graph.contentWidth + labelWidth / textZoom) / 2);
-      ys.push(graph.uncalledLabel.y, graph.uncalledLabel.y + (typeScale.micro * serviceMapLineHeight + 2) / textZoom);
+      ys.push(graph.uncalledLabel.y, graph.uncalledLabel.y + (typeScale.small * serviceMapLineHeight + 2) / textZoom);
     }
     return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
   }, [graph, measureText, textZoom]);
@@ -107,22 +109,22 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
       onPointerDown={e => { if (e.button !== 0) return; suppressClick.current = false; dragging.current = { x: e.clientX, y: e.clientY, initial: view, moved: false }; }}
       onPointerMove={e => { const drag = dragging.current; if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.hypot(dx, dy) > 3) drag.moved = true; if (drag.moved) { e.currentTarget.setPointerCapture?.(e.pointerId); setView({ ...drag.initial, x: drag.initial.x + dx, y: drag.initial.y + dy }); } }}
       onPointerUp={() => { suppressClick.current = dragging.current?.moved ?? false; dragging.current = null; }} onPointerCancel={() => { dragging.current = null; suppressClick.current = false; }}>
-      {(layoutError || !cached) && <Text role="status" c="dimmed">{layoutError ?? "Laying out services…"}</Text>}
+      {(layoutError || !cached) && <DataState state={layoutError ? "error" : "loading"} loadingLabel="Laying out services…" rows={0} error={{ message: layoutError }} />}
       <div {...(import.meta.env.DEV ? { "data-service-content": true } : {})} style={{ position: "relative", width: graph.contentWidth, height: graph.contentHeight, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`, transformOrigin: "0 0" }}>
       <svg aria-hidden="true" width={graph.contentWidth} height={graph.contentHeight} viewBox={`0 0 ${graph.contentWidth} ${graph.contentHeight}`} style={{ position: "absolute", inset: 0 }}>
         <defs>{[theme.muted, theme.status.warn, theme.status.bad].map((color, i) => <marker key={color} id={`${id}-arrow-${i}`} viewBox="0 0 6 6" refX={5} refY={3} markerWidth={5} markerHeight={5} orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L6,3 L0,6 Z" fill={color} /></marker>)}</defs>
         <g>
-          {graph.edges.map(e => <path key={e.id} {...(import.meta.env.DEV ? { "data-service-edge": true, "data-caller": e.caller, "data-callee": e.callee } : {})} d={e.path} fill="none" stroke={e.status ? theme.status[e.status] : theme.muted} strokeLinejoin="round" strokeWidth={1 + 3 * Math.log1p(e.request_rate ?? e.calls) / Math.log1p(maxRate)} opacity={active && e.caller !== active && e.callee !== active ? .25 : 1} markerEnd={`url(#${id}-arrow-${e.status === "bad" ? 2 : e.status === "warn" ? 1 : 0})`} style={{ pointerEvents: "stroke" }}><title>{`${e.caller} → ${e.callee}\n${e.edge_type} · ${formatValue("per_second", e.request_rate)} · ${formatValue("count", e.calls)} calls\n${formatValue("percent", e.error_rate)} errors · ${formatValue("ms", e.average_ms)} average`}</title></path>)}
+          {graph.edges.map(e => <path key={e.id} {...(import.meta.env.DEV ? { "data-service-edge": true, "data-caller": e.caller, "data-callee": e.callee } : {})} d={e.path} fill="none" stroke={e.status ? theme.status[e.status] : theme.muted} strokeLinejoin="round" strokeWidth={1 + 3 * Math.log1p(e.request_rate ?? e.calls) / Math.log1p(maxRate)} opacity={active && e.caller !== active && e.callee !== active ? .25 : 1} markerEnd={`url(#${id}-arrow-${e.status === "bad" ? 2 : e.status === "warn" ? 1 : 0})`} style={{ pointerEvents: "stroke" }}><title>{`${e.caller} → ${e.callee}\n${e.edge_type} · ${formatValue("per_second", e.request_rate)} · ${formatValue("count", e.calls)} requests\n${formatValue("percent", e.error_rate)} errors · ${formatValue("ms", e.average_ms)} average`}</title></path>)}
         </g>
       </svg>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-        {graph.uncalledLabel && <span {...(import.meta.env.DEV ? { "data-service-uncalled-label": true } : {})} style={{ position: "absolute", left: "50%", top: graph.uncalledLabel.y, transform: "translateX(-50%)", color: theme.muted, background: theme.surface, fontSize: typeScale.micro / textZoom, lineHeight: serviceMapLineHeight, padding: `${1 / textZoom}px 0`, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
+        {graph.uncalledLabel && <span {...(import.meta.env.DEV ? { "data-service-uncalled-label": true } : {})} style={{ position: "absolute", left: "50%", top: graph.uncalledLabel.y, transform: "translateX(-50%)", color: theme.muted, background: theme.surface, fontSize: typeScale.small / textZoom, lineHeight: serviceMapLineHeight, padding: `${1 / textZoom}px 0`, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
         {graph.nodes.map(n => {
           const color = n.health === "unhealthy" ? theme.status.bad : n.health === "degraded" ? theme.status.warn : n.health === "healthy" ? theme.status.ok : theme.muted;
           const label = serviceCardLabels(n, { width: n.width / graph.scale, scale: graph.scale * textZoom, compact:graph.compact, measureText });
           return <button type="button" key={n.id} {...(import.meta.env.DEV ? { "data-service-node": n.id, "data-service-entry": n.entry } : {})} title={`${n.id} · ${n.health}\n${nodeMetrics(n)}`} onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(undefined)} onFocus={() => setFocused(n.id)} onBlur={() => setFocused(undefined)} onClick={() => select(n.id)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); suppressClick.current = false; select(n.id); } }}
             style={{ position: "absolute", left: n.x, top: n.y, width: n.width, height: n.height, display: "flex", flexDirection:"column", justifyContent:"center", gap: 3 / textZoom, boxSizing: "border-box", border: `${1 / textZoom}px solid ${n.health === "unhealthy" || n.health === "degraded" ? color : theme.border}`, borderRadius: 6, padding: `0 ${5 / textZoom}px`, background: theme.surface, color: theme.text, textAlign: "left", opacity: 1, outline: focused === n.id ? `2px solid ${ring}` : undefined, outlineOffset: -2, pointerEvents: "auto", cursor: "pointer", fontFamily: fonts.display }}>
-            <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{ display: "flex", alignItems: "center", gap: 4 / textZoom, width: "100%", minWidth: 0, fontSize: Math.max(typeScale.micro / textZoom, 12 * graph.scale), lineHeight: serviceMapLineHeight, whiteSpace: "nowrap" }}>
+            <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{ display: "flex", alignItems: "center", gap: 4 / textZoom, width: "100%", minWidth: 0, fontSize: Math.max(typeScale.small / textZoom, 12 * graph.scale), lineHeight: serviceMapLineHeight, whiteSpace: "nowrap" }}>
               <span aria-hidden="true" style={{ color, flex: "none" }}>{healthGlyph[n.health] ?? "○"}</span>
               <span {...(import.meta.env.DEV ? { "data-service-name": true } : {})} style={{ flex: "none", fontWeight: 600, whiteSpace: "nowrap" }}>{label.name}</span>
               <VisuallyHidden component="span">, {n.health}</VisuallyHidden>
@@ -138,6 +140,12 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
         background: `linear-gradient(to ${edge}, transparent, var(--mantine-color-body))`,
       }} />)}
     </div>
+    <Group gap="xs" mt={4} aria-label="Service status legend" style={{flexShrink: 0}}>
+      <StatusBadge tone="success" icon={<span aria-hidden>●</span>}>Healthy</StatusBadge>
+      <StatusBadge tone="warning" icon={<span aria-hidden>■</span>}>Degraded</StatusBadge>
+      <StatusBadge tone="danger" icon={<span aria-hidden>◆</span>}>Unhealthy</StatusBadge>
+      <StatusBadge tone="neutral" icon={<span aria-hidden>○</span>}>Unknown</StatusBadge>
+    </Group>
     <Text c="dimmed" fz={12} mt={4} style={{ flexShrink: 0 }}>{model.nodes.length} services · {model.edges.length} {model.edges.length === 1 ? "route" : "routes"}</Text>
   </div>;
 }

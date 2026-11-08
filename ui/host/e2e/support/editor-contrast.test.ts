@@ -1,7 +1,7 @@
 import axe from "axe-core";
 import { defaultCssVariablesResolver, DEFAULT_THEME, mergeMantineTheme } from "@mantine/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fanoutCssVariables, fanoutThemeConfig } from "../../../theme";
+import { fanoutCssVariables, fanoutTheme } from "../../../theme";
 import { editorOverlapTargets, proveEditorText } from "./editor-contrast";
 
 beforeEach(() => {
@@ -13,8 +13,9 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); document.body.innerHTML = ""; });
 
 function validationProblem(scheme: "light" | "dark") {
-  const mantine = defaultCssVariablesResolver(mergeMantineTheme(DEFAULT_THEME, fanoutThemeConfig));
-  const variables: Record<string, string> = { ...mantine.variables, ...mantine[scheme], ...fanoutCssVariables()[scheme] };
+  const theme = mergeMantineTheme(DEFAULT_THEME, fanoutTheme);
+  const mantine = defaultCssVariablesResolver(theme);
+  const variables: Record<string, string> = { ...mantine.variables, ...mantine[scheme], ...fanoutCssVariables(theme)[scheme] };
   const resolve = (value: string): string => value.startsWith("var(") ? resolve(variables[value.slice(4, -1)]) : value;
   // Mantine Alert's default variant paints a translucent semantic background;
   // its message uses --mantine-color-black/white according to the scheme.
@@ -37,7 +38,7 @@ it.each(["light", "dark"] as const)("proves wrapped validation text against the 
   expect(proof.samples.map(sample => sample.text)).toEqual(Array.from(problem.childNodes, text => text.textContent));
   expect(proof.samples).toHaveLength(3);
   expect(proof.ratio).toBeGreaterThanOrEqual(4.5);
-  expect(proof.samples[0].bg).toBe(scheme === "light" ? "#fbd9dc" : "#380d11");
+  expect(proof.samples[0].bg).toBe(scheme === "light" ? "#fbd9dc" : "#342023");
   expect(proof.samples[0].fg).toBe(scheme === "light" ? "#000000" : "#ffffff");
   problem.style.color = proof.samples[0].bg!;
   expect(proveEditorText([".sql-problem"])[0].ratio).toBeCloseTo(1);
