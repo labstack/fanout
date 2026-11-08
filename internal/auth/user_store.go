@@ -269,11 +269,13 @@ func (s *UserStore) applyUpdate(id string, email, displayName *string, role *Rol
 		}
 	}
 
-	// Access ends on every transition out of active, so a later reactivation
-	// cannot bring old credentials back.
+	// Access ends on every status transition. Leaving active ends what the user
+	// holds now. Entering active clears whatever outlived the suspension, such
+	// as an account suspended before suspension revoked credentials or a token
+	// minted while the suspension committed, so reactivation starts with none.
 	removedAccess := int64(0)
-	repeatedSuspension := opts.convergeSuspended && status != nil && before.Status != UserStatusActive
-	if existing.Status != UserStatusActive && (before.Status == UserStatusActive || repeatedSuspension) {
+	repeatedSuspension := opts.convergeSuspended && status != nil && before.Status != UserStatusActive && existing.Status != UserStatusActive
+	if before.Status != existing.Status || repeatedSuspension {
 		if removedAccess, err = revokeUserAccess(ctx, conn, id); err != nil {
 			return User{}, false, err
 		}

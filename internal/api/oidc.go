@@ -306,6 +306,9 @@ func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oid
 			return appauth.User{}, appauth.UserIdentity{}, countErr
 		}
 		if count == 0 {
+			if h.cfg.SCIMToken != "" {
+				return appauth.User{}, appauth.UserIdentity{}, errors.New("no accounts exist yet; the first administrator must be provisioned through SCIM")
+			}
 			return appauth.User{}, appauth.UserIdentity{}, errors.New("first administrator setup is required")
 		}
 		user, err = h.users.CreateWithAudit(email, "", h.provisionRole(claims.Groups), appauth.AuditEvent{EventType: "user.provisioned", Outcome: "success", Metadata: map[string]any{"mode": "oidc"}})
@@ -392,7 +395,11 @@ func (h *OIDCHandler) groupPolicyConfigured() bool {
 // roleMappingConfigured reports whether the IdP owns the fixed role. Without a
 // group-to-role mapping the role is managed locally and must be left alone.
 func (h *OIDCHandler) roleMappingConfigured() bool {
-	return len(csvValues(h.cfg.OIDCAdminGroups)) != 0 || len(csvValues(h.cfg.OIDCOperatorGroups)) != 0
+	return oidcRoleMappingConfigured(h.cfg)
+}
+
+func oidcRoleMappingConfigured(cfg config.Config) bool {
+	return len(csvValues(cfg.OIDCAdminGroups)) != 0 || len(csvValues(cfg.OIDCOperatorGroups)) != 0
 }
 
 // reconcileRole applies the configured IdP group-to-role mapping on every

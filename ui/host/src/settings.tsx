@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { getJSON } from "./api";
 import { useFanoutApp } from "./app-context";
-import { authorizedFetch, useViewer } from "./auth";
+import { authorizedFetch, useRuntimeStatus, useViewer } from "./auth";
 import { docs } from "../../links";
 
 type IngestSettings = {
@@ -79,6 +79,25 @@ function ConnectedAgents() {
     <ConfirmDialog opened={selected !== null} onClose={() => { disconnect.reset(); setSelected(null); }} title={`Disconnect ${selected?.client_name ?? "agent"}?`} confirmLabel="Disconnect agent" tone="danger" pending={disconnect.isPending ? "confirm" : null} error={disconnect.isError ? "Fanout could not disconnect this agent. Try again." : undefined} onConfirm={() => selected && disconnect.mutate(selected)}>
       <Text span ff="monospace">{selected?.client_name}</Text> loses access immediately. Your other agents and browser session stay connected. You can authorize the agent again to reconnect.
     </ConfirmDialog>
+  </Stack>;
+}
+
+const accountOwnershipReason = {
+  identity_provider_roles: "Your identity provider creates accounts and assigns roles, so Fanout refuses both here. Administrators can still change an email or display name, suspend or reactivate an account, and delete an account.",
+  identity_provider_directory: "Your identity provider owns accounts through SCIM. Fanout refuses creating or deleting an account and changing its role, status, or email here. Display names can still be edited.",
+} as const;
+
+/** Fanout has no screen that changes other users, so this is where a person
+ *  learns why those changes are refused. The mode comes from the server, which
+ *  enforces it; local administration shows nothing. */
+function AccountOwnership() {
+  const { account_ownership: ownership } = useRuntimeStatus();
+  if (ownership === "local") return null;
+  return <Stack gap="sm">
+    <Title order={2} fz={22} lts="-0.02em">User accounts</Title>
+    <Notice tone="info" title="Managed by your identity provider">
+      {accountOwnershipReason[ownership]} <Anchor href={docs.authentication} target="_blank" rel="noopener noreferrer" underline="always">Authentication</Anchor> covers what stays in Fanout.
+    </Notice>
   </Stack>;
 }
 
@@ -297,6 +316,7 @@ export default function Settings() {
           </Stack>
         </Paper>
       </Stack>}
+      <AccountOwnership />
       <ConnectedAgents />
     </Stack>
 

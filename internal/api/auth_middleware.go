@@ -151,6 +151,9 @@ func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg c
 					return echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
 				}
 				if count == 0 {
+					if cfg.SCIMToken != "" {
+						return echo.NewHTTPError(http.StatusUnauthorized, "no accounts have been provisioned yet")
+					}
 					return echo.NewHTTPError(http.StatusUnauthorized, "setup required")
 				}
 				return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")

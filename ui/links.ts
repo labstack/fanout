@@ -13,4 +13,6 @@ export const docs = {
   /** Sending telemetry: endpoint, authentication, collector and SDK setup. */
   ingest: "https://fanout.run/docs/get-started/send-telemetry",
   connect: "https://fanout.run/docs/guides/mcp",
+  /** Who owns accounts and roles when an identity provider is configured. */
+  authentication: "https://fanout.run/docs/concepts/authentication",
 } as const;

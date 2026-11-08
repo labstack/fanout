@@ -13,8 +13,10 @@ beforeEach(() => { app.agentAvailable = true; });
 const fetchMock = vi.fn<typeof fetch>();
 const agentsFetchMock = vi.fn<typeof fetch>();
 let role = "admin";
+let accountOwnership = "local";
 
 vi.mock("./auth", () => ({
+  useRuntimeStatus: () => ({ account_ownership: accountOwnership }),
   useViewer: () => ({ id: "u1", email: "v@labstack.com", display_name: "V", status: "active" as const, role }),
   authorizedFetch: (url: string, init?: RequestInit) => url.startsWith("/api/auth/oauth/connections") ? agentsFetchMock(url, init) : fetchMock(url, init),
 }));
@@ -47,6 +49,7 @@ async function mount() {
 describe("connect telemetry", () => {
   beforeEach(() => {
     role = "admin";
+    accountOwnership = "local";
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
     agentsFetchMock.mockReset();
@@ -54,6 +57,25 @@ describe("connect telemetry", () => {
     fetchMock.mockImplementation(async () => json(connection));
   });
   afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
+
+  it("says nothing about account ownership when accounts are managed locally", async () => {
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Connect telemetry"));
+    expect(document.body.textContent).not.toContain("User accounts");
+    await act(async () => root.unmount());
+  });
+
+  it.each([
+    ["identity_provider_roles", "creates accounts and assigns roles", "suspend or reactivate"],
+    ["identity_provider_directory", "owns accounts through SCIM", "status, or email"],
+  ])("explains what the server reports when ownership is %s", async (ownership, statement, detail) => {
+    accountOwnership = ownership;
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Managed by your identity provider"));
+    expect(document.body.textContent).toContain(statement);
+    expect(document.body.textContent).toContain(detail);
+    await act(async () => root.unmount());
+  });
 
   it.each([false, true])("shows chat setup guidance only when agent_available=%s is false", async (available) => {
     app.agentAvailable = available;

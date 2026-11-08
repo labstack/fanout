@@ -746,6 +746,59 @@ func TestBrowserSuspensionRevokesMCPTokens(t *testing.T) {
 	assertMCPRejected(t, s.e, "after reactivation", unused, unusedForm)
 }
 
+// An account suspended before suspension revoked credentials, or a token
+// minted in a race with it, must not become valid again on reactivation.
+func TestReactivationRevokesCredentialsThatOutlivedSuspension(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		reactivate func(t *testing.T, s *scimServer, member auth.User, ownerCookie *http.Cookie)
+	}{
+		{"browser route", func(t *testing.T, s *scimServer, member auth.User, ownerCookie *http.Cookie) {
+			t.Helper()
+			headers := map[string]string{"Content-Type": "application/json", "Fanout-Request": "1"}
+			rec := serve(t, s.e, http.MethodPatch, "/api/users/"+member.ID+"/status", `{"status":"active"}`, headers, ownerCookie)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("reactivate = %d %s", rec.Code, rec.Body.String())
+			}
+		}},
+		{"scim", func(t *testing.T, s *scimServer, member auth.User, _ *http.Cookie) {
+			t.Helper()
+			rec := s.do(t, http.MethodPatch, scimUsersPath+"/"+member.ID, scimPatchBody(`{"op":"replace","path":"active","value":true}`))
+			if rec.Code != http.StatusOK || !decodeSCIMResource(t, rec).Active {
+				t.Fatalf("reactivate = %d %s", rec.Code, rec.Body.String())
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newSCIMServer(t)
+			RegisterUserRoutes(s.e, s.users, auth.SMTPConfig{}, scimTestConfig())
+			_, ownerCookie, member, memberCookie := s.signedInMember(t)
+			bearer, form := issueMCPGrant(t, s.e, memberCookie)
+			client := registerOAuthClient(t, s.e)
+			_, challenge := pkcePair()
+			approveAndGetCode(t, s.e, authorizeParams(client.ClientID, mcpReadScope, challenge), memberCookie)
+			if _, err := s.db.DB.Exec(`UPDATE users SET status = 'suspended' WHERE id = ?`, member.ID); err != nil {
+				t.Fatalf("suspend: %v", err)
+			}
+			liveTokens := `SELECT COUNT(*) FROM oauth_tokens WHERE user_id = ? AND revoked_at IS NULL`
+			liveCodes := `SELECT COUNT(*) FROM oauth_authorization_codes WHERE user_id = ?`
+			if s.count(t, liveTokens, member.ID) == 0 || s.count(t, liveCodes, member.ID) == 0 {
+				t.Fatal("fixture has no live credentials")
+			}
+
+			tc.reactivate(t, s, member, ownerCookie)
+
+			if got := s.count(t, liveTokens, member.ID); got != 0 {
+				t.Fatalf("live tokens after reactivation = %d, want 0", got)
+			}
+			if got := s.count(t, liveCodes, member.ID); got != 0 {
+				t.Fatalf("live codes after reactivation = %d, want 0", got)
+			}
+			assertMCPRejected(t, s.e, "after reactivation", bearer, form)
+		})
+	}
+}
+
 func TestSCIMRepeatDeactivationRemovesRemainingAccess(t *testing.T) {
 	s := newSCIMServer(t)
 	_, _, member, memberCookie := s.signedInMember(t)

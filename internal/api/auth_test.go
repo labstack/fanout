@@ -325,7 +325,7 @@ func TestAuthStatusAndMeRequirePersistedAccount(t *testing.T) {
 	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
 		t.Fatalf("status = %s err=%v", statusRec.Body.String(), err)
 	}
-	if len(status) != 6 || status["agent_available"] != false || status["smtp_configured"] != false || status["self_signup"] != false {
+	if len(status) != 7 || status["agent_available"] != false || status["smtp_configured"] != false || status["self_signup"] != false {
 		t.Fatalf("unexpected auth status fields: %s", statusRec.Body.String())
 	}
 

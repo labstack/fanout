@@ -145,8 +145,11 @@ when there are no users.
 
 Unknown fields return `400`. Email, role, and status changes revoke browser
 sessions. Suspension also blocks sign-in and revokes the user's OAuth tokens
-and pending authorization codes; reactivation does not restore them. Demotion,
-suspension, and deletion cannot remove the last active administrator.
+and pending authorization codes. Reactivation revokes any that remain, so a
+reactivated user starts with no credentials and signs in again. Demotion,
+suspension, and deletion cannot remove the last active administrator. With an
+OIDC role mapping, some of these routes are refused; see
+[Who owns accounts](#who-owns-accounts).
 The first-run `POST /api/auth/setup` request uses `display_name` alongside
 `email` and `setup_token`.
 
@@ -268,6 +271,36 @@ The last active administrator is never demoted by this reconciliation — the
 installation would lose its ability to administer itself. Promote a second
 administrator before expecting the mapping to apply to the first.
 
+### Who owns accounts
+
+Role mapping also moves account ownership to the identity provider, because a
+later login with the same verified email would otherwise link to a local account
+an administrator created. `GET /api/auth/status` reports the result as
+`account_ownership`, and Settings shows it to everyone who is signed in:
+
+| `account_ownership` | Configuration | Browser user routes refuse |
+|---|---|---|
+| `local` | No role mapping, with or without a SCIM token | Nothing |
+| `identity_provider_roles` | Role mapping, no SCIM token | Creating a user and changing a role |
+| `identity_provider_directory` | Role mapping and a SCIM token | Creating and deleting a user; changing a role, status or email |
+
+A refused request returns `403` with the code `managed_by_identity_provider`,
+and it changes nothing. The check runs before the request body is validated.
+
+Only `POST /api/users` and the `/api/users/{id}` routes are affected. These keep
+working in every mode:
+
+- SCIM provisioning and login-time role reconciliation and provisioning.
+- `PATCH /api/users/{id}` with only `display_name`. A directory that sends
+  `displayName` overwrites the value on its next update.
+- `POST /api/users/{id}/access/revoke`, which ends sessions and OAuth tokens
+  without changing the account.
+- `POST /api/auth/setup` for the first administrator when no SCIM token is set.
+- `fanout login-link --break-glass`.
+
+Without a SCIM token, an administrator can still suspend, reactivate, delete and
+change the email of a user from the browser routes.
+
 ### Microsoft Entra ID group overage
 
 Past roughly 200 group memberships, Entra omits the `groups` claim from the
@@ -313,7 +346,8 @@ Without it the routes do not exist and nothing below applies.
 
 With a token configured, Fanout prints no setup banner, `/api/auth/setup` returns
 `410`, and `/api/auth/status` reports `setup_required: false`. The first
-administrator comes from SCIM.
+administrator comes from SCIM. Until one exists, signed-out API requests return
+`401` with `no accounts have been provisioned yet`.
 
 Fanout implements a small subset of SCIM 2.0 (RFC 7644) under `/scim/v2`.
 Requests send `Authorization: Bearer <token>`, and bodies use
