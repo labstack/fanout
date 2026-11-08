@@ -26,8 +26,10 @@ import (
 )
 
 const (
-	BatchSuffix          = ".batch"
-	SchemaBatch          = "_schema" + BatchSuffix
+	BatchSuffix = ".batch"
+	SchemaBatch = "_schema" + BatchSuffix
+	// scripts/release-notes.sh reads this declaration to mark format-changing
+	// releases; keep it a single integer literal.
 	batchMetadataVersion = 5
 	parquetPageSize      = 64 << 10
 	// A column whose distinct values outgrow this switches to plain pages for
