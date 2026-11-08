@@ -82,9 +82,10 @@ func (a *ingestAuthorizer) authorizeToken(ctx context.Context, token string) err
 		return fmt.Errorf("%w: %v", errIngestAuthUnavailable, err)
 	}
 	if ingestCfg.TokenHash == "" {
-		// Pre-setup (no admin yet) — no token exists to check against. Reject
-		// all requests until setup completes; collectors must wait.
-		slog.Warn("ingest: rejecting request — no ingest token configured (setup not complete)")
+		// No token has been issued yet: interactive setup issues the first one,
+		// and an administrator created from FANOUT_FIRST_ADMIN_EMAIL issues it from Settings.
+		// Reject all requests until then; collectors must wait.
+		slog.Warn("ingest: rejecting request — no ingest token configured; an administrator must issue one")
 		return errIngestNotInitialized
 	}
 	if token == "" || !settings.CheckIngestToken(token, ingestCfg.TokenHash) {
