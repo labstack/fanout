@@ -1,0 +1,18 @@
+name: CLA
+
+# "Check CLA" is a required check, and the CLA workflow runs only on pull
+# request events, which never fire in the merge queue. A pull request enters
+# the queue only after its own "Check CLA" passed, and the merged changes are
+# the same commits, so the queue reports the check as satisfied. This
+# workflow checks out nothing and holds no permissions.
+on:
+  merge_group:
+
+permissions: {}
+
+jobs:
+  cla:
+    name: Check CLA
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "Signed on the pull request before it entered the queue."
