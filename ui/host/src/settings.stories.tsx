@@ -22,6 +22,10 @@ export const IdentityProviderRoles: Story = { parameters: { scenario: { accountO
   await expect(await canvas.findByText("Managed by your identity provider")).toBeVisible();
 } };
 
+export const IdentityProviderRolesNoProvisioning: Story = { parameters: { scenario: { accountOwnership: "identity_provider_roles_no_provisioning" } }, play: async ({ canvas }) => {
+  await expect(await canvas.findByText("New people cannot be added")).toBeVisible();
+} };
+
 export const IdentityProviderDirectory: Story = { parameters: { scenario: { accountOwnership: "identity_provider_directory" } }, play: async ({ canvas }) => {
   await expect(await canvas.findByText("Managed by your identity provider")).toBeVisible();
 } };

@@ -82,9 +82,11 @@ function ConnectedAgents() {
   </Stack>;
 }
 
-const accountOwnershipReason = {
-  identity_provider_roles: "Your identity provider creates accounts and assigns roles, so Fanout refuses both here. Administrators can still change an email or display name, suspend or reactivate an account, and delete an account.",
-  identity_provider_directory: "Your identity provider owns accounts through SCIM. Fanout refuses creating or deleting an account and changing its role, status, or email here. Display names can still be edited.",
+const localAdministration = "Administrators can still change an email or display name, suspend or reactivate an account, and delete an account.";
+const accountOwnershipNotice = {
+  identity_provider_roles: { tone: "info", title: "Managed by your identity provider", reason: `Your identity provider creates accounts at first sign-in and assigns roles, so Fanout refuses both here. ${localAdministration}` },
+  identity_provider_roles_no_provisioning: { tone: "warning", title: "New people cannot be added", reason: `Your identity provider assigns roles, so Fanout refuses creating accounts and changing roles here, and this workspace does not create accounts at sign-in. People without an account stay out until automatic provisioning with an allow-list or SCIM is configured. ${localAdministration}` },
+  identity_provider_directory: { tone: "info", title: "Managed by your identity provider", reason: "Your identity provider owns accounts through SCIM. Fanout refuses creating or deleting an account and changing its role, status, or email here. Display names can still be edited." },
 } as const;
 
 /** Fanout has no screen that changes other users, so this is where a person
@@ -95,8 +97,8 @@ function AccountOwnership() {
   if (ownership === "local") return null;
   return <Stack gap="sm">
     <Title order={2} fz={22} lts="-0.02em">User accounts</Title>
-    <Notice tone="info" title="Managed by your identity provider">
-      {accountOwnershipReason[ownership]} <Anchor href={docs.authentication} target="_blank" rel="noopener noreferrer" underline="always">Authentication</Anchor> covers what stays in Fanout.
+    <Notice tone={accountOwnershipNotice[ownership].tone} title={accountOwnershipNotice[ownership].title}>
+      {accountOwnershipNotice[ownership].reason} <Anchor href={docs.authentication} target="_blank" rel="noopener noreferrer" underline="always">Authentication</Anchor> covers what stays in Fanout.
     </Notice>
   </Stack>;
 }

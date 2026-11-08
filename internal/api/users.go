@@ -31,9 +31,14 @@ type accountOwnership string
 
 const (
 	accountOwnershipLocal accountOwnership = "local"
-	// accountOwnershipRoles applies with an OIDC group-to-role mapping: the
-	// provider decides who has an account and which role it holds.
+	// accountOwnershipRoles applies with an OIDC group-to-role mapping and
+	// auto-provisioning: the provider decides who has an account, created at
+	// first sign-in, and which role it holds.
 	accountOwnershipRoles accountOwnership = "identity_provider_roles"
+	// accountOwnershipRolesNoProvisioning is the same mapping without
+	// auto-provisioning. Nothing can create an account, so people without one
+	// stay out until provisioning or SCIM is configured.
+	accountOwnershipRolesNoProvisioning accountOwnership = "identity_provider_roles_no_provisioning"
 	// accountOwnershipDirectory adds a SCIM token to the mapping: the directory
 	// also owns each account's status, email, and existence.
 	accountOwnershipDirectory accountOwnership = "identity_provider_directory"
@@ -42,11 +47,14 @@ const (
 // accountOwnershipFor needs the mapping, so a SCIM token without one leaves
 // local administration unchanged.
 func accountOwnershipFor(cfg config.Config) accountOwnership {
-	if strings.ToLower(strings.TrimSpace(cfg.AuthMode)) != "oidc" || !oidcRoleMappingConfigured(cfg) {
+	if strings.ToLower(strings.TrimSpace(cfg.AuthMode)) != "oidc" || !cfg.OIDCRoleMappingConfigured() {
 		return accountOwnershipLocal
 	}
 	if cfg.SCIMToken != "" {
 		return accountOwnershipDirectory
+	}
+	if !cfg.OIDCAutoProvision {
+		return accountOwnershipRolesNoProvisioning
 	}
 	return accountOwnershipRoles
 }

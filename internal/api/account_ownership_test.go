@@ -100,6 +100,8 @@ func TestBrowserUserRoutesFollowAccountOwnership(t *testing.T) {
 	blankMapping.OIDCAdminGroups, blankMapping.OIDCOperatorGroups = " , ", ","
 	operatorOnly := noMapping
 	operatorOnly.OIDCOperatorGroups = ownershipOperatorGroup
+	withProvisioning := roleMappedConfig()
+	withProvisioning.OIDCAutoProvision = true
 
 	roleRefused := map[string]bool{"create": true, "role": true}
 	directoryRefused := map[string]bool{
@@ -117,6 +119,7 @@ func TestBrowserUserRoutesFollowAccountOwnership(t *testing.T) {
 		{"scim token without role mapping", scimTestConfig(), nil},
 		{"admin group mapping", roleMappedConfig(), roleRefused},
 		{"operator group mapping", operatorOnly, roleRefused},
+		{"role mapping with provisioning", withProvisioning, roleRefused},
 		{"role mapping with scim token", directoryConfig(), directoryRefused},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -274,6 +277,8 @@ func TestAuthStatusPublishesAccountOwnership(t *testing.T) {
 	noMapping.SCIMToken = ""
 	operatorOnly := roleMappedConfig()
 	operatorOnly.OIDCAdminGroups, operatorOnly.OIDCOperatorGroups = "", ownershipOperatorGroup
+	provisioning := roleMappedConfig()
+	provisioning.OIDCAutoProvision = true
 	for _, tc := range []struct {
 		name string
 		cfg  config.Config
@@ -282,8 +287,9 @@ func TestAuthStatusPublishesAccountOwnership(t *testing.T) {
 		{"local", config.Config{AuthMode: "local", OIDCAdminGroups: ownershipAdminGroup}, "local"},
 		{"oidc without role mapping", noMapping, "local"},
 		{"scim token without role mapping", scimTestConfig(), "local"},
-		{"admin group mapping", roleMappedConfig(), "identity_provider_roles"},
-		{"operator group mapping", operatorOnly, "identity_provider_roles"},
+		{"admin group mapping without provisioning", roleMappedConfig(), "identity_provider_roles_no_provisioning"},
+		{"operator group mapping without provisioning", operatorOnly, "identity_provider_roles_no_provisioning"},
+		{"role mapping with provisioning", provisioning, "identity_provider_roles"},
 		{"role mapping with scim token", directoryConfig(), "identity_provider_directory"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

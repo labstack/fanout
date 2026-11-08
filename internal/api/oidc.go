@@ -395,11 +395,7 @@ func (h *OIDCHandler) groupPolicyConfigured() bool {
 // roleMappingConfigured reports whether the IdP owns the fixed role. Without a
 // group-to-role mapping the role is managed locally and must be left alone.
 func (h *OIDCHandler) roleMappingConfigured() bool {
-	return oidcRoleMappingConfigured(h.cfg)
-}
-
-func oidcRoleMappingConfigured(cfg config.Config) bool {
-	return len(csvValues(cfg.OIDCAdminGroups)) != 0 || len(csvValues(cfg.OIDCOperatorGroups)) != 0
+	return h.cfg.OIDCRoleMappingConfigured()
 }
 
 // reconcileRole applies the configured IdP group-to-role mapping on every

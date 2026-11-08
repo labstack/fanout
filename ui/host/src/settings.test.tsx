@@ -66,12 +66,13 @@ describe("connect telemetry", () => {
   });
 
   it.each([
-    ["identity_provider_roles", "creates accounts and assigns roles", "suspend or reactivate"],
-    ["identity_provider_directory", "owns accounts through SCIM", "status, or email"],
-  ])("explains what the server reports when ownership is %s", async (ownership, statement, detail) => {
+    ["identity_provider_roles", "Managed by your identity provider", "creates accounts at first sign-in and assigns roles", "suspend or reactivate"],
+    ["identity_provider_roles_no_provisioning", "New people cannot be added", "does not create accounts at sign-in", "automatic provisioning with an allow-list or SCIM"],
+    ["identity_provider_directory", "Managed by your identity provider", "owns accounts through SCIM", "status, or email"],
+  ])("explains what the server reports when ownership is %s", async (ownership, title, statement, detail) => {
     accountOwnership = ownership;
     const root = await mount();
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Managed by your identity provider"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain(title));
     expect(document.body.textContent).toContain(statement);
     expect(document.body.textContent).toContain(detail);
     await act(async () => root.unmount());

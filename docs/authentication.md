@@ -252,8 +252,9 @@ Fanout’s roles apply across the instance:
 Removing a user from an allowed group at the identity provider prevents their
 next login; it does not wait for a provisioning cycle.
 
-If neither list is configured there is no allow policy to enforce, and
-membership is managed locally through user administration.
+If neither list is configured there is no allow policy to enforce. Membership
+is then managed locally through user administration, unless a role mapping is
+set; see [Who owns accounts](#who-owns-accounts).
 
 ### Role ownership
 
@@ -281,11 +282,21 @@ an administrator created. `GET /api/auth/status` reports the result as
 | `account_ownership` | Configuration | Browser user routes refuse |
 |---|---|---|
 | `local` | No role mapping, with or without a SCIM token | Nothing |
-| `identity_provider_roles` | Role mapping, no SCIM token | Creating a user and changing a role |
+| `identity_provider_roles` | Role mapping and `FANOUT_OIDC_AUTO_PROVISION`, no SCIM token | Creating a user and changing a role |
+| `identity_provider_roles_no_provisioning` | Role mapping, no `FANOUT_OIDC_AUTO_PROVISION`, no SCIM token | Creating a user and changing a role |
 | `identity_provider_directory` | Role mapping and a SCIM token | Creating and deleting a user; changing a role, status or email |
 
 A refused request returns `403` with the code `managed_by_identity_provider`,
-and it changes nothing. The check runs before the request body is validated.
+and it changes nothing. The check runs before the request body is validated,
+except on `PATCH /api/users/{id}`, which has to decode the body to see whether
+`email` is present. Malformed JSON there returns `400`.
+
+To add users under a role mapping, set `FANOUT_OIDC_AUTO_PROVISION` with
+`FANOUT_OIDC_ALLOWED_GROUPS` or `FANOUT_OIDC_ALLOWED_DOMAINS`, or configure a
+SCIM token. With neither, `POST /api/users` is refused and a first login is
+denied as not provisioned, so nobody new can get an account. Fanout still starts
+in this configuration, logs a warning at startup, and Settings says so. Existing
+accounts keep working.
 
 Only `POST /api/users` and the `/api/users/{id}` routes are affected. These keep
 working in every mode:
