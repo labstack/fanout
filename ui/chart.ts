@@ -15,7 +15,7 @@ export function healthColor(health: string) {
 /* A chart is drawn into a canvas or SVG that cannot read CSS custom
    properties, so these hand ECharts resolved values from the same ramps
    Mantine gets. The shade differs by scheme for the same reason the accent
-   does: the palette's own hue reads on Ayu, a darker stop is needed on white. */
+   does: a lighter stop reads on the dark ground, a darker one on white. */
 export function chartTheme(dark: boolean) {
   return chart[dark ? "dark" : "light"];
 }

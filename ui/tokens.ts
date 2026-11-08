@@ -1,6 +1,7 @@
-/** Raw values for package-free code (shared panels, embedded views, canvas
- * charts) that cannot import the UI library. They mirror the library's default
- * brand, which ./theme.ts uses; host/src/theme.test.ts keeps them in sync.
+/** Raw values for code that reads colors and fonts as plain strings (canvas
+ * charts, embedded views, inline styles) without creating a theme. They mirror
+ * the library's default brand, which ./theme.ts uses; host/src/theme.test.ts
+ * keeps them in sync.
  * Status and interaction hues stay separate: the accent never conveys health. */
 export const accent = [
   "#F1F0FF", "#E4E2FF", "#CDC9FF", "#B5B0FF", "#A29CFF",
@@ -12,7 +13,7 @@ export const surfaces = {
   light: { ground: "#F5F5F6", raised: "#FFFFFF", inset: "#EFEFF1", hover: "#EDEDEF", border: "#E3E3E6", borderSoft: "#ECECEE", controlBorder: "#6D6D73", text: "#111113", muted: "#53535B" },
 } as const;
 
-/** Healthy. Ayu's green, the hue the landing page's service table already uses. */
+/** Healthy, the hue the landing page's service table already uses. */
 export const ok = [
   "#eefbe6", "#dcf7cc", "#c2f0a6", "#a5e880", "#8fe06c",
   "#7fd962", // site healthy
@@ -34,10 +35,10 @@ export const bad = [
 ] as const;
 
 /** Informational — the fourth severity, deliberately not one of the three
- *  status hues. Ayu's entity blue. */
+ *  status hues. */
 export const info = [
   "#e8f6ff", "#ccebff", "#a3daff", "#7dcbff", "#66c5ff",
-  "#59c2ff", // Ayu entity
+  "#59c2ff",
   "#33a7e6", "#1e86bd", "#146694", "#0d4a6d",
 ] as const;
 

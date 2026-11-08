@@ -194,7 +194,7 @@ body,
 .chat-app-chevron { display: flex; align-items: center; flex: none; }
 .chat-app-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-app-toggle:hover { background: var(--mantine-color-default-hover); }
-.chat-app-toggle:focus-visible { outline: 2px solid var(--mantine-color-accent-filled); outline-offset: -2px; }
+.chat-app-toggle:focus-visible { outline: 2px solid var(--labstack-focus); outline-offset: -2px; }
 
 /* Keyboard users can jump past the header and navigation; the link shows
    only while focused. */

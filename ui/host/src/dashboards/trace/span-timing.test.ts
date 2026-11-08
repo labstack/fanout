@@ -7,3 +7,8 @@ it("preserves nanosecond differences across second boundaries and RFC3339 offset
   expect([...spanStarts(spans).values()]).toEqual([0.0002, 0, 0.0001]);
   expect([...spanStarts([]).values()]).toEqual([]);
 });
+
+it("places a malformed start at the trace start without shifting valid spans, and truncates extra fraction digits", () => {
+  const spans = ["2026-11-07T00:00:00.0000000019Z", "not a time", "2026-11-07T00:00:00.5Z"].map(start => ({ start }) as TraceSpan);
+  expect([...spanStarts(spans).values()]).toEqual([0, 0, 499.999999]);
+});

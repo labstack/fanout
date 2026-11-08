@@ -23,7 +23,7 @@ import { useVariableOptions } from "./use-variables";
 import { VariableBar } from "./variable-bar";
 import { useShortcuts } from "./use-shortcuts";
 import { ShortcutsHelp } from "./shortcuts-help";
-import { shortcutsEvent } from "../shortcuts-event";
+import { useShortcutsHandler } from "../shortcuts-event";
 import { useViewer } from "../auth";
 import { useShortcutPreference } from "./shortcut-preference";
 import { usePanelViewFocus } from "./use-panel-view-focus";
@@ -78,11 +78,7 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
   const [duplicating, setDuplicating] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  useEffect(() => {
-    const open = () => setHelpOpen(true);
-    window.addEventListener(shortcutsEvent, open);
-    return () => window.removeEventListener(shortcutsEvent, open);
-  }, []);
+  useShortcutsHandler(useCallback(() => setHelpOpen(true), []));
   const region = useRef<HTMLElement>(null);
   const scope = useId();
   const preference = useShortcutPreference(useViewer().id);
