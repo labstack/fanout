@@ -43,7 +43,7 @@ test.each([
 
 test("allows workspace packages and package-free shared imports; skips comments and dependencies", () => {
   expect(check({
-    "theme.ts": 'import { createLabstackTheme } from "@labstack/ui";',
+    "theme.ts": 'import { buildTheme } from "@labstack/ui";',
     "panels/style.ts": 'import { contrastRatio } from "@labstack/ui";',
     "host/src/test.ts": 'import { X } from "react"; import { Y } from "../../panels/test";',
     "host/src/mcp-apps/test.ts": 'import { X } from "@mantine/core"; import { Y } from "../dashboards/test";',
