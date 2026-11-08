@@ -10,13 +10,16 @@ import (
 	"database/sql"
 )
 
-const claimAlertEmailDelivery = `-- name: ClaimAlertEmailDelivery :exec
-UPDATE alert_email_deliveries SET status = 'sending', attempts = attempts + 1 WHERE id = ?
+const claimAlertEmailDelivery = `-- name: ClaimAlertEmailDelivery :execrows
+UPDATE alert_email_deliveries SET status = 'sending', attempts = attempts + 1 WHERE id = ? AND status = 'pending'
 `
 
-func (q *Queries) ClaimAlertEmailDelivery(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, claimAlertEmailDelivery, id)
-	return err
+func (q *Queries) ClaimAlertEmailDelivery(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, claimAlertEmailDelivery, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const countAlertEmailSendsSince = `-- name: CountAlertEmailSendsSince :one
@@ -33,6 +36,15 @@ func (q *Queries) CountAlertEmailSendsSince(ctx context.Context, arg CountAlertE
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const deleteAlertEmailDelivery = `-- name: DeleteAlertEmailDelivery :exec
+DELETE FROM alert_email_deliveries WHERE id = ?
+`
+
+func (q *Queries) DeleteAlertEmailDelivery(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteAlertEmailDelivery, id)
+	return err
 }
 
 const finishAlertEmailDelivery = `-- name: FinishAlertEmailDelivery :exec
@@ -179,6 +191,45 @@ SELECT id, notification_id, rule_id, alert_id, recipient, content, status, attem
 
 func (q *Queries) ListOpenAlertEmailDeliveries(ctx context.Context) ([]AlertEmailDelivery, error) {
 	rows, err := q.db.QueryContext(ctx, listOpenAlertEmailDeliveries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertEmailDelivery{}
+	for rows.Next() {
+		var i AlertEmailDelivery
+		if err := rows.Scan(
+			&i.ID,
+			&i.NotificationID,
+			&i.RuleID,
+			&i.AlertID,
+			&i.Recipient,
+			&i.Content,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.LastError,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSendingAlertEmailDeliveries = `-- name: ListSendingAlertEmailDeliveries :many
+SELECT id, notification_id, rule_id, alert_id, recipient, content, status, attempts, next_attempt_at, last_error, created_at FROM alert_email_deliveries WHERE status = 'sending' ORDER BY id
+`
+
+func (q *Queries) ListSendingAlertEmailDeliveries(ctx context.Context) ([]AlertEmailDelivery, error) {
+	rows, err := q.db.QueryContext(ctx, listSendingAlertEmailDeliveries)
 	if err != nil {
 		return nil, err
 	}

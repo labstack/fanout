@@ -132,13 +132,19 @@ name. They are stored in lowercase and a rule can have up to 10.
 
 A notification is queued in the control database in the same transaction as the
 alert's state change, with one row per recipient. Fanout makes up to five
-attempts, waiting 1, 5, 15, then 30 minutes between them. Connection failures and
-4xx SMTP replies are retried. A 5xx reply or an unusable address fails at once.
+attempts, waiting 1, 5, 15, then 30 minutes between them. Connection failures,
+including a connection lost partway through a session, and 4xx SMTP replies are
+retried. A 5xx reply or an unusable address fails at once. Once the server has
+accepted a message, a failure while closing the session does not count against
+it. Before a retry, Fanout drops a recipient no longer on the rule, and deleting
+a rule cancels its queued mail.
 
-Delivery is at least once. A restart resumes queued mail. If Fanout stops while a
-message is being handed to the mail server, it cannot tell whether the server
-took it, so it sends the message again. The repeat has the same `Message-ID`, and
-only that one interrupted message per recipient can repeat.
+Delivery is at least once. A restart resumes queued mail. If Fanout stops or the
+worker panics while a message is being handed to the mail server, or a connection
+drops before the server confirms it, Fanout cannot tell whether the server took
+it, so it sends the message again. The repeat has the same `Message-ID`. The same
+happens after a restart if the database could not record an accepted message
+before Fanout stopped.
 
 ### The hourly limit
 

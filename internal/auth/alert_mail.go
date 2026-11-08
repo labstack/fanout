@@ -33,17 +33,23 @@ type AlertMail struct {
 	LimitNotice string
 }
 
-var errInvalidMailAddress = errors.New("invalid mail address")
+// ErrInvalidMailAddress marks a sender or recipient that does not parse.
+var ErrInvalidMailAddress = errors.New("invalid mail address")
 
 // IsPermanentMailError reports whether retrying err cannot succeed: an address
-// that does not parse, or a 5xx SMTP rejection. Connection failures and 4xx
-// replies are transient.
+// that does not parse, or a 5xx SMTP reply. Everything else is transient,
+// including a connection lost mid-session, which go-mail reports as a SendError
+// with no server code and does not count as temporary.
 func IsPermanentMailError(err error) bool {
-	if errors.Is(err, errInvalidMailAddress) {
+	if errors.Is(err, ErrInvalidMailAddress) {
 		return true
 	}
 	var sendErr *mail.SendError
-	return errors.As(err, &sendErr) && !sendErr.IsTemp()
+	if !errors.As(err, &sendErr) {
+		return false
+	}
+	code := sendErr.ErrorCode()
+	return code >= 500 && code < 600
 }
 
 // MailFailureDetail describes a send failure by its class and SMTP code, for
@@ -53,7 +59,7 @@ func MailFailureDetail(err error) string {
 	var sendErr *mail.SendError
 	var netErr net.Error
 	switch {
-	case errors.Is(err, errInvalidMailAddress):
+	case errors.Is(err, ErrInvalidMailAddress):
 		return "Invalid email address"
 	case errors.As(err, &sendErr):
 		if code := sendErr.ErrorCode(); code != 0 {
@@ -77,7 +83,7 @@ func SendAlert(ctx context.Context, cfg SMTPConfig, alert AlertMail) error {
 	}
 	message, err := newMailMessage(cfg.From, alert.To, subject, text, html)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errInvalidMailAddress, err)
+		return fmt.Errorf("%w: %w", ErrInvalidMailAddress, err)
 	}
 	message.SetMessageIDWithValue(alert.ID + "@alerts.fanout")
 	return deliver(ctx, cfg, message)

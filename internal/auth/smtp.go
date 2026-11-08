@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"time"
 
 	mail "github.com/wneessen/go-mail"
@@ -79,6 +80,12 @@ func deliver(ctx context.Context, cfg SMTPConfig, message *mail.Msg) error {
 		return fmt.Errorf("auth: configure SMTP client: %w", err)
 	}
 	if err := client.DialAndSendWithContext(ctx, message); err != nil {
+		// The server took the message; only RSET or QUIT failed afterwards.
+		// Reporting that as a failure would send the message again.
+		if message.IsDelivered() {
+			slog.Warn("auth: email accepted but the SMTP session did not end cleanly", "reason", MailFailureDetail(err))
+			return nil
+		}
 		return fmt.Errorf("auth: send email: %w", err)
 	}
 	return nil

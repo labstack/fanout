@@ -1,13 +1,16 @@
 package alert
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -211,7 +214,7 @@ func TestPermanentRejectionIsNotRetried(t *testing.T) {
 	attempts := 0
 	h.box.fail = func(auth.AlertMail) error {
 		attempts++
-		return &mail.SendError{Reason: mail.ErrSMTPRcptTo}
+		return fmt.Errorf("%w: rejected", auth.ErrInvalidMailAddress)
 	}
 	h.fire(rule)
 	h.drain()
@@ -373,13 +376,268 @@ func TestStatusDetailLeavesOutServerTextAndAddresses(t *testing.T) {
 	h.fire(rule)
 	h.drain()
 	stored := h.ruleStatus(t, rule.ID)
-	if stored.EmailStatus != "failed" || !strings.Contains(stored.EmailStatusDetail, "RCPT TO") {
+	if stored.EmailStatus != "retrying" || !strings.Contains(stored.EmailStatusDetail, "RCPT TO") {
 		t.Fatalf("rule = %+v", stored)
 	}
 	for _, leaked := range []string{"private note", "a@example.com"} {
 		if strings.Contains(stored.EmailStatusDetail, leaked) {
 			t.Fatalf("detail leaks %q: %q", leaked, stored.EmailStatusDetail)
 		}
+	}
+}
+
+func (h *mailHarness) sendsRecorded(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := h.store.db.QueryRow(`SELECT COUNT(*) FROM alert_email_sends`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func (h *mailHarness) exec(t *testing.T, statement string) {
+	t.Helper()
+	if _, err := h.store.db.Exec(statement); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAcceptedMailIsRecordedAfterADatabaseFailureWithoutResending(t *testing.T) {
+	h := newMailHarness(t, 30)
+	rule := h.rule(t, "errors", "a@example.com")
+	h.exec(t, `CREATE TRIGGER block_send BEFORE INSERT ON alert_email_sends BEGIN SELECT RAISE(ABORT, 'blocked'); END`)
+	h.fire(rule)
+	h.drain()
+	h.exec(t, `DROP TRIGGER block_send`)
+	h.now = h.now.Add(time.Minute)
+	h.drain()
+	h.drain()
+	if got := h.box.to("a@example.com"); len(got) != 1 {
+		t.Fatalf("sends = %d, want 1", len(got))
+	}
+	if got := h.sendsRecorded(t); got != 1 {
+		t.Fatalf("recorded sends = %d, want 1", got)
+	}
+	if status := h.ruleStatus(t, rule.ID).EmailStatus; status != "sent" {
+		t.Fatalf("rule status = %q", status)
+	}
+}
+
+func TestRetryIsScheduledAfterADatabaseFailureRecordingIt(t *testing.T) {
+	h := newMailHarness(t, 30)
+	rule := h.rule(t, "errors", "a@example.com")
+	attempts := 0
+	h.box.fail = func(auth.AlertMail) error { attempts++; return errors.New("451 later") }
+	h.exec(t, `CREATE TRIGGER block_retry BEFORE UPDATE ON alert_email_deliveries WHEN NEW.status = 'pending' BEGIN SELECT RAISE(ABORT, 'blocked'); END`)
+	h.fire(rule)
+	h.drain()
+	h.exec(t, `DROP TRIGGER block_retry`)
+	h.drain()
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 before the backoff elapses", attempts)
+	}
+	if status := h.ruleStatus(t, rule.ID).EmailStatus; status != "retrying" {
+		t.Fatalf("rule status = %q", status)
+	}
+	h.box.fail = nil
+	h.now = h.now.Add(2 * time.Minute)
+	h.drain()
+	if got := h.box.to("a@example.com"); len(got) != 1 {
+		t.Fatalf("mails = %+v", got)
+	}
+}
+
+func TestShutdownJustAfterAnAcceptedSendKeepsTheRecord(t *testing.T) {
+	h := newMailHarness(t, 30)
+	rule := h.rule(t, "errors", "a@example.com")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.box.fail = func(auth.AlertMail) error { cancel(); return nil }
+	h.fire(rule)
+	h.engine.drainEmail(ctx)
+	if got := h.sendsRecorded(t); got != 1 {
+		t.Fatalf("recorded sends = %d, want 1", got)
+	}
+	if status := h.ruleStatus(t, rule.ID).EmailStatus; status != "sent" {
+		t.Fatalf("rule status = %q", status)
+	}
+}
+
+func TestRowStrandedInSendingIsRecoveredWhileRunning(t *testing.T) {
+	h := newMailHarness(t, 30)
+	rule := h.rule(t, "errors", "a@example.com")
+	h.fire(rule)
+	h.exec(t, `UPDATE alert_email_deliveries SET status='sending', attempts=1`)
+	h.drain()
+	if got := h.box.to("a@example.com"); len(got) != 1 {
+		t.Fatalf("mails = %+v", got)
+	}
+	if status := h.ruleStatus(t, rule.ID).EmailStatus; status != "sent" {
+		t.Fatalf("rule status = %q", status)
+	}
+}
+
+func TestRuleDeletedAfterTheBatchReadSendsNothing(t *testing.T) {
+	h := newMailHarness(t, 30)
+	rule := h.rule(t, "errors", "a@example.com")
+	h.fire(rule)
+	rows, err := h.store.q.ListOpenAlertEmailDeliveries(context.Background())
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %v, %v", rows, err)
+	}
+	if err := h.store.DeleteRule(rule.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.engine.deliverEmail(context.Background(), rows[0])
+	if len(h.box.mails) != 0 {
+		t.Fatalf("mailed after the rule was deleted: %+v", h.box.mails)
+	}
+}
+
+func TestRetryDropsARecipientNoLongerOnTheRule(t *testing.T) {
+	h := newMailHarness(t, 30)
+	rule := h.rule(t, "errors", "stay@example.com", "gone@example.com")
+	h.box.fail = func(m auth.AlertMail) error {
+		if m.To == "gone@example.com" {
+			return errors.New("451 later")
+		}
+		return nil
+	}
+	h.fire(rule)
+	h.drain()
+	h.box.fail = nil
+	rule.EmailRecipients = []string{"stay@example.com"}
+	if _, err := h.store.ReplaceRule(rule); err != nil {
+		t.Fatal(err)
+	}
+	h.now = h.now.Add(2 * time.Minute)
+	h.drain()
+	if got := h.box.to("gone@example.com"); len(got) != 0 {
+		t.Fatalf("mailed a removed recipient: %+v", got)
+	}
+	if status := h.ruleStatus(t, rule.ID).EmailStatus; status != "sent" {
+		t.Fatalf("rule status = %q", status)
+	}
+}
+
+func TestEmailWorkerKeepsRunningAfterAPanic(t *testing.T) {
+	h := newMailHarness(t, 30)
+	h.engine.now = nil
+	rule := h.rule(t, "errors", "a@example.com")
+	panicked := false
+	h.box.fail = func(auth.AlertMail) error {
+		if !panicked {
+			panicked = true
+			panic("boom")
+		}
+		return nil
+	}
+	h.engine.transition(rule, "api", true, Env{Service: "api"}, time.Now())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); h.engine.runEmail(ctx) }()
+	deadline := time.After(10 * time.Second)
+	for len(h.box.to("a@example.com")) != 1 {
+		select {
+		case <-done:
+			t.Fatal("worker exited after a panic")
+		case <-deadline:
+			t.Fatal("mail was not delivered after the panic")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
+}
+
+// startDroppingSMTP accepts mail and drops the connection when dropAt arrives,
+// returning the settings and a count of accepted messages.
+func startDroppingSMTP(t *testing.T, dropAt string) (auth.SMTPConfig, *atomic.Int32) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	accepted := &atomic.Int32{}
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+				reader := bufio.NewReader(conn)
+				fmt.Fprint(conn, "220 fake\r\n")
+				for {
+					line, err := reader.ReadString('\n')
+					if err != nil {
+						return
+					}
+					verb := strings.ToUpper(strings.Fields(line + " x")[0])
+					if verb == dropAt {
+						return
+					}
+					switch verb {
+					case "EHLO", "HELO":
+						fmt.Fprint(conn, "250-fake\r\n250 AUTH CRAM-MD5\r\n")
+					case "AUTH":
+						fmt.Fprint(conn, "334 PDEyMzQ1QGZha2U+\r\n")
+						if _, err := reader.ReadString('\n'); err != nil {
+							return
+						}
+						fmt.Fprint(conn, "235 ok\r\n")
+					case "DATA":
+						fmt.Fprint(conn, "354 go\r\n")
+						for {
+							part, err := reader.ReadString('\n')
+							if err != nil {
+								return
+							}
+							if part == ".\r\n" {
+								break
+							}
+						}
+						accepted.Add(1)
+						fmt.Fprint(conn, "250 queued\r\n")
+					case "QUIT":
+						fmt.Fprint(conn, "221 bye\r\n")
+						return
+					default:
+						fmt.Fprint(conn, "250 ok\r\n")
+					}
+				}
+			}()
+		}
+	}()
+	return auth.SMTPConfig{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port, User: "u", Pass: "p", From: "noreply@example.com"}, accepted
+}
+
+func TestAcceptedMailIsSentAndCountedOnceWhenTheSessionEndsBadly(t *testing.T) {
+	for _, verb := range []string{"RSET", "QUIT"} {
+		t.Run(verb, func(t *testing.T) {
+			h := newMailHarness(t, 30)
+			cfg, accepted := startDroppingSMTP(t, verb)
+			h.engine.email.Send = func(ctx context.Context, m auth.AlertMail) error { return auth.SendAlert(ctx, cfg, m) }
+			rule := h.rule(t, "errors", "a@example.com")
+			h.fire(rule)
+			for range 3 {
+				h.drain()
+				h.now = h.now.Add(time.Hour)
+			}
+			if got := accepted.Load(); got != 1 {
+				t.Fatalf("accepted = %d, want 1", got)
+			}
+			if got := h.sendsRecorded(t); got != 1 {
+				t.Fatalf("recorded sends = %d, want 1", got)
+			}
+			if status := h.ruleStatus(t, rule.ID).EmailStatus; status != "sent" {
+				t.Fatalf("rule status = %q", status)
+			}
+		})
 	}
 }
 
@@ -531,7 +789,7 @@ func TestWebhookResultStaysOnAlertWhenRuleAlsoEmails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.box.fail = func(auth.AlertMail) error { return &mail.SendError{Reason: mail.ErrSMTPRcptTo} }
+	h.box.fail = func(auth.AlertMail) error { return fmt.Errorf("%w: rejected", auth.ErrInvalidMailAddress) }
 	h.fire(rule)
 	calls.Wait()
 	h.drain()

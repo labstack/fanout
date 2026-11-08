@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -222,16 +223,10 @@ func decodeRecipients(ruleID string, stored sql.NullString) []string {
 // runEmail delivers queued mail until ctx ends. One worker sends sequentially,
 // which keeps the per-recipient count exact.
 func (e *Engine) runEmail(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("alert: email worker panic", "panic", r, "stack", string(debug.Stack()))
-		}
-	}()
-	e.recoverEmail(context.WithoutCancel(ctx))
 	ticker := time.NewTicker(emailPollInterval)
 	defer ticker.Stop()
 	for {
-		e.drainEmail(ctx)
+		e.safeDrainEmail(ctx)
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
@@ -240,26 +235,81 @@ func (e *Engine) runEmail(ctx context.Context) {
 	}
 }
 
-// recoverEmail resumes after a restart. A row still marked sending may or may
-// not have reached the server, so it is sent again: delivery is at least once,
-// and the repeated Message-ID lets a mail system collapse the duplicate.
+// safeDrainEmail keeps a panic from ending the worker. A row it left marked
+// sending is recovered by the next drain.
+func (e *Engine) safeDrainEmail(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("alert: email worker panic", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	e.drainEmail(ctx)
+}
+
+// emailOutcome is the bookkeeping for a finished attempt. One that the database
+// refuses is held and retried by later drains, so a transient database error
+// cannot strand the row or cause mail the server accepted to be sent again.
+type emailOutcome struct {
+	row   generated.AlertEmailDelivery
+	apply func(context.Context) error
+	after func(context.Context)
+}
+
+// recordOutcome applies an outcome, holding it on failure. It reports success.
+func (e *Engine) recordOutcome(ctx context.Context, outcome emailOutcome) bool {
+	if err := outcome.apply(ctx); err != nil {
+		slog.Error("alert: record email outcome", "rule", outcome.row.RuleID, "err", err)
+		if e.emailHeld == nil {
+			e.emailHeld = make(map[string]emailOutcome)
+		}
+		e.emailHeld[outcome.row.ID] = outcome
+		return false
+	}
+	delete(e.emailHeld, outcome.row.ID)
+	if outcome.after != nil {
+		outcome.after(ctx)
+	}
+	return true
+}
+
+// finishOutcome moves a row to status and then runs after.
+func (e *Engine) finishOutcome(row generated.AlertEmailDelivery, status, detail, nextAttemptAt string, after func(context.Context)) emailOutcome {
+	return emailOutcome{
+		row: row,
+		apply: func(ctx context.Context) error {
+			return e.finishEmail(ctx, row, status, detail, nextAttemptAt)
+		},
+		after: after,
+	}
+}
+
+func (e *Engine) settleAfter(row generated.AlertEmailDelivery) func(context.Context) {
+	return func(ctx context.Context) { e.settleEmail(ctx, row) }
+}
+
+// recoverEmail handles rows left marked sending by a restart or a panic. Such a
+// row may or may not have reached the server, so it is sent again: delivery is
+// at least once, and the repeated Message-ID lets a mail system collapse the
+// duplicate. It runs only between attempts, so no row is in flight, and rows
+// with a held outcome are skipped because their result is already known.
 func (e *Engine) recoverEmail(ctx context.Context) {
-	rows, err := e.store.q.ListOpenAlertEmailDeliveries(ctx)
+	rows, err := e.store.q.ListSendingAlertEmailDeliveries(ctx)
 	if err != nil {
-		slog.Error("alert: list open email", "err", err)
+		if ctx.Err() == nil {
+			slog.Error("alert: list interrupted email", "err", err)
+		}
 		return
 	}
 	now := formatStoredTime(e.clock())
 	for _, row := range rows {
-		if row.Status != emailSending {
+		if _, held := e.emailHeld[row.ID]; held {
 			continue
 		}
 		if int(row.Attempts) >= len(emailBackoff) {
-			e.finishEmail(ctx, row, emailFailed, "Interrupted during its last attempt", row.NextAttemptAt)
-			e.settleEmail(ctx, row)
+			e.recordOutcome(ctx, e.finishOutcome(row, emailFailed, "Interrupted during its last attempt", row.NextAttemptAt, e.settleAfter(row)))
 			continue
 		}
-		e.finishEmail(ctx, row, emailPending, row.LastError, now)
+		e.recordOutcome(ctx, e.finishOutcome(row, emailPending, row.LastError, now, nil))
 	}
 }
 
@@ -272,13 +322,16 @@ func (e *Engine) failUndeliverableEmail(ctx context.Context) {
 		return
 	}
 	for _, row := range rows {
-		e.finishEmail(ctx, row, emailFailed, EmailUnavailableMessage, row.NextAttemptAt)
-		e.settleEmail(ctx, row)
+		e.recordOutcome(ctx, e.finishOutcome(row, emailFailed, EmailUnavailableMessage, row.NextAttemptAt, e.settleAfter(row)))
 	}
 }
 
 // drainEmail processes everything currently due, oldest first.
 func (e *Engine) drainEmail(ctx context.Context) {
+	for _, outcome := range e.emailHeld {
+		e.recordOutcome(context.WithoutCancel(ctx), outcome)
+	}
+	e.recoverEmail(ctx)
 	for ctx.Err() == nil {
 		rows, err := e.store.q.ListDueAlertEmailDeliveries(ctx, generated.ListDueAlertEmailDeliveriesParams{
 			NextAttemptAt: formatStoredTime(e.clock()),
@@ -293,12 +346,17 @@ func (e *Engine) drainEmail(ctx context.Context) {
 		if len(rows) == 0 {
 			return
 		}
+		attempted := false
 		for _, row := range rows {
+			if _, held := e.emailHeld[row.ID]; held {
+				continue
+			}
+			attempted = true
 			if ctx.Err() != nil || !e.deliverEmail(ctx, row) {
 				return
 			}
 		}
-		if len(rows) < emailBatchSize {
+		if !attempted || len(rows) < emailBatchSize {
 			return
 		}
 	}
@@ -309,6 +367,22 @@ func (e *Engine) drainEmail(ctx context.Context) {
 // a burst cannot arrive later as a backlog. It returns false when the database
 // failed and the row is still due, so the drain stops until the next poll.
 func (e *Engine) deliverEmail(ctx context.Context, row generated.AlertEmailDelivery) bool {
+	if row.Attempts > 0 {
+		addressed, err := e.stillAddressed(row)
+		if err != nil {
+			slog.Error("alert: read rule for email retry", "rule", row.RuleID, "err", err)
+			return false
+		}
+		if !addressed {
+			if err := e.store.q.DeleteAlertEmailDelivery(ctx, row.ID); err != nil {
+				slog.Error("alert: drop email delivery", "rule", row.RuleID, "err", err)
+				return false
+			}
+			e.settleEmail(ctx, row)
+			return true
+		}
+	}
+
 	now := e.clock()
 	sent, err := e.store.q.CountAlertEmailSendsSince(ctx, generated.CountAlertEmailSendsSinceParams{
 		Recipient: row.Recipient,
@@ -321,22 +395,20 @@ func (e *Engine) deliverEmail(ctx context.Context, row generated.AlertEmailDeliv
 	limit := e.email.HourlyLimit
 	if int(sent) >= limit {
 		slog.Warn("alert: email suppressed by hourly limit", "rule", row.RuleID, "alert", row.AlertID, "limit", limit)
-		if !e.finishEmail(ctx, row, emailSuppressed, fmt.Sprintf("Over the limit of %d emails per hour to this address", limit), row.NextAttemptAt) {
-			return false
-		}
-		e.settleEmail(ctx, row)
-		return true
+		return e.recordOutcome(ctx, e.finishOutcome(row, emailSuppressed, fmt.Sprintf("Over the limit of %d emails per hour to this address", limit), row.NextAttemptAt, e.settleAfter(row)))
 	}
 
 	var content emailContent
 	if err := json.Unmarshal([]byte(row.Content), &content); err != nil {
-		e.finishEmail(ctx, row, emailFailed, "The stored message could not be read", row.NextAttemptAt)
-		e.settleEmail(ctx, row)
-		return true
+		return e.recordOutcome(ctx, e.finishOutcome(row, emailFailed, "The stored message could not be read", row.NextAttemptAt, e.settleAfter(row)))
 	}
-	if err := e.store.q.ClaimAlertEmailDelivery(ctx, row.ID); err != nil {
+	claimed, err := e.store.q.ClaimAlertEmailDelivery(ctx, row.ID)
+	if err != nil {
 		slog.Error("alert: claim email", "err", err)
 		return false
+	}
+	if claimed == 0 {
+		return true // Deleted with its rule since the batch was read.
 	}
 	attempt := int(row.Attempts) + 1
 
@@ -361,33 +433,47 @@ func (e *Engine) deliverEmail(ctx context.Context, row generated.AlertEmailDeliv
 	if err != nil {
 		detail = auth.MailFailureDetail(err)
 	}
+	// The outcome is recorded even if shutdown began during the send.
+	record := context.WithoutCancel(ctx)
 	switch {
 	case err == nil:
-		e.recordEmailSent(ctx, row)
-		e.settleEmail(ctx, row)
+		sentAt := e.clock()
+		return e.recordOutcome(record, emailOutcome{
+			row:   row,
+			apply: func(c context.Context) error { return e.store.recordEmailSent(c, row, sentAt) },
+			after: e.settleAfter(row),
+		})
 	case ctx.Err() != nil:
 		// Shutting down: leave the row marked sending for recoverEmail.
 	case auth.IsPermanentMailError(err) || attempt >= len(emailBackoff):
 		slog.Warn("alert: email delivery failed", "rule", row.RuleID, "alert", row.AlertID, "attempt", attempt, "reason", detail)
-		e.finishEmail(ctx, row, emailFailed, detail, row.NextAttemptAt)
-		e.settleEmail(ctx, row)
+		return e.recordOutcome(record, e.finishOutcome(row, emailFailed, detail, row.NextAttemptAt, e.settleAfter(row)))
 	default:
 		next := e.clock().Add(emailBackoff[attempt])
 		slog.Warn("alert: email attempt failed, will retry", "rule", row.RuleID, "alert", row.AlertID, "attempt", attempt, "reason", detail)
-		e.finishEmail(ctx, row, emailPending, detail, formatStoredTime(next))
-		e.setRuleEmailStatus(ctx, row.RuleID, emailRetrying, fmt.Sprintf("Attempt %d of %d failed: %s", attempt, len(emailBackoff), detail))
+		status := fmt.Sprintf("Attempt %d of %d failed: %s", attempt, len(emailBackoff), detail)
+		return e.recordOutcome(record, e.finishOutcome(row, emailPending, detail, formatStoredTime(next), func(c context.Context) {
+			e.setRuleEmailStatus(c, row.RuleID, emailRetrying, status)
+		}))
 	}
 	return true
 }
 
-// recordEmailSent marks a row sent and counts it toward the hourly limit,
-// atomically. If this fails the row stays sending and is resent after a restart.
-func (e *Engine) recordEmailSent(ctx context.Context, row generated.AlertEmailDelivery) {
-	if err := e.store.recordEmailSent(ctx, row, e.clock()); err != nil {
-		slog.Error("alert: record sent email", "rule", row.RuleID, "err", err)
+// stillAddressed reports whether a retry's recipient is still a destination of
+// its rule.
+func (e *Engine) stillAddressed(row generated.AlertEmailDelivery) (bool, error) {
+	rule, err := e.store.GetRule(row.RuleID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return false, nil
+		}
+		return false, err
 	}
+	return slices.Contains(e.emailRecipients(rule), row.Recipient), nil
 }
 
+// recordEmailSent marks a row sent and counts it toward the hourly limit,
+// atomically.
 func (s *Store) recordEmailSent(ctx context.Context, row generated.AlertEmailDelivery, now time.Time) error {
 	id, err := newID()
 	if err != nil {
@@ -416,17 +502,13 @@ func (s *Store) recordEmailSent(ctx context.Context, row generated.AlertEmailDel
 	return tx.Commit()
 }
 
-func (e *Engine) finishEmail(ctx context.Context, row generated.AlertEmailDelivery, status, detail, nextAttemptAt string) bool {
-	if err := e.store.q.FinishAlertEmailDelivery(ctx, generated.FinishAlertEmailDeliveryParams{
+func (e *Engine) finishEmail(ctx context.Context, row generated.AlertEmailDelivery, status, detail, nextAttemptAt string) error {
+	return e.store.q.FinishAlertEmailDelivery(ctx, generated.FinishAlertEmailDeliveryParams{
 		Status:        status,
 		LastError:     detail,
 		NextAttemptAt: nextAttemptAt,
 		ID:            row.ID,
-	}); err != nil {
-		slog.Error("alert: update email delivery", "rule", row.RuleID, "status", status, "err", err)
-		return false
-	}
-	return true
+	})
 }
 
 // settleEmail publishes a notification's result once every recipient is
@@ -440,7 +522,9 @@ func (e *Engine) settleEmail(ctx context.Context, row generated.AlertEmailDelive
 		return
 	}
 	if len(rows) == 0 {
-		return // The rule was deleted during the send.
+		// Every recipient was dropped, or the rule went with them.
+		e.setRuleEmailStatus(ctx, row.RuleID, "", "")
+		return
 	}
 	var failed, suppressed int
 	var cause string
@@ -485,10 +569,14 @@ func (e *Engine) settleEmail(ctx context.Context, row generated.AlertEmailDelive
 }
 
 func (e *Engine) setRuleEmailStatus(ctx context.Context, ruleID, status, detail string) {
+	at := ""
+	if status != "" {
+		at = e.clock().Format(time.RFC3339)
+	}
 	if err := e.store.q.UpdateRuleEmailStatus(ctx, generated.UpdateRuleEmailStatusParams{
 		EmailStatus:       status,
 		EmailStatusDetail: detail,
-		EmailStatusAt:     e.clock().Format(time.RFC3339),
+		EmailStatusAt:     at,
 		ID:                ruleID,
 	}); err != nil {
 		slog.Error("alert: update rule email status", "rule", ruleID, "err", err)

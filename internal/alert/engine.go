@@ -30,10 +30,11 @@ type Engine struct {
 	interval    time.Duration
 	histDays    int
 	lastPrune   time.Time
-	envOverride map[string]Env   // for testing — bypasses DuckDB query
-	afterList   func()           // for testing — runs once a tick has listed its rules
-	email       *EmailConfig     // nil without SMTP
-	now         func() time.Time // for testing — the email clock
+	envOverride map[string]Env          // for testing — bypasses DuckDB query
+	afterList   func()                  // for testing — runs once a tick has listed its rules
+	emailHeld   map[string]emailOutcome // outcomes the database refused; worker-owned
+	email       *EmailConfig            // nil without SMTP
+	now         func() time.Time        // for testing — the email clock
 }
 
 // NewEngine creates an Engine ready to Run.

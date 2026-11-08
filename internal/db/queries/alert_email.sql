@@ -15,8 +15,14 @@ SELECT * FROM alert_email_deliveries WHERE status IN ('pending', 'sending') ORDE
 -- name: ListAlertEmailDeliveriesByNotification :many
 SELECT * FROM alert_email_deliveries WHERE notification_id = ? ORDER BY id;
 
--- name: ClaimAlertEmailDelivery :exec
-UPDATE alert_email_deliveries SET status = 'sending', attempts = attempts + 1 WHERE id = ?;
+-- name: ListSendingAlertEmailDeliveries :many
+SELECT * FROM alert_email_deliveries WHERE status = 'sending' ORDER BY id;
+
+-- name: ClaimAlertEmailDelivery :execrows
+UPDATE alert_email_deliveries SET status = 'sending', attempts = attempts + 1 WHERE id = ? AND status = 'pending';
+
+-- name: DeleteAlertEmailDelivery :exec
+DELETE FROM alert_email_deliveries WHERE id = ?;
 
 -- name: FinishAlertEmailDelivery :exec
 UPDATE alert_email_deliveries SET status = ?, last_error = ?, next_attempt_at = ? WHERE id = ?;

@@ -23,8 +23,11 @@ import (
 type fakeSMTP struct {
 	listener  net.Listener
 	rcptReply string
-	mu        sync.Mutex
-	data      []string
+	// dropAt closes the connection without a reply when this verb arrives;
+	// BODY drops after the message data, before the server's reply.
+	dropAt string
+	mu     sync.Mutex
+	data   []string
 }
 
 func startFakeSMTP(t *testing.T, rcptReply string) (*fakeSMTP, SMTPConfig) {
@@ -59,6 +62,9 @@ func (s *fakeSMTP) serve(conn net.Conn) {
 			return
 		}
 		verb := strings.ToUpper(strings.Fields(line + " x")[0])
+		if verb == s.dropAt {
+			return
+		}
 		switch verb {
 		case "EHLO", "HELO":
 			reply("250-fake")
@@ -91,6 +97,9 @@ func (s *fakeSMTP) serve(conn net.Conn) {
 			s.mu.Lock()
 			s.data = append(s.data, body.String())
 			s.mu.Unlock()
+			if s.dropAt == "BODY" {
+				return
+			}
 			reply("250 queued")
 		case "QUIT":
 			reply("221 bye")
@@ -233,14 +242,20 @@ func TestSendAlertRejectsAddressWithLineBreakWithoutSending(t *testing.T) {
 
 func TestMailErrorClassification(t *testing.T) {
 	for _, tc := range []struct {
-		name, reply string
-		permanent   bool
+		name, reply, drop string
+		permanent         bool
 	}{
-		{"mailbox rejected", "550 no such user", true},
-		{"greylisted", "451 try again later", false},
+		{name: "mailbox rejected", reply: "550 no such user", permanent: true},
+		{name: "greylisted", reply: "451 try again later"},
+		// A lost connection is a SendError with no server code: retryable.
+		{name: "dropped at MAIL", drop: "MAIL"},
+		{name: "dropped at RCPT", drop: "RCPT"},
+		{name: "dropped at DATA", drop: "DATA"},
+		{name: "dropped after the body", drop: "BODY"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, cfg := startFakeSMTP(t, tc.reply)
+			server, cfg := startFakeSMTP(t, tc.reply)
+			server.dropAt = tc.drop
 			err := SendAlert(context.Background(), cfg, hostileAlert())
 			if err == nil {
 				t.Fatal("send succeeded")
@@ -262,6 +277,23 @@ func TestMailErrorClassification(t *testing.T) {
 	}
 }
 
+// Once the server has accepted the message, a failure while closing the session
+// must not report the send as failed, or the message would be sent again.
+func TestAcceptedMailSucceedsWhenTheSessionEndsBadly(t *testing.T) {
+	for _, verb := range []string{"RSET", "QUIT"} {
+		t.Run(verb, func(t *testing.T) {
+			server, cfg := startFakeSMTP(t, "")
+			server.dropAt = verb
+			if err := SendAlert(context.Background(), cfg, hostileAlert()); err != nil {
+				t.Fatalf("accepted mail reported as failed: %v", err)
+			}
+			if got := len(server.messages()); got != 1 {
+				t.Fatalf("messages = %d, want 1", got)
+			}
+		})
+	}
+}
+
 func TestMailFailureDetailKeepsTheCodeAndDropsServerText(t *testing.T) {
 	_, cfg := startFakeSMTP(t, "550 private note about oncall@example.com")
 	err := SendAlert(context.Background(), cfg, hostileAlert())
@@ -277,7 +309,7 @@ func TestMailFailureDetailKeepsTheCodeAndDropsServerText(t *testing.T) {
 			t.Fatalf("detail leaks %q: %q", leaked, detail)
 		}
 	}
-	if got := MailFailureDetail(fmt.Errorf("%w: a@example.com", errInvalidMailAddress)); strings.Contains(got, "a@example.com") {
+	if got := MailFailureDetail(fmt.Errorf("%w: a@example.com", ErrInvalidMailAddress)); strings.Contains(got, "a@example.com") {
 		t.Fatalf("address detail = %q", got)
 	}
 	if got := MailFailureDetail(fmt.Errorf("dial a@example.com: %w", context.DeadlineExceeded)); strings.Contains(got, "a@example.com") {
