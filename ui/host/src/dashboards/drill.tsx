@@ -83,13 +83,13 @@ export function DrillDrawer({
         onChange(next);
       }}>Back to traces</Button>}
       {!panel && (
-        <Box ><Notice tone="danger">This panel is no longer in the dashboard.</Notice></Box>
+        <Box><Notice tone="danger">This panel is no longer in the dashboard.</Notice></Box>
       )}
       {(exemplars.isFetching || trace.isFetching) && (
-        <Box role="status" aria-label="Loading drill data"><DataState state="loading" loadingLabel="Loading drill data" rows={3} /></Box>
+        <DataState state="loading" loadingLabel="Loading drill data" rows={3} />
       )}
       {(exemplars.error || trace.error) && (
-        <Box ><Notice tone="danger" retryLabel="Retry" onRetry={() => {void (target?.trace_id ? trace.refetch() : exemplars.refetch());}}>{(exemplars.error ?? trace.error)?.message}</Notice></Box>
+        <Box><Notice tone="danger" retryLabel="Retry" onRetry={() => {void (target?.trace_id ? trace.refetch() : exemplars.refetch());}}>{(exemplars.error ?? trace.error)?.message}</Notice></Box>
       )}
       {directLogs && exemplars.data?.logs && panel && (
         <LogsViz

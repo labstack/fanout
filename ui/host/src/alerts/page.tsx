@@ -1,5 +1,4 @@
 import { LoadingSkeleton } from "../loading-skeleton";
-import { formatTimestamp } from "../../../panels/units";
 import { LiveDataMeta } from "../live-data-meta";
 import { ConfirmDialog, DataState, Notice, PageHeader, StatusBadge } from "@labstack/ui";
 import { ActionIcon, Button, Group, Menu, Modal, Stack, Switch, Table, Text, Title } from "@mantine/core";
@@ -14,9 +13,7 @@ import { RuleForm } from "./rule-form";
 import { formatValue, variables } from "./values";
 
 const stateTone: Record<string, "danger" | "warning" | "neutral"> = { firing: "danger", pending: "warning", resolved: "neutral" } as const;
-/** A badge whose label can shrink is cut to "FIR…" when a narrow screen squeezes the table. */
-const whole = { label: { overflow: "visible" } };
-const when = (value?: string) => value ? formatTimestamp(Date.parse(value)) : "—";
+const when = (value?: string) => value ? exactTimestamp(value) : "—";
 
 /** The rollup variables a rule reads, as the FanQL source and measure that chart them. */
 const charts: Record<string, string> = { error_rate: "spans | error_rate()", p95: "spans | p95(duration)", throughput: "spans | count()", log_count: "logs | count()" };
@@ -77,7 +74,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
       <Title order={2} fz={18}>Rules</Title>
       {rules.data && rules.data.length > 0 && <Text size="xs" c="dimmed">{exploreNote}</Text>}
       {rules.isLoading ? <DataState state="loading" loadingLabel="Loading alert rules" skeleton={<LoadingSkeleton shape="table" columns={7} rows={4} />} /> : rules.error ? <DataState state="error" error={{ message: `Rules could not be loaded: ${rules.error.message}`, onRetry: () => void rules.refetch() }} />
-        : rules.data?.length === 0 ? <DataState state="empty" empty={{title: "No rules yet", description: "Create a rule to get notified when a service misbehaves.", action: canManage && <Button onClick={() => setEditing({})}>New rule</Button>}} />
+        : rules.data?.length === 0 ? <DataState state="empty" empty={{title: "No rules yet", description: canManage ? "Create a rule to get notified when a service misbehaves." : "An operator or admin can create rules.", action: canManage && <Button onClick={event => { opener.remember(event.currentTarget); setEditing({}); }}>New rule</Button>}} />
         : <Table.ScrollContainer minWidth={760}><Table verticalSpacing="sm">
           <Table.Thead><Table.Tr><Table.Th>Rule</Table.Th><Table.Th>Service</Table.Th><Table.Th>Expression</Table.Th><Table.Th>State</Table.Th><Table.Th>Last fired</Table.Th><Table.Th>Enabled</Table.Th><Table.Th w={48}><Text size="xs" c="dimmed">Actions</Text></Table.Th></Table.Tr></Table.Thead>
           <Table.Tbody>{rules.data?.map(rule => {
@@ -106,7 +103,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
     <Stack gap="xs">
       <Title order={2} fz={18}>History</Title>
       {alerts.isLoading ? <DataState state="loading" loadingLabel="Loading alert history" skeleton={<LoadingSkeleton shape="table" columns={7} rows={4} />} /> : alerts.error ? <Notice tone="danger">Alert history could not be loaded: {alerts.error.message}</Notice>
-        : history.length === 0 ? <DataState state="empty" empty={{title: "Nothing has fired yet", description: "Connect telemetry to evaluate your alert rules.", action: <Button component="a" href="/settings" variant="default">Connect telemetry</Button>}} />
+        : history.length === 0 ? <DataState state="empty" empty={{title: "Nothing has fired yet", description: "Alerts appear here when a rule fires."}} />
         : <Table.ScrollContainer minWidth={760} scrollAreaProps={{ viewportProps: { tabIndex: 0, role: "region", "aria-label": "Alert history" } }}><Table verticalSpacing="xs">
           <Table.Thead><Table.Tr><Table.Th>State</Table.Th><Table.Th>Rule</Table.Th><Table.Th>Service</Table.Th><Table.Th ta="right">Value</Table.Th><Table.Th>Fired</Table.Th><Table.Th>Resolved</Table.Th><Table.Th>Delivery</Table.Th></Table.Tr></Table.Thead>
           <Table.Tbody>{history.map(a => <Table.Tr key={a.id}>

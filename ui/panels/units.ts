@@ -118,7 +118,7 @@ export function adaptValueAxis(axis: Record<string, unknown>, pixels: number): R
   const unit = typeof axis.fanout_unit === "string" ? axis.fanout_unit : undefined;
   const next = valueAxis(axis.min, axis.max, unit, pixels);
   // New ticks may need another duration or binary unit.
-  return { ...axis, ...next, ...(unit && (unit in durationFactor || unit === "bytes") ? { axisLabel: { ...(axis.axisLabel as object), formatter: formatAxis(axis.fanout_unit_in_name ? undefined : unit, next) } } : {}) };
+  return { ...axis, ...next, ...(unit && (unit in durationFactor || unit === "bytes") ? { axisLabel: { ...(axis.axisLabel as object), formatter: formatAxis(unit, next) } } : {}) };
 }
 
 /** Use one duration scale for both ends of a bucket. */

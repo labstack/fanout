@@ -1,4 +1,5 @@
 import { TraceIdCopy } from "../../trace-id-copy";
+import { statusLabel } from "./status-label";
 import { Notice, StatusBadge } from "@labstack/ui";
 import { seriesSlot } from "../../../../chart";
 import { Anchor, Box, Button, Group, Table, Text, UnstyledButton, useComputedColorScheme } from "@mantine/core";
@@ -181,7 +182,7 @@ function FormattedCell({ format, value, max, panel, better, trend, traceHref, tr
     case "status": {
       const bad = display.status === "bad" || display.text === "bad" || display.text === "unhealthy" || display.text.includes("ERROR");
       const warn = display.status === "warn" || display.text === "warn" || display.text === "degraded" || display.text === "WARN";
-      return <StatusBadge tone={bad ? "danger" : warn ? "warning" : display.status === "ok" ? "success" : "neutral"}>{display.text.charAt(0).toUpperCase() + display.text.slice(1).toLowerCase()}</StatusBadge>;
+      return <StatusBadge tone={bad ? "danger" : warn ? "warning" : display.status === "ok" ? "success" : "neutral"}>{statusLabel(display.text)}</StatusBadge>;
     }
     case "sparkline": return display.unsupported
       ? <Text fz={12} c="dimmed" role="status">{display.unsupported}</Text>

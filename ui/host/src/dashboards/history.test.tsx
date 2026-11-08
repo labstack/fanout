@@ -196,13 +196,14 @@ it.each([404, 409, 500])("gives status-specific restore advice for %s and refres
   if (status === 404) expect(api.listVersions.mock.calls.length).toBeGreaterThan(reads);
 });
 
-it.each(["light", "dark"] as const)("uses the defined ok palette for success and clears it on close in %s", async theme => {
+it.each(["light", "dark"] as const)("shows success as one quiet note, announced once by focus, and clears it on close in %s", async theme => {
   scheme = theme; api.restoreVersion.mockResolvedValue({ ...record, version: 4 });
   await render(); await act(async () => button("Version 1").click()); await settle();
   await act(async () => button("Restore version 1").click()); await settle();
-  const alert = [...document.querySelectorAll<HTMLElement>('[role="status"]')].find(node => node.textContent?.includes("Restored v1 as v4"))!;
-  expect(alert.style.background).toBe("var(--mantine-color-default-hover)");
-  expect(alert.querySelector("svg")).not.toBeNull();
+  const note = [...document.querySelectorAll<HTMLElement>('[role="note"]')].find(node => node.textContent?.includes("Restored v1 as v4"))!;
+  expect(note.querySelector("[role], [aria-live]")).toBeNull();
+  expect((note.firstElementChild as HTMLElement).style.background).toBe("var(--mantine-color-default-hover)");
+  expect(note.querySelector("svg")).not.toBeNull();
   await render(false); await render(); expect(document.body.textContent).not.toContain("Restored v1 as v4");
 });
 

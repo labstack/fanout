@@ -1,5 +1,5 @@
 import { LoadingSkeleton } from "../loading-skeleton";
-import { DataState, KeyValueList, Notice } from "@labstack/ui";
+import { DataState, KeyValueList } from "@labstack/ui";
 import { Anchor, Box, Stack, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import type { Cell } from "../../../panels/types";

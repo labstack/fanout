@@ -87,8 +87,11 @@ describe("AlertsPage", () => {
   it("keeps state badges whole, lets the keyboard scroll the history, and does not tint rows under dimmed text", async () => {
     const { ui, wait } = await render();
     await wait(() => expect(ui.getByText("Firing · checkout")).toBeTruthy());
-    // A narrow screen squeezes the table's columns; a badge must not shrink to "FIR…".
-    expect(ui.getByText("Firing · checkout").textContent).toBe("Firing · checkout");
+    // A narrow screen squeezes the table's columns; the state badge keeps one
+    // line and its width instead of wrapping or shrinking to "Firing · che…".
+    const label = ui.getByText("Firing · checkout").closest<HTMLElement>(".mantine-Badge-label")!;
+    expect(label.style.whiteSpace).toBe("nowrap");
+    expect(label.closest<HTMLElement>(".mantine-Badge-root")!.style.flexShrink).toBe("0");
     const history = ui.getByRole("region", { name: "Alert history" });
     expect(history.tabIndex).toBe(0);
     expect(history.querySelector("table")).not.toBeNull();

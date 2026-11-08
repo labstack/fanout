@@ -2,7 +2,7 @@ import { LoadingSkeleton } from "./loading-skeleton";
 import { formatTimestamp } from "../../panels/units";
 import { ConfirmDialog, DataState, KeyValueList, Notice, PageHeader } from "@labstack/ui";
 import { Anchor, Box, Button, Code, CopyButton, Group, Paper, Stack, Text, TextInput, Title, Tooltip } from "@mantine/core";
-import { ArrowsClockwise, Check, Copy, WarningCircle } from "@phosphor-icons/react";
+import { ArrowsClockwise, Check, Copy } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { getJSON } from "./api";

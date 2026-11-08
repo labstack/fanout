@@ -78,8 +78,8 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       const values = rows.map(row => row[measure]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
       const min = Math.min(0, ...values), max = Math.max(0, ...values);
       const bounds = scale === "log" ? undefined : valueAxis(min, max, unit, pixels);
-      return { fanout_unit_in_name: true, type: scale === "log" ? "log" : "value", ...(bounds ?? {splitNumber:valueAxisTicks(pixels)}),
-        axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { lineStyle: { color: theme.grid } }, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatAxis(undefined), hideOverlap: true } };
+      return { type: scale === "log" ? "log" : "value", ...(bounds ?? {splitNumber:valueAxisTicks(pixels)}),
+        axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { lineStyle: { color: theme.grid } }, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatAxis(unit, bounds), hideOverlap: true } };
     };
     return {
       ...base,
@@ -175,7 +175,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
         }).join("<br/>");
       } },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
-      xAxis: { type: "time", min: buckets.length ? Math.min(...buckets.map(b => Number(b.value[0]))) : result.from_ms, max: result.to_ms, axisPointer: { show: true }, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatTimeAxis, hideOverlap: true } },
+      xAxis: { type: "time", min: result.from_ms, max: result.to_ms, axisPointer: { show: true }, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatTimeAxis, hideOverlap: true } },
       yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, width: 140, overflow: "truncate", ...(heat ? { interval: (size.height-60)/Math.max(1,names.length)<12 ? 1 : 0, hideOverlap: true } : { interval: 0 }) } },
       visualMap: heat ? {
         type: "continuous", show: true, orient: "horizontal", right: 16, bottom: 0, padding: 0,

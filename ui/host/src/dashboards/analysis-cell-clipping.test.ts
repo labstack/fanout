@@ -16,8 +16,7 @@ it.each(["heatmap", "state_timeline"] as const)("clips %s cells to an unaligned 
     const model = (chart as any).getModel().getSeriesByIndex(0);
     (chart as any).getViewOfSeriesModel(model).group.traverse((el: any) => { if (el.type === "rect") rects.push(el); });
     expect(rects).toHaveLength(2);
-    expect(rects.every((el: any) => el.shape.x >= grid.x)).toBe(true);
-    expect((chart as any).getModel().getComponent("xAxis").option.min).toBe(0);
+    expect(rects.some((el: any) => el.shape.x < grid.x)).toBe(true);
     expect(rects.some((el: any) => el.shape.x + el.shape.width > grid.x + grid.width)).toBe(true);
     for (const cell of rects) {
       expect(cell.__clipPaths?.length ?? 0).toBeGreaterThan(0);

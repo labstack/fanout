@@ -97,7 +97,7 @@ describe("panel rendering", () => {
     const x = got.xAxis as { name?: string; splitLine: { lineStyle: { color: string } } };
     const y = got.yAxis as { name?: string; interval: number; splitLine: { lineStyle: { color: string } }; axisLabel: { formatter: (v: number) => string } };
     expect(x.name).toBe("Requests"); expect(y.name).toBe("p95 (ms)"); expect(y.interval).toBe(600000);
-    expect(y.axisLabel.formatter(y.interval)).toBe("600K");
+    expect(y.axisLabel.formatter(y.interval)).toBe("10 m");
     expect(x.splitLine.lineStyle.color).toBe(theme.grid); expect(y.splitLine.lineStyle.color).toBe(theme.grid);
   });
   it("fills the heatmap and anchors the scale beneath its right edge", () => {

@@ -2,7 +2,7 @@ import { LoadingSkeleton } from "../loading-skeleton";
 import { DataState, Notice } from "@labstack/ui";
 import { logConstants } from "../../../panels/rows";
 import { useMergedRef } from "@mantine/hooks";
-import { ActionIcon, Box, Button, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
+import { ActionIcon, Box, Button, Group, Loader, Menu, Paper, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
 import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, Trash, WarningCircle } from "@phosphor-icons/react";
 import type { Panel, Selection, VarValue } from "../../../panels/types";
 import type { PanelDisplayResult } from "./panel-result";
@@ -17,14 +17,16 @@ import { Viz } from "./viz";
 import type { RowControls } from "./viz/table";
 import { PanelTooltipContext } from "./panel-fullscreen";
 
-export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, onEdit, staleAt, traceLinks, controls, suspended = false, menuRef, initialView = "Chart" }: {
+export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, onWiden, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, onEdit, staleAt, traceLinks, controls, suspended = false, menuRef, initialView = "Chart" }: {
   initialView?: "Chart" | "Data" | "Spec";
   compare?: boolean; range?: string; panel: Panel; title: string; result?: PanelDisplayResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
   annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; traceLinks?: "button"; controls?: RowControls;
   onSelect?: (value: string) => void; onView?(): void; onCopyLink?: () => void; onExplain?: () => void; onFix?: () => void; onRetry?(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
   suspended?: boolean; menuRef?: Ref<HTMLButtonElement>; onEdit?(): void;
   onVariable?: (name: string, value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
-  zoomed?: boolean; onZoomReset?: () => void; onRangePending?(pending: boolean): void;
+  zoomed?: boolean; onZoomReset?: () => void;
+  /** Widens the page's time range; the empty state offers it only when given. */
+  onWiden?: () => void; onRangePending?(pending: boolean): void;
 }) {
   const [keyboardHint, setKeyboardHint] = useState<string>();
   const chartHint = useMemo(() => ({setHint: setKeyboardHint}), []);
@@ -197,13 +199,13 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     <Box ref={body} data-panel-body data-panel-loading={loadingBody || undefined} className="dashboard-panel-padding" tabIndex={view !== "Chart" ? 0 : undefined} style={{ flex: "1 1 0px", isolation: "isolate", contain: rows || view === "Data" ? "paint" : undefined, minHeight: 0, minWidth: 0, padding: "16px", overflow: !loadingBody && scrolls ? "auto" : "hidden", display: !loadingBody && (rows || view !== "Chart") ? "block" : "flex", flexDirection: "column", backgroundColor: "inherit", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>
       {suspended ? <DataState state="empty" empty={{ title: "Shown in full-screen" }} /> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <DataState state="loading" loadingLabel={`Loading panel ${title || panel.id}`} skeleton={<LoadingSkeleton viz={panel.viz} />} />
         : (result?.status === "error" || result?.status === "invalid") ? <Box data-panel-error={result.reason !== "busy" || undefined} data-panel-busy={result.reason === "busy" || undefined} style={{minWidth: 0, maxHeight: "100%", overflow: "auto", overflowWrap: "anywhere"}}>
-          <Notice tone={result.reason === "busy" ? "info" : "danger"} title={result.reason === "busy" ? "Not run yet" : result.status === "invalid" ? "This panel is invalid" : "This panel failed"} retryLabel="Retry" onRetry={retryable || result.reason === "busy" ? onRetry : undefined}>
+          <Notice live={false} tone={result.reason === "busy" ? "info" : "danger"} title={result.reason === "busy" ? "Not run yet" : result.status === "invalid" ? "This panel is invalid" : "This panel failed"} retryLabel="Retry" onRetry={retryable || result.reason === "busy" ? onRetry : undefined}>
             <Text data-panel-error-message={result.reason !== "busy" || undefined} title={result.error} size="xs" style={{overflowWrap: "anywhere"}}>{result.error || "The query could not run."}</Text>
             {result.problems?.map((problem, i) => <Text key={i} size="xs"><code>{problem.path}</code>{problem.message !== result.error && `: ${problem.message}`}{problem.hint && ` — ${problem.hint}`}</Text>)}
           </Notice>
           {fixable && agentAvailable && onFix && <Button size="compact-xs" variant="light" onClick={onFix}>Ask Fanout to fix it</Button>}
         </Box>
-        : result?.status === "empty" ? <DataState state="empty" empty={{title: "No data in this time range", description: <Text size="sm" style={{overflowWrap: "anywhere"}}>{result.diagnosis || "Widen the time range to find matching telemetry."}</Text>, action: <Button variant="default" size="compact-xs" onClick={() => { if (onZoom && result.from_ms !== undefined && result.to_ms !== undefined) { const span = result.to_ms - result.from_ms; onZoom(result.from_ms - span / 2, result.to_ms + span / 2); } else if (zoomed && onZoomReset) onZoomReset(); else document.getElementById("shell-time-range")?.querySelector("button")?.click(); }}>Widen time range</Button>}} />
+        : result?.status === "empty" ? <DataState state="empty" empty={{title: "No data in this time range", description: <Text size="sm" style={{overflowWrap: "anywhere"}}>{result.diagnosis || "Widen the time range to find matching telemetry."}</Text>, action: zoomed && onZoomReset ? <Button variant="default" size="compact-xs" onClick={onZoomReset}>Reset zoom</Button> : onWiden ? <Button variant="default" size="compact-xs" onClick={onWiden}>Widen time range</Button> : undefined}} />
         : <ChartHintContext.Provider value={chartHint}><Viz traceLinks={traceLinks} controls={controls} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} /></ChartHintContext.Provider>}
     </Box>
     {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, paddingTop: 8, background: "var(--mantine-color-body)", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>

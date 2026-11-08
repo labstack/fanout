@@ -1,5 +1,5 @@
 import { ConfirmDialog, DataState, Notice } from "@labstack/ui";
-import { ActionIcon, Box, Button, Center, Group, Kbd, Loader, Menu, Modal, ScrollArea, Stack, Text, TextInput, ThemeIcon, Tooltip, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Box, Button, Group, Kbd, Menu, Modal, ScrollArea, Stack, Text, TextInput, ThemeIcon, Tooltip, UnstyledButton } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { Bell, ChatCircle, SquaresFour, Gear, Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Star, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";

@@ -1,4 +1,4 @@
-import { DataState, Notice } from "@labstack/ui";
+import { Notice } from "@labstack/ui";
 import { Box, Stack, Text } from "@mantine/core";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { panelFragment, fragmentTitle, type PanelFragment } from "../../../panels/fragment";
@@ -126,8 +126,8 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     <Box hidden={hostFocused} style={hostFocused ? { display: "none" } : undefined}><Stack gap="md">
     {spec.panels.length > 1 && <Text data-fragment-header fw={600}>{fragmentTitle(shown)}</Text>}
     <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVariable} />
-    {options.error && <Box ><Notice tone="danger">Variable options could not be loaded.</Notice></Box>}
-    {error && <Box ><Notice tone="danger">{error}</Notice></Box>}
+    {options.error && <Box><Notice tone="danger">Variable options could not be loaded.</Notice></Box>}
+    {error && <Box><Notice tone="danger">{error}</Notice></Box>}
     {spec.panels.map(panel => <Box key={panel.id} h={height ?? fragmentPanelHeight(panel)}>{card(panel, height ?? fragmentPanelHeight(panel))}</Box>)}
     {shown.trace && <TraceDetailView result={shown.trace} dark={dark} />}
     </Stack></Box>

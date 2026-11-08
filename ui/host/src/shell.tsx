@@ -1,6 +1,6 @@
 import { Notice } from "@labstack/ui";
 import { ColorSchemeToggle } from "./color-scheme-toggle";
-import { ActionIcon, AppShell, Avatar, Burger, Button, Drawer, Group, Menu } from "@mantine/core";
+import { ActionIcon, AppShell, Avatar, Box, Burger, Button, Drawer, Group, Menu } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { MagnifyingGlass, SidebarSimple, PlugsConnected, SignOut } from "@phosphor-icons/react";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
@@ -8,7 +8,6 @@ import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "rea
 import { createDashboardPrompt, useFanoutApp } from "./app-context";
 import { logout, useViewer } from "./auth";
 import { BrandLockup } from "./brand";
-import { docs } from "../../links";
 import { useOpener } from "./opener";
 import { HelpMenu } from "./help-menu";
 
@@ -37,7 +36,9 @@ export default function Shell({ children }: { children: ReactNode }) {
   // The navbar stays mounted below `md`, only collapsed, so its ref is never
   // null and cannot say which rail the viewer can see. The breakpoint can.
   const mobile = useMediaQuery("(max-width: 62em)");
+  const phone = useMediaQuery("(max-width: 48em)");
   const mobileRef = useRef(mobile);
+  const openSearch = () => { if (mobile) { setKeyboardOpen(true); drawer.open(); } else { setCollapsed(false); requestAnimationFrame(() => railRef.current?.focusSearch()); } };
   mobileRef.current = mobile;
 
   // A navigation from inside the drawer should close it.
@@ -81,8 +82,10 @@ export default function Shell({ children }: { children: ReactNode }) {
           <ActionIcon visibleFrom="md" variant="subtle" color="gray" aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}><SidebarSimple size={18} /></ActionIcon>
           <BrandLockup size="small" />
         </Group>
-        <Button variant="default" color="gray" leftSection={<MagnifyingGlass size={16} />} onClick={() => { if (mobile) { setKeyboardOpen(true); drawer.open(); } else { setCollapsed(false); requestAnimationFrame(() => railRef.current?.focusSearch()); } }}>Search · ⌘K</Button>
-        <div id="shell-time-range" />
+        {phone
+          ? <ActionIcon variant="default" size="lg" aria-label="Search" onClick={openSearch}><MagnifyingGlass size={16} /></ActionIcon>
+          : <Button variant="default" color="gray" leftSection={<MagnifyingGlass size={16} />} onClick={openSearch}>Search · ⌘K</Button>}
+        <Box id="shell-time-range" visibleFrom="sm" />
         <Group gap="xs" wrap="nowrap">
           {/* Help sits in the chrome, not in the account menu: it answers a
               question someone has while working, and the account menu is for
@@ -99,7 +102,7 @@ export default function Shell({ children }: { children: ReactNode }) {
       <Rail {...railProps} autoFocusSearch={drawerOpened && keyboardOpen} />
     </Drawer>
     <AppShell.Main id="main" tabIndex={-1}>
-      {signOutError && <Notice tone="danger">{signOutError}</Notice>}
+      {signOutError && <Notice tone="danger" onDismiss={() => setSignOutError("")}>{signOutError}</Notice>}
       {children}
     </AppShell.Main>
     {creating && <Suspense fallback={null}><NewDashboard onClose={closeNew} onCreated={id => { setCreating(false); void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: {} }); }} /></Suspense>}

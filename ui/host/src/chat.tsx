@@ -1,5 +1,4 @@
-import { Notice } from "@labstack/ui";
-import { DataState, PageHeader, labstackContentWidths } from "@labstack/ui";
+import { DataState, Notice, PageHeader, labstackContentWidths } from "@labstack/ui";
 import type { Message } from "@ag-ui/client";
 import { ActionIcon, Box, Button, Container, Group, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
 import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight, ArrowDown } from "@phosphor-icons/react";
@@ -129,7 +128,7 @@ function ChatAppView({ view }: { view: AppView }) {
     : counts.size ? [...counts.keys()].join(", ") : `${rows} ${rows === 1 ? "row" : "rows"}`;
   return <Paper data-chat-app data-chat-anchor withBorder radius="md" style={{ overflow: "hidden" }}>
     <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><span className="chat-app-chevron" aria-hidden="true">{expanded ? <CaretDown size={14} /> : <CaretRight size={14} />}</span><span className="chat-app-summary">{[title, viz, status].filter(Boolean).join(" · ")}</span></UnstyledButton>
-    {expanded && <Suspense fallback={<DataState state="loading" variant="page" loadingLabel="Preparing view…" />}><MCPAppFrame content={view.content} /></Suspense>}
+    {expanded && <Suspense fallback={<DataState state="loading" loadingLabel="Preparing view…" />}><MCPAppFrame content={view.content} /></Suspense>}
   </Paper>;
 }
 
@@ -256,9 +255,9 @@ function ChatMessage({ message, time, appView }: { message: Message; time?: numb
 
   if (message.role === "activity") {
     if (message.activityType === "agent-outcome" && message.content && typeof message.content === "object" && "message" in message.content && typeof message.content.message === "string") {
-      return "status" in message.content && message.content.status === "stopped" ? <Text c="dimmed" size="sm" data-chat-anchor>{message.content.message}</Text> : <Notice tone="danger" title="Something went wrong">{message.content.message}</Notice>;
+      return "status" in message.content && message.content.status === "stopped" ? <Text c="dimmed" size="sm" data-chat-anchor>{message.content.message}</Text> : <Box data-chat-anchor><Notice tone="danger" title="Something went wrong">{message.content.message}</Notice></Box>;
     }
-    if (message.activityType === "mcp-app") return appView ? <ChatAppView view={appView} /> : <Notice tone="danger">This view could not be loaded. Please try again.</Notice>;
+    if (message.activityType === "mcp-app") return appView ? <ChatAppView view={appView} /> : <Box data-chat-anchor><Notice tone="danger">This view could not be loaded. Please try again.</Notice></Box>;
     return null;
   }
   if (message.role === "assistant" && message.toolCalls?.length) return null;

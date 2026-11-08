@@ -1,9 +1,8 @@
 import { DashboardSkeleton } from "./dashboard-skeleton";
 import { LiveDataMeta } from "../live-data-meta";
-import { Notice } from "@labstack/ui";
-import { DataState, PageHeader } from "@labstack/ui";
-import { ActionIcon, Box, Button, Center, Group, Stack, Text, Title, Tooltip } from "@mantine/core";
-import { Copy, WarningCircle } from "@phosphor-icons/react";
+import { DataState, Notice, PageHeader } from "@labstack/ui";
+import { ActionIcon, Box, Button, Center, Group, Stack, Title, Tooltip } from "@mantine/core";
+import { Copy } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
@@ -93,6 +92,15 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
   const { zoom, reset: resetBrush, resetZoom, zoomed } = useBrushZoom(search, onSearch);
   const time = effectiveTime(spec, search);
   const [refresh, setRefresh] = useState(time.refresh ?? "30s");
+  // Zooming out keeps a relative range relative; only an absolute range widens by half each side.
+  const widen = () => {
+    if (time.from && time.to) {
+      const from = Date.parse(time.from);
+      const to = Date.parse(time.to);
+      const half = (to - from) / 2;
+      onSearch({ ...search, range: undefined, from: new Date(from - half).toISOString(), to: new Date(to + half).toISOString() });
+    } else onSearch({ ...search, range: zoomOut[time.range ?? "1h"] ?? "1h", from: undefined, to: undefined });
+  };
   const compare = search.compare ? search.compare === "1" : spec.time.compare === "previous_period";
   const vars = search.vars ?? {};
   const options = useVariableOptions(`dashboard-${id}`, spec, time, vars, resolveVariables, retryQuery);
@@ -145,14 +153,7 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
       <Toolbar selecting={ranges.size > 0} time={time} refresh={refresh} compare={compare} editing={search.edit === "1"} fetching={data.fetching} updatedAt={data.updatedAt}
           onRange={(range) => { resetBrush(); onSearch({ ...search, range, from: undefined, to: undefined }); }}
           onAbsolute={(from, to) => { resetBrush(); onSearch({ ...search, range: undefined, from, to }); }}
-          onZoomOut={() => {
-            if (time.from && time.to) {
-              const from = Date.parse(time.from);
-              const to = Date.parse(time.to);
-              const half = (to - from) / 2;
-              onSearch({ ...search, range: undefined, from: new Date(from - half).toISOString(), to: new Date(to + half).toISOString() });
-            } else onSearch({ ...search, range: zoomOut[time.range ?? "1h"] ?? "1h", from: undefined, to: undefined });
-          }}
+          onZoomOut={widen}
           onRefresh={setRefresh} onRefreshNow={data.refetch}
           onCompare={(on) => onSearch({ ...search, compare: on ? "1" : "0" }, true)}
           onEdit={edit} onHistory={() => setHistoryOpen(true)} />
@@ -171,9 +172,9 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
       {loadError instanceof ApiError && <ul>{loadError.problems.map((problem, index) =>
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     </Notice>}
-    {spec.panels.length === 0 && <DataState state="empty" empty={{title: "No panels yet", description: "Add a panel to see telemetry on this dashboard.", action: <Button onClick={edit}>Add panel</Button>}} />}
+    {spec.panels.length === 0 && <DataState state="empty" empty={{title: "No panels yet", description: "Add a panel to see telemetry on this dashboard.", action: <Button onClick={() => onSearch({ ...search, edit: "1" })}>Add panel</Button>}} />}
     <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={{ ...time, compare: compare ? "previous_period" : undefined }} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
-      canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onRetry={data.retry} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={onView} onRangePending={rangePending} shortcutScope={scope} onShortcuts={() => setHelpOpen(true)} overlayOpen={historyOpen || helpOpen || Boolean(search.drill)} returnViewFocus={viewFocus.restore} onVisible={setVisible}
+      canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onRetry={data.retry} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onWiden={widen} onView={onView} onRangePending={rangePending} shortcutScope={scope} onShortcuts={() => setHelpOpen(true)} overlayOpen={historyOpen || helpOpen || Boolean(search.drill)} returnViewFocus={viewFocus.restore} onVisible={setVisible}
       onPoint={(panel, selection) => {
         const selected = drillSelection(panel, data.results.get(panel.id), selection, vars);
         if (selected) onSearch({ ...search, vars: selected.vars, drill: JSON.stringify(selected.target) }, false);

@@ -198,7 +198,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
   return <Stack gap="md" px={{base:"md",sm:"xl"}} pt="lg" pb="xl" maw={1600} mx="auto" data-search-page={preset.viz}>
     <Group justify="space-between" align="flex-end">
       <PageHeader title={preset.name} description={preset.name === "Logs" ? "Search and inspect log events." : "Find slow requests and inspect their traces."} meta={<LiveDataMeta time={time} updatedAt={ran ? ranAt : null} />} />
-      <RangeMenu time={time} onRange={range => onSearch({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => onSearch({ ...search, from, to })} />
+      <RangeMenu inHeader time={time} onRange={range => onSearch({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => onSearch({ ...search, from, to })} />
     </Group>
     <Stack gap="xs">
       <Text id={help} size="xs" c="dimmed">Filter with FanQL, for example <code>{preset.example}</code>. {preset.matching} Press Enter to search.</Text>

@@ -310,7 +310,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
 
   return <Stack gap="md" px={{base:"md",sm:"xl"}} pt="lg" pb="xl" maw={1600} mx="auto" data-explore>
     {!context && <PageHeader title="Explore" description="Ask a question of your telemetry." meta={<LiveDataMeta time={time} updatedAt={run ? runAt : null} />} />}
-    <RangeMenu time={time} onRange={range => pickWindow({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => pickWindow({ ...search, from, to })} />
+    <RangeMenu inHeader={!context} time={time} onRange={range => pickWindow({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => pickWindow({ ...search, from, to })} />
     <Tabs value={search.tab} onChange={value => void openTab(value === "sql" || value === "builder" ? value : "query")} keepMounted={false}>
       <Tabs.List>
         <Tabs.Tab value="query">Query</Tabs.Tab>

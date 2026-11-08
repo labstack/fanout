@@ -26,7 +26,7 @@ export type GridProps = {
   canManage?: boolean; agentAvailable: boolean; onOpenChat(prompt?: string, options?: TurnOptions): void; onVariable(name: string, value: VarValue): void; onView(view?: string): void; onVisible(ids: string[]): void;
   onRetry?(panelId: string): void;
   onPoint?(panel: Panel, selection: Selection): void; onZoom?(from: number, to: number): void;
-  zoomed?: boolean; onZoomReset?(): void; onRangePending?(id: string, pending: boolean): void;
+  zoomed?: boolean; onZoomReset?(): void; onWiden?(): void; onRangePending?(id: string, pending: boolean): void;
   shortcutScope?: string; onShortcuts?(): void; overlayOpen?: boolean; returnViewFocus?(panel?: string): HTMLElement | undefined;
 };
 
@@ -39,7 +39,7 @@ function newPanelId(panels: Panel[]): string {
   return id;
 }
 
-export function PanelGrid({ dashboardId, version, spec, vars, results, fetching, annotations, fetchingIds = [], staleAt = new Map(), time = spec.time, onEditExit, editing, view, agentAvailable, canManage = false, onOpenChat, onVariable, onRetry, onPoint, onZoom, onZoomReset, zoomed, onView, onVisible, onRangePending, shortcutScope, onShortcuts, overlayOpen, returnViewFocus }: GridProps) {
+export function PanelGrid({ dashboardId, version, spec, vars, results, fetching, annotations, fetchingIds = [], staleAt = new Map(), time = spec.time, onEditExit, editing, view, agentAvailable, canManage = false, onOpenChat, onVariable, onRetry, onPoint, onZoom, onZoomReset, onWiden, zoomed, onView, onVisible, onRangePending, shortcutScope, onShortcuts, overlayOpen, returnViewFocus }: GridProps) {
   const client = useQueryClient();
   // Capture the authored spec and base version when editing starts, so a
   // background refresh cannot silently rebase a draft over another edit.
@@ -158,7 +158,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     menuRef={!fullscreen ? node => { if (node) menus.current.set(panel.id, node); else menus.current.delete(panel.id); } : fullscreenMenu}
     compare={time.compare === "previous_period"} range={panel.time?.range ?? time.range} annotations={annotations} vars={vars} onVariable={onVariable}
     {...panelHandlers(panel, results.get(panel.id), onVariable, onPoint ? selection => onPoint(panel, selection) : undefined)}
-    onRangePending={pending => onRangePending?.(panel.id, pending)} onZoom={onZoom} zoomed={zoomed} onZoomReset={onZoomReset}
+    onRangePending={pending => onRangePending?.(panel.id, pending)} onZoom={onZoom} zoomed={zoomed} onZoomReset={onZoomReset} onWiden={onWiden}
     onRetry={onRetry ? () => onRetry(panel.id) : undefined}
     onView={() => onView(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}
@@ -186,7 +186,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     </Group>}
     {conflict && <Box mb="sm"><Notice tone="warning">Someone saved this dashboard since you opened it. Load the latest version, then redo your change. <Button size="compact-sm" onClick={loadLatest}>Load latest</Button></Notice></Box>}
     {mutationError && !conflict && <Box mb="sm"><Notice tone="danger">{mutationError.message}</Notice></Box>}
-    {copyFeedback && <Box role="status" mb="sm"><Notice tone="info">{copyFeedback}</Notice></Box>}
+    {copyFeedback && <Box mb="sm"><Notice tone="info">{copyFeedback}</Notice></Box>}
     {!gridReady && <div data-grid-placeholder style={{ height: pixels(Math.max(1, ...layout.map(l => l.y + l.h))) }} />}
     {gridReady && <Responsive width={width} className={`dashboard-grid${canEdit ? " dashboard-grid-editing" : ""}`} layouts={{ lg: layout, md: layout, sm: layout.map((l) => ({ ...l, x: 0, w: 12 })) }} breakpoints={{ lg: 1100, md: 800, sm: 0 }} cols={{ lg: 12, md: 12, sm: 12 }}
       rowHeight={rowHeight} margin={[margin, margin]} containerPadding={[0, 0]} compactor={verticalCompactor} dragConfig={{enabled:canEdit,handle:".panel-drag",cancel:"button"}} resizeConfig={{enabled:canEdit}}
@@ -194,9 +194,9 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
       {spec.panels.map((panel) => { const g = layout.find((l) => l.i === panel.id); return <div key={panel.id} data-panel={panel.id}>{card(panel, pixels(g?.h ?? 6))}</div>; })}
     </Responsive>}
     <PanelFullscreen shortcutScope={shortcutScope} onShortcuts={onShortcuts} escapeEnabled={!overlayOpen && !panelEdit} opened={Boolean(view)} onClose={() => onView(undefined)} title={viewed ? interpolate(viewed.title, vars) : "Missing panel"} returnFocusTo={() => returnViewFocus?.(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? "") ?? menus.current.values().next().value}>
-      {viewed ? <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, Math.max(40, windowHeight - 140), true)}</div> : <Box ><Notice tone="warning">This panel is missing from the dashboard. The shared link may be out of date.</Notice></Box>}
+      {viewed ? <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, Math.max(40, windowHeight - 140), true)}</div> : <Box><Notice tone="warning">This panel is missing from the dashboard. The shared link may be out of date.</Notice></Box>}
     </PanelFullscreen>
-    {panelEdit && dashboardId && <Suspense fallback={<Modal opened onClose={closePanelEdit} title="Loading the panel editor"><Box role="status" aria-label="Loading the panel editor"><DataState state="loading" loadingLabel="Loading the panel editor" rows={3} /></Box></Modal>}>
+    {panelEdit && dashboardId && <Suspense fallback={<Modal opened onClose={closePanelEdit} title="Loading the panel editor"><DataState state="loading" loadingLabel="Loading the panel editor" rows={3} /></Modal>}>
       <PanelEditor dashboardId={dashboardId} version={panelEdit.version} spec={withLayout(panelEdit.spec.panels)} layoutChanged={canEdit && dirty} panel={panelEdit.panel} time={time} vars={vars} onClose={closePanelEdit} />
     </Suspense>}
   </div>;

@@ -1,5 +1,6 @@
 import { Button, Group, Menu, SegmentedControl, Switch, Text, TextInput, Tooltip } from "@mantine/core";
 import { ArrowClockwise, CaretDown, Clock, ClockCounterClockwise, MagnifyingGlassMinus, PencilSimple } from "@phosphor-icons/react";
+import { useMediaQuery } from "@mantine/hooks";
 import { createPortal } from "react-dom";
 import { useEffect, useState } from "react";
 import type { DashboardTime } from "../../../panels/types";
@@ -13,13 +14,18 @@ function timeLabel(time: DashboardTime): string {
   return rangeLabel[time.range ?? "1h"] ?? time.range ?? "Last hour";
 }
 
-/** The relative and absolute time picker shared by dashboards and Explore. */
-export function RangeMenu({ time, onRange, onAbsolute }: { time: DashboardTime; onRange(range: string): void; onAbsolute(from: string, to: string): void }) {
+/** The relative and absolute time picker shared by dashboards and Explore.
+ * A page's own picker moves into the shell header; one inside a dialog (the
+ * panel editor) stays inline so it remains inside the dialog's focus trap. */
+export function RangeMenu({ time, onRange, onAbsolute, inHeader = false }: { time: DashboardTime; onRange(range: string): void; onAbsolute(from: string, to: string): void; inHeader?: boolean }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [opened, setOpened] = useState(false);
   const [host, setHost] = useState<HTMLElement | null>(null);
-  useEffect(() => { setHost(document.getElementById("shell-time-range")); }, []);
+  // A phone header has no room for it, so there it stays in the page.
+  const phone = useMediaQuery("(max-width: 48em)");
+  const portal = inHeader && !phone;
+  useEffect(() => { setHost(portal ? document.getElementById("shell-time-range") : null); }, [portal]);
   const menu = <Menu position="bottom-end" withinPortal opened={opened} onChange={setOpened}>
     <Menu.Target>
       <Button variant="default" size="sm" leftSection={<Clock size={15} />} rightSection={<CaretDown size={12} weight="bold" />}>{timeLabel(time)}</Button>
@@ -47,7 +53,7 @@ export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, 
   selecting?: boolean;
 }) {
   return <Group gap="xs" wrap="wrap" role="group" aria-label="Dashboard controls">
-    <RangeMenu time={time} onRange={onRange} onAbsolute={onAbsolute} />
+    <RangeMenu inHeader time={time} onRange={onRange} onAbsolute={onAbsolute} />
     <Tooltip label="Zoom out"><Button variant="default" size="sm" px={10} aria-label="Zoom out" onClick={onZoomOut}><MagnifyingGlassMinus size={15} /></Button></Tooltip>
     <Group data-refresh-controls gap={4} wrap="nowrap">
       <Tooltip label={updatedAt ? `Updated ${exactTimestamp(updatedAt)}` : "Refresh now"}><Button variant="default" size="sm" px={10} aria-label="Refresh now" loading={fetching} onClick={onRefreshNow}><ArrowClockwise size={15} /></Button></Tooltip>

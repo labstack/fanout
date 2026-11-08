@@ -92,11 +92,11 @@ function HistoryContent({ id, opened, currentVersion, currentSpec, selected, onS
   return <Stack gap="md" data-version-history>
     <Text size="sm" c="dimmed">Inspect saved specs and changes. Restoring adds a new version.</Text>
     {/* Focus reads it out; a live region as well would announce it twice. */}
-    {success && <Box ref={confirmation} tabIndex={-1} role="note"><Notice tone="success">{success.text}</Notice></Box>}
+    {success && <Box ref={confirmation} tabIndex={-1} role="note"><Notice live={false} tone="success">{success.text}</Notice></Box>}
     {error && failedVersion === version && <RestoreError error={error} version={version!} />}
     <Box mih={160}>
       {list.isPending && <DataState state="loading" loadingLabel="Loading history…" rows={3} />}
-      {list.error && <Box ><Notice tone="danger" title="History unavailable">{list.error.message}<Button mt="xs" variant="default" size="xs" onClick={() => void list.refetch()}>Retry history</Button></Notice></Box>}
+      {list.error && <Box><Notice tone="danger" title="History unavailable">{list.error.message}<Button mt="xs" variant="default" size="xs" onClick={() => void list.refetch()}>Retry history</Button></Notice></Box>}
       {list.data?.length === 0 && <DataState state="empty" empty={{title: "No versions available.", description: "Version history appears after a dashboard is saved.", action: <Button variant="default" onClick={() => void list.refetch()}>Retry history</Button>}} />}
       {!!list.data?.length && <ScrollArea h={200} type="auto">
         <Stack gap="xs" pr="sm" role="list" aria-label="Saved versions">
@@ -114,7 +114,7 @@ function HistoryContent({ id, opened, currentVersion, currentSpec, selected, onS
     <VisuallyHidden role="status" aria-live="polite">{version === undefined ? "Select a version." : detail.isFetching ? `Loading version ${version}…` : detail.error ? `Version ${version} unavailable.` : `Version ${version} ready.`}</VisuallyHidden>
     <Box mih={280} aria-busy={detail.isFetching}>
       {version !== undefined && detail.isPending && <DataState state="loading" loadingLabel="Loading version…" rows={3} />}
-      {detail.error && <Box ><Notice tone="danger" title={detail.error instanceof ApiError && detail.error.code === "dashboard_version_not_found" ? "This version is no longer available" : "Version unavailable"}>
+      {detail.error && <Box><Notice tone="danger" title={detail.error instanceof ApiError && detail.error.code === "dashboard_version_not_found" ? "This version is no longer available" : "Version unavailable"}>
         {detail.error.message}<Button mt="xs" variant="default" size="xs" onClick={() => void detail.refetch()}>Retry version</Button>
       </Notice></Box>}
       {detail.data && !detail.error && <VersionDetails record={detail.data} currentVersion={currentVersion} current={JSON.stringify(detail.data.dashboard.spec) === JSON.stringify(currentSpec)} pending={pending} onRestore={() => onRestore(detail.data.dashboard.version)} />}
@@ -145,7 +145,7 @@ function VersionDetails({ record, currentVersion, current, pending, onRestore }:
     {record.changes_available ? <>
       <DashboardChangeChips labels={labels} />
       {!labels.length && !record.layout_changed && <DataState state="empty" empty={{ title: "No authored changes." }} />}
-    </> : <Box ><Notice tone="warning" title="Changes unavailable">The preceding version is no longer retained. This saved spec is still available.</Notice></Box>}
+    </> : <Box><Notice tone="warning" title="Changes unavailable">The preceding version is no longer retained. This saved spec is still available.</Notice></Box>}
     <Text size="sm" c="dimmed">Read-only · {dashboard.spec.panels.length} panels. Historical data is not queried.</Text>
     <Accordion variant="contained">
       <Accordion.Item value="spec"><Accordion.Control>Spec</Accordion.Control><Accordion.Panel><Code block tabIndex={0} style={{ maxHeight: 320, overflow: "auto" }}>{JSON.stringify(dashboard.spec, null, 2)}</Code></Accordion.Panel></Accordion.Item>
@@ -157,7 +157,7 @@ function VersionDetails({ record, currentVersion, current, pending, onRestore }:
 function RestoreError({ error, version }: { error: Error; version: number }) {
   const code = error instanceof ApiError ? error.code : undefined;
   const advice = !(error instanceof ApiError) || error.status >= 500 ? "Try again with the restore button." : code === "invalid_spec" ? "This saved spec is invalid. Review the fields below and choose another version." : code === "dashboard_version_not_found" ? "Reload history and choose a retained version." : code === "already_current" ? "The dashboard already has this version's contents, so there is nothing to restore." : ["dashboard_version_conflict", "conflict"].includes(code ?? "") ? "This dashboard changed or its name conflicts. Reload history and choose another version." : "Check your access and reload history.";
-  return <Box ><Notice tone="danger" title={`Restore of version ${version} failed`}>
+  return <Box><Notice tone="danger" title={`Restore of version ${version} failed`}>
     <Text size="sm">{error.message}</Text>
     {error instanceof ApiError && error.problems.length > 0 && <ul>{error.problems.map((problem, index) => <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     <Text size="sm" mt="xs">{advice}</Text>

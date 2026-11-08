@@ -141,8 +141,8 @@ export default function PanelEditor({ dashboardId, version: openedVersion, spec:
     {variables.length > 0 && <Text size="xs" c="dimmed" px="lg" pt="xs" data-editor-variables>
       Runs with the dashboard&apos;s variables: {variables.map((v, index) => <span key={v.name}>{index > 0 && " · "}<code>${v.name}</code> = {shown(vars[v.name])}</span>)}
     </Text>}
-    {formatted.error ? <Box ><Notice tone="danger" title="This panel's query could not be opened">{formatted.error.message}</Notice></Box>
-      : !current ? <Box role="status" aria-label="Loading the panel's query"><DataState state="loading" loadingLabel="Loading the panel's query" rows={3} /></Box>
+    {formatted.error ? <Box><Notice tone="danger" title="This panel's query could not be opened">{formatted.error.message}</Notice></Box>
+      : !current ? <DataState state="loading" loadingLabel="Loading the panel's query" rows={3} />
       : <ExplorePage search={current} onSearch={setSearch}
           context={{ spec, vars, panel, compose: panel ? draft => composePanel(panel, draft) : undefined, onDirtyChange: setQueryDirty, cancel: discard.request,
             save: { label: openedPanel ? "Save panel" : "Add panel", run: save },

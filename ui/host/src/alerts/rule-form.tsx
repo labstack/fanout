@@ -1,4 +1,4 @@
-import { DataState, Notice } from "@labstack/ui";
+import { Notice } from "@labstack/ui";
 import { Box,  Autocomplete, Button, Group, Menu, Modal, NumberInput, Stack, Switch, Text, TextInput, Textarea } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -97,7 +97,7 @@ export function RuleForm({ rule, onClose, onSave }: { rule?: Rule; onClose(): vo
         <Switch label="Notify when resolved" checked={draft.notify_on_resolve} onChange={event => set({ notify_on_resolve: event.currentTarget.checked })} />
         <Switch label="Enabled" checked={draft.enabled} onChange={event => set({ enabled: event.currentTarget.checked })} />
       </Group>
-      {error && <Box ><Notice tone="danger" title="Not saved">{error}</Notice></Box>}
+      {error && <Box><Notice tone="danger" title="Not saved">{error}</Notice></Box>}
       <Group justify="flex-end" gap="xs">
         <Button variant="default" disabled={saving} onClick={discard.request}>Cancel</Button>
         <Button loading={saving} disabled={!ready} onClick={() => void save()}>{rule ? "Save rule" : "Create rule"}</Button>

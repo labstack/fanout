@@ -121,13 +121,6 @@
   }
 }
 
-.mantine-Button-root:disabled, .mantine-Button-root[data-disabled],
-.mantine-ActionIcon-root:disabled, .mantine-ActionIcon-root[data-disabled] {
-  background-color: var(--labstack-inset);
-  color: var(--labstack-muted);
-  border-color: var(--labstack-border-soft);
-}
-
 
 .dashboard-loading-panel[data-skeleton-columns="4"] { grid-column: span 4; }
 .dashboard-loading-panel[data-skeleton-columns="6"] { grid-column: span 6; }
