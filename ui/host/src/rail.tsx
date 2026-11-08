@@ -127,10 +127,28 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
     } finally { setBusy(false); }
   }
 
+  /* Collapsed, the rail keeps every destination: chats and dashboards open as
+     menus beside it, so reaching one never means expanding the rail first. */
   if (collapsed) return <Stack gap={4} component="nav" aria-label="Navigation">
-    {agentAvailable && <ActionIcon variant="subtle" color="gray" size={46} aria-label="New chat" onClick={onNewChat}><ChatCircle size={18} /></ActionIcon>}
+    {agentAvailable && <ActionIcon variant="subtle" color="gray" size={46} aria-label="New chat" title="New chat" onClick={onNewChat}><Plus size={18} /></ActionIcon>}
+    {agentAvailable && <Menu position="right-start" withinPortal shadow="md">
+      <Menu.Target><ActionIcon variant="subtle" color="gray" size={46} aria-label="Chats" title="Chats" className="rail-row" data-active={Boolean(activeThreadID) || undefined}><ChatCircle size={18} /></ActionIcon></Menu.Target>
+      <Menu.Dropdown maw={280}>
+        <Menu.Label>Recent chats</Menu.Label>
+        {threads.length === 0 && <Menu.Item disabled>No chats yet</Menu.Item>}
+        {threads.slice(0, 10).map(thread => <Menu.Item key={thread.id} aria-current={thread.id === activeThreadID ? "page" : undefined} fw={thread.id === activeThreadID ? 600 : undefined} onClick={() => onSelectThread(thread.id)}><Text size="sm" truncate>{thread.title || "Untitled chat"}</Text></Menu.Item>)}
+      </Menu.Dropdown>
+    </Menu>}
     {pages.map(({path, label, Icon}) => <ActionIcon key={path} component="a" href={path} title={label} aria-label={label} aria-current={activePath === path ? "page" : undefined} className="rail-row" data-active={activePath === path || undefined} variant="subtle" color="gray" size={46} onClick={event => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); onNavigate(path); }}><Icon size={18} /></ActionIcon>)}
-    <ActionIcon variant="subtle" color="gray" size={46} aria-label="New dashboard" onClick={onNewDashboard}><SquaresFour size={18} /></ActionIcon>
+    <Menu position="right-start" withinPortal shadow="md">
+      <Menu.Target><ActionIcon variant="subtle" color="gray" size={46} aria-label="Dashboards" title="Dashboards" className="rail-row" data-active={Boolean(activeDashboardID) || undefined}><SquaresFour size={18} /></ActionIcon></Menu.Target>
+      <Menu.Dropdown maw={280}>
+        <Menu.Label>Dashboards</Menu.Label>
+        {(dashboards.data ?? []).map(dashboard => <Menu.Item key={dashboard.id} aria-current={dashboard.id === activeDashboardID ? "page" : undefined} fw={dashboard.id === activeDashboardID ? 600 : undefined} onClick={() => onSelectDashboard(dashboard.id)}><Text size="sm" truncate>{dashboard.name}</Text></Menu.Item>)}
+        {dashboards.data?.length ? <Menu.Divider /> : null}
+        <Menu.Item leftSection={<Plus size={14} />} onClick={onNewDashboard}>New dashboard</Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
   </Stack>;
 
   return <Stack gap="sm" h="100%" component="nav" aria-label="Navigation">

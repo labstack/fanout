@@ -15,7 +15,8 @@ export function PanelApp() {
     if (app && wrapper.current) return observeContentSize(wrapper.current, size => app.sendSizeChanged(size));
   }, [app]);
   const transport = useMemo(() => app ? appTransport(app) : undefined, [app]);
-  const dark = host?.theme !== "light";
+  // Follow the host theme; without one, follow the system setting.
+  const dark = host?.theme ? host.theme === "dark" : window.matchMedia?.("(prefers-color-scheme: dark)").matches === true;
   const failure = toolError ?? (error ? "This view could not be loaded. Please try again." : null);
   return <MantineProvider theme={fanoutTheme} cssVariablesResolver={fanoutCssVariables} forceColorScheme={dark ? "dark" : "light"}>
     <QueryClientProvider client={queryClient}><div ref={wrapper} role="main" aria-label="Fanout analysis view" data-app-content>

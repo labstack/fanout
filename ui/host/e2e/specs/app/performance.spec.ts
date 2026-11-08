@@ -190,7 +190,8 @@ test("refreshes once per batch and resolves variables once per range", async ({ 
     for (const range of ["24h", "12h"]) {
       if (range === "12h") {
         const start = observed.events.length;
-        await page.getByRole("group", { name: "Dashboard controls", exact: true }).getByRole("button").first().click();
+        // The dashboard's time range lives in the shell header.
+        await page.locator("#shell-time-range").getByRole("button").click();
         await page.getByRole("menuitem", { name: "Last 12 hours", exact: true }).click();
         await expect.poll(() => observed.events.slice(start).filter(event => event.path === "/api/queries/variables/resolve" && event.finished).length).toBe(1);
         await page.waitForFunction(allPanelsPainted, spec.panels, { polling: "raf" }).then(handle => handle.dispose());

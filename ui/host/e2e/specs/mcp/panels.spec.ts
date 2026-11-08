@@ -4,9 +4,9 @@ import recordings from "../../data/mcp.json" with { type: "json" };
 for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
   test("announces loading before the host delivers a result", async ({ mcpHost, page }) => {
     const frame = await mcpHost("overview", theme, { hold: true });
-    await expect(frame.getByRole("status", { name: "Loading panel view" })).toBeVisible();
+    await expect(frame.getByRole("status").filter({ hasText: "Loading panel view" })).toBeVisible();
     await page.evaluate(() => (window as typeof window & { deliver(): Promise<void> }).deliver());
-    await expect(frame.getByRole("status", { name: "Loading panel view" })).toHaveCount(0);
+    await expect(frame.getByRole("status").filter({ hasText: "Loading panel view" })).toHaveCount(0);
     await expect(frame.getByRole("main", { name: "Fanout analysis view" })).toContainText("System health");
   });
 
@@ -16,7 +16,7 @@ for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
       const main = frame.getByRole("main", { name: "Fanout analysis view" });
       await expect(main).toBeVisible();
       await expect(frame.locator("html")).toHaveAttribute("data-mantine-color-scheme", theme);
-      await expect(frame.getByRole("status", { name: "Loading panel view" })).toHaveCount(0);
+      await expect(frame.getByRole("status").filter({ hasText: "Loading panel view" })).toHaveCount(0);
       for (const panel of recordings[scenario].result.structuredContent.dashboard.panels) await expect(main.getByText(panel.title, { exact: true })).toBeVisible();
       if (scenario === "overview") await expect(main.getByRole("region", { name: /Service health: .+; 6 services/ })).toBeVisible();
       if (scenario === "topology") {
@@ -66,7 +66,7 @@ for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
       await scanApp(frame);
       await tabTo(main.getByRole("button").first());
       if (scenario === "trace") {
-        await main.getByRole("button", { name: recordings.trace.result.structuredContent.trace.data.trace_id.slice(0, 16), exact: true }).click();
+        await main.getByRole("button", { name: `${recordings.trace.result.structuredContent.trace.data.trace_id.slice(0, 16)}…`, exact: true }).click();
         const detail = frame.getByRole("dialog", { name: "Trace", exact: true });
         await expect(detail.getByRole("tab", { name: "Waterfall", exact: true })).toBeVisible();
         await expect(detail.getByRole("alert")).toHaveCount(0);
@@ -92,7 +92,7 @@ for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
   });
   test("shows its fallback when no host connects", async ({ mcpHost, page }) => {
     const frame = await mcpHost("unavailable", theme, { clock: true });
-    await expect(frame.getByRole("status", { name: "Loading panel view" })).toBeVisible();
+    await expect(frame.getByRole("status").filter({ hasText: "Loading panel view" })).toBeVisible();
     await page.clock.runFor(60_001);
     await expect(frame.getByRole("alert")).toHaveText("This view could not be loaded. Please try again.");
   });

@@ -74,6 +74,32 @@ describe("Rail", () => {
     document.body.innerHTML = "";
   });
 
+  it("reaches existing chats and dashboards from the collapsed rail", async () => {
+    const { root, handlers, render } = mount({ collapsed: true });
+    await act(async () => render());
+    const open = async (label: string) => {
+      await act(async () => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click());
+      await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+    };
+    const item = (text: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === text);
+
+    await open("Chats");
+    await vi.waitFor(() => expect(item("Checkout latency")).toBeDefined());
+    expect(item("Checkout latency")!.getAttribute("aria-current")).toBe("page");
+    await act(async () => item("Checkout latency")!.click());
+    expect(handlers.onSelectThread).toHaveBeenCalledWith("thread-checkout");
+
+    await open("Dashboards");
+    await vi.waitFor(() => expect(item("Checkout")).toBeDefined());
+    await act(async () => item("Checkout")!.click());
+    expect(handlers.onSelectDashboard).toHaveBeenCalledWith("dash-checkout");
+
+    await open("Dashboards");
+    await act(async () => item("New dashboard")!.click());
+    expect(handlers.onNewDashboard).toHaveBeenCalledOnce();
+    await act(async () => root.unmount());
+  });
+
   it("lists chats and dashboards, marks the active rows, and selects", async () => {
     const { root, handlers, render } = mount();
     await act(async () => render());

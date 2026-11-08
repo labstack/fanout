@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-mantine-color-scheme="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -16,12 +16,12 @@
     <script>
       try {
         var stored = window.localStorage.getItem("mantine-color-scheme-value");
-        var scheme = stored === "light" || stored === "dark" || stored === "auto" ? stored : "dark";
+        var scheme = stored === "light" || stored === "dark" || stored === "auto" ? stored : "auto";
         var computed = scheme !== "auto" ? scheme : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
         document.documentElement.setAttribute("data-mantine-color-scheme", computed);
       } catch (e) {}
     </script>
-    <script type="module" crossorigin src="/assets/index-DMmIK0t9.js"></script>
+    <script type="module" crossorigin src="/assets/index-D2FVw3NW.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/useRouter-ByJ6_rwb.js">
     <link rel="modulepreload" crossorigin href="/assets/brand-6hkIXFdT.js">
     <link rel="modulepreload" crossorigin href="/assets/useNavigate-B1zgPEUp.js">

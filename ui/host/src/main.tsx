@@ -17,7 +17,7 @@ import "./dashboards/dashboard.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <MantineProvider theme={fanoutTheme} defaultColorScheme="dark" cssVariablesResolver={fanoutCssVariables}>
+    <MantineProvider theme={fanoutTheme} defaultColorScheme="auto" cssVariablesResolver={fanoutCssVariables}>
       <RouterProvider router={router} />
     </MantineProvider>
   </StrictMode>,

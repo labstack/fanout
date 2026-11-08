@@ -1,0 +1,1 @@
+import{t as e}from"./chat-CFxrg_Dk.js";var t=e;export{t as component};

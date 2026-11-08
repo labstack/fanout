@@ -65,8 +65,10 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     return () => window.clearInterval(timer);
   }, [staleAt]);
   const tableOnly = ["logs", "traces", "table", "log_patterns"].includes(panel.viz);
-  const modes = tableOnly ? ["Table", "Data", "Spec"] : ["Chart", "Data", "Spec"];
-  const [view, setView] = useState<string>(tableOnly && initialView === "Chart" ? "Table" : initialView);
+  const modes = ["Chart", "Data", "Spec"];
+  // A table-only panel's main view is its table; the view keeps one value, only its label differs.
+  const modeLabel = (mode: string) => panel.viz === "text" && mode === "Chart" ? "Content" : tableOnly && mode === "Chart" ? "Table" : mode;
+  const [view, setView] = useState<string>(initialView);
   const [mapView, setMapView] = useState<MapView>();
   const onMapView = useCallback((next: MapView) => setMapView(next), []);
   const hint = panel.click ? `click to filter by ${panel.click.set_variable}`
@@ -76,12 +78,12 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     : panel.viz === "table" && panel.drill === "traces" && !result?.frame ? undefined
     : panel.drill === "logs" ? "click for matching logs"
     : panel.drill === "traces" && ["table", "timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline"].includes(panel.viz) ? "click for exemplar traces" : undefined;
-  const loadingBody = !suspended && !result && panel.viz !== "text" && (view === "Chart" || view === "Table");
+  const loadingBody = !suspended && !result && panel.viz !== "text" && view === "Chart";
   const bodyHeight = Math.max(40, height - 88);
   const constants = [...new Set(logConstants(panel, result?.frame).map(c => c.value))];
   const subtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")}${constants.length ? ` · ${constants.join(" · ")}` : ""}${hint ? ` · ${hint}` : ""}`;
   const canvas = ["timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline", "gauge", "service_map"].includes(panel.viz);
-  const scrolls = (view !== "Chart" && view !== "Table") || !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
+  const scrolls = view !== "Chart" || !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
   const rows = ["table", "logs", "traces", "log_patterns", "text"].includes(panel.viz);
   const note = formatPanelNote(result?.frame?.note);
   const refreshError = result?.frame && result.error;
@@ -157,7 +159,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       </Group>
       <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
       {!compactViews && panel.viz !== "text" && <Button.Group aria-label={`${title} view`}>
-        {modes.map(mode => <Button key={mode} size="compact-xs" variant="default" fw={view === mode ? 600 : 400} bg={view === mode ? "var(--mantine-color-accent-light)" : undefined} c={view === mode ? "var(--mantine-color-accent-text)" : undefined} data-panel-view={mode} aria-pressed={view === mode} onClick={() => setView(mode)}>{mode}</Button>)}
+        {modes.map(mode => <Button key={mode} size="compact-xs" variant="default" fw={view === mode ? 600 : 400} bg={view === mode ? "var(--mantine-color-accent-light)" : undefined} c={view === mode ? "var(--mantine-color-accent-text)" : undefined} data-panel-view={mode} aria-pressed={view === mode} onClick={() => setView(mode)}>{modeLabel(mode)}</Button>)}
       </Button.Group>}
       {panel.viz === "service_map" && mapView?.canFit && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={mapView.overview ? `Return to readable ${title} view` : `Show whole ${title} graph`} onClick={mapView.fit}><ArrowsOut size={16} /></ActionIcon>}
       {zoomed && onZoomReset && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Reset ${title} zoom`} onClick={onZoomReset}><ArrowCounterClockwise size={16} /></ActionIcon>}
@@ -175,7 +177,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           {(compactViews || panel.viz === "text") && <>
             <Menu.RadioGroup value={view} onChange={setView}>
               <Box role="group" aria-label={`${title} view`}>
-                {(panel.viz === "text" ? ["Chart", "Spec"] : modes).map(mode => <Menu.RadioItem key={mode} value={mode} data-panel-view={mode} closeMenuOnClick>{panel.viz === "text" && mode === "Chart" ? "Content" : mode}</Menu.RadioItem>)}
+                {(panel.viz === "text" ? ["Chart", "Spec"] : modes).map(mode => <Menu.RadioItem key={mode} value={mode} data-panel-view={mode} closeMenuOnClick>{modeLabel(mode)}</Menu.RadioItem>)}
               </Box>
             </Menu.RadioGroup>
             <Menu.Divider />
