@@ -61,6 +61,11 @@ export function formatAxis(unit?: string, axis?: { min: number; max: number; int
     const power = [4, 3, 2, 1].find(p => extent >= 1024 ** p && Math.abs(axis.interval / 1024 ** p * 100 - Math.round(axis.interval / 1024 ** p * 100)) < 1e-6) ?? 0;
     return (value: number) => Number.isFinite(value) ? `${number(value / 1024 ** power)} ${byteUnits[power]}` : "—";
   }
+  if (unit === "percent" && axis && axis.interval > 0) {
+    // Every tick uses the decimals the step needs: 0.0%, 0.5%, 1.0%, not 0.00%, 0.5%, 1.00%.
+    const places = [0, 1, 2, 3, 4].find(p => Math.abs(axis.interval * 10 ** p - Math.round(axis.interval * 10 ** p)) < 1e-6) ?? 4;
+    return (value: number) => Number.isFinite(value) ? `${value.toFixed(places)}%` : "—";
+  }
   if (factor !== undefined && axis && axis.interval > 0) {
     const extent = Math.max(Math.abs(axis.min), Math.abs(axis.max)) * factor, step = axis.interval * factor;
     // The largest unit the axis reaches whose ticks still read in two decimals.
@@ -72,6 +77,11 @@ export function formatAxis(unit?: string, axis?: { min: number; max: number; int
     if (unit === "ms" || unit === "s" || unit === "ns") return formatValue(unit, value).replace(/(\.\d*?)0+([a-z]*)$/, "$1$2").replace(/\.([a-z]*)$/, "$1");
     return formatValue(unit, value);
   };
+}
+
+/** Whether axis ticks print the unit themselves, so an axis name need not repeat it. */
+export function ticksShowUnit(unit?: string): boolean {
+  return unit !== undefined && unit !== "count" && /[^\d\s]$/.test(formatAxis(unit)(1).trim());
 }
 
 /** Readable chart/table labels use a space before duration units. */
@@ -118,7 +128,7 @@ export function adaptValueAxis(axis: Record<string, unknown>, pixels: number): R
   const unit = typeof axis.fanout_unit === "string" ? axis.fanout_unit : undefined;
   const next = valueAxis(axis.min, axis.max, unit, pixels);
   // New ticks may need another duration or binary unit.
-  return { ...axis, ...next, ...(unit && (unit in durationFactor || unit === "bytes") ? { axisLabel: { ...(axis.axisLabel as object), formatter: formatAxis(unit, next) } } : {}) };
+  return { ...axis, ...next, ...(unit && (unit in durationFactor || unit === "bytes" || unit === "percent") ? { axisLabel: { ...(axis.axisLabel as object), formatter: formatAxis(unit, next) } } : {}) };
 }
 
 /** Use one duration scale for both ends of a bucket. */

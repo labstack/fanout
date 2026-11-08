@@ -96,7 +96,8 @@ describe("panel rendering", () => {
     const got = analysis.analysisOption({ ...panel, viz: "scatter" }, { ...result, frame }, theme);
     const x = got.xAxis as { name?: string; splitLine: { lineStyle: { color: string } } };
     const y = got.yAxis as { name?: string; interval: number; splitLine: { lineStyle: { color: string } }; axisLabel: { formatter: (v: number) => string } };
-    expect(x.name).toBe("Requests"); expect(y.name).toBe("p95 (ms)"); expect(y.interval).toBe(600000);
+    expect(x.name).toBe("Requests"); // Ticks print the unit ("10 m"), so the name does not repeat a different one.
+    expect(y.name).toBe("p95"); expect(y.interval).toBe(600000);
     expect(y.axisLabel.formatter(y.interval)).toBe("10 m");
     expect(x.splitLine.lineStyle.color).toBe(theme.grid); expect(y.splitLine.lineStyle.color).toBe(theme.grid);
   });

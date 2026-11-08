@@ -135,7 +135,9 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
       <Menu.Target><ActionIcon variant="subtle" color="gray" size={46} aria-label="Chats" title="Chats" className="rail-row" data-active={Boolean(activeThreadID) || undefined}><ChatCircle size={18} /></ActionIcon></Menu.Target>
       <Menu.Dropdown maw={280}>
         <Menu.Label>Recent chats</Menu.Label>
-        {threads.length === 0 && <Menu.Item disabled>No chats yet</Menu.Item>}
+        {history.isPending ? <Menu.Item disabled>Loading chats…</Menu.Item>
+          : history.isError ? <Menu.Item onClick={() => void history.refetch()}>Chats could not be loaded. Retry</Menu.Item>
+          : threads.length === 0 && <Menu.Item disabled>No chats yet</Menu.Item>}
         {threads.slice(0, 10).map(thread => <Menu.Item key={thread.id} aria-current={thread.id === activeThreadID ? "page" : undefined} fw={thread.id === activeThreadID ? 600 : undefined} onClick={() => onSelectThread(thread.id)}><Text size="sm" truncate>{thread.title || "Untitled chat"}</Text></Menu.Item>)}
       </Menu.Dropdown>
     </Menu>}
@@ -144,6 +146,8 @@ export default function Rail({ collapsed = false, agentAvailable, activeThreadID
       <Menu.Target><ActionIcon variant="subtle" color="gray" size={46} aria-label="Dashboards" title="Dashboards" className="rail-row" data-active={Boolean(activeDashboardID) || undefined}><SquaresFour size={18} /></ActionIcon></Menu.Target>
       <Menu.Dropdown maw={280}>
         <Menu.Label>Dashboards</Menu.Label>
+        {dashboards.isPending && <Menu.Item disabled>Loading dashboards…</Menu.Item>}
+        {dashboards.isError && <Menu.Item onClick={() => void dashboards.refetch()}>Dashboards could not be loaded. Retry</Menu.Item>}
         {(dashboards.data ?? []).map(dashboard => <Menu.Item key={dashboard.id} aria-current={dashboard.id === activeDashboardID ? "page" : undefined} fw={dashboard.id === activeDashboardID ? 600 : undefined} onClick={() => onSelectDashboard(dashboard.id)}><Text size="sm" truncate>{dashboard.name}</Text></Menu.Item>)}
         {dashboards.data?.length ? <Menu.Divider /> : null}
         <Menu.Item leftSection={<Plus size={14} />} onClick={onNewDashboard}>New dashboard</Menu.Item>

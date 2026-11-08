@@ -8,7 +8,7 @@ import { frameRows } from "./rows";
 import { isOtherSeries, seriesGroups, sumPresent, wrappingLegend } from "./series";
 import { statusFor } from "./thresholds";
 import type { Cell, Panel, PanelResult } from "./types";
-import { formatAxis, formatBucket, formatTimeAxis, formatTimestamp, formatValue, valueAxis, valueAxisTicks } from "./units";
+import { formatAxis, formatBucket, ticksShowUnit, formatTimeAxis, formatTimestamp, formatValue, valueAxis, valueAxisTicks } from "./units";
 import { tint, markStyle } from "./style";
 
 function spanMs(interval?: string): number {
@@ -92,8 +92,8 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       } },
       legend: legendLayout.option,
       grid: { ...base.grid, top: legendLayout.option.show ? legendLayout.top + 20 : 28, left: 8, right: 16, bottom: 32 },
-      xAxis: { ...axis(xUnit, xScale, measures[0]?.name, size.width - 80), name: displayLabel(measures[0] ? { ...measures[0], unit: xUnit } : "x", panel), nameLocation: "middle", nameGap: 28, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "top" } },
-      yAxis: { ...axis(yUnit, yScale, measures[1]?.name, size.height-legendLayout.top-74), name: displayLabel(measures[1] ? { ...measures[1], unit: yUnit } : "y", panel), nameLocation: "end", nameGap: 8, nameRotate: 0, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "left", verticalAlign: "bottom" } },
+      xAxis: { ...axis(xUnit, xScale, measures[0]?.name, size.width - 80), name: displayLabel(measures[0] ? { ...measures[0], unit: ticksShowUnit(xUnit) ? undefined : xUnit } : "x", panel), nameLocation: "middle", nameGap: 28, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "top" } },
+      yAxis: { ...axis(yUnit, yScale, measures[1]?.name, size.height-legendLayout.top-74), name: displayLabel(measures[1] ? { ...measures[1], unit: ticksShowUnit(yUnit) ? undefined : yUnit } : "y", panel), nameLocation: "end", nameGap: 8, nameRotate: 0, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "left", verticalAlign: "bottom" } },
       series: groups.map(({ name, items }, index) => ({
         type: "scatter", name, interactive: true, label: {show: rows.length <= 12, formatter: "{b}", position: "right", color: theme.muted, fontFamily: theme.font, fontSize: 11, width: 120, overflow: "truncate"}, labelLayout: {hideOverlap: true}, keyboard_unit: yUnit, keyboard_x_unit: xUnit, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
         data: rows.filter(row => !colour || items.some(item => item.name === String(row[colour] ?? "")))

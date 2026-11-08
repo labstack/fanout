@@ -4,7 +4,7 @@ import { barOption, chartThemeFor, gaugeOption, timeseriesOption } from "../../.
 import { statValue, toCategories, toSeries } from "../../../panels/frame";
 import { statusFor } from "../../../panels/thresholds";
 import type { Frame, Panel, PanelResult } from "../../../panels/types";
-import { formatAxis, formatValue, valueAxis } from "../../../panels/units";
+import { formatAxis, formatValue, valueAxis, ticksShowUnit } from "../../../panels/units";
 
 const series: Frame = {
   columns: [{ name: "time", type: "time", role: "time" }, { name: "service", type: "string", role: "dimension" }, { name: "p95", type: "number", role: "measure", unit: "ms" }],
@@ -270,4 +270,14 @@ describe("compile, more", () => {
     const color = theme.status[statusFor(75, higher.thresholds, "higher")!];
     expect(option.graphic.find(g => g.id === "gauge-fill")!.style.fill).toBe(color);
   });
+});
+
+it("prints percent ticks with the decimals their step needs and knows when ticks carry the unit", () => {
+  const ticks = formatAxis("percent", { min: 0, max: 1, interval: 0.5 });
+  expect([0, 0.5, 1].map(ticks)).toEqual(["0.0%", "0.5%", "1.0%"]);
+  expect([0, 25, 50].map(formatAxis("percent", { min: 0, max: 50, interval: 25 }))).toEqual(["0%", "25%", "50%"]);
+  expect(ticksShowUnit("ms")).toBe(true);
+  expect(ticksShowUnit("percent")).toBe(true);
+  expect(ticksShowUnit("count")).toBe(false);
+  expect(ticksShowUnit(undefined)).toBe(false);
 });

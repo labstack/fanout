@@ -1,6 +1,7 @@
 import { DataState } from "@labstack/ui";
 import { useEffect, useMemo, useRef } from "react";
 import { Box, MantineProvider } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fanoutTheme, fanoutCssVariables } from "../../../theme";
 import { FragmentView } from "../dashboards/fragment-view";
@@ -16,7 +17,8 @@ export function PanelApp() {
   }, [app]);
   const transport = useMemo(() => app ? appTransport(app) : undefined, [app]);
   // Follow the host theme; without one, follow the system setting.
-  const dark = host?.theme ? host.theme === "dark" : window.matchMedia?.("(prefers-color-scheme: dark)").matches === true;
+  const systemDark = useMediaQuery("(prefers-color-scheme: dark)", undefined, { getInitialValueInEffect: false });
+  const dark = host?.theme ? host.theme === "dark" : systemDark;
   const failure = toolError ?? (error ? "This view could not be loaded. Please try again." : null);
   return <MantineProvider theme={fanoutTheme} cssVariablesResolver={fanoutCssVariables} forceColorScheme={dark ? "dark" : "light"}>
     <QueryClientProvider client={queryClient}><div ref={wrapper} role="main" aria-label="Fanout analysis view" data-app-content>
