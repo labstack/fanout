@@ -177,7 +177,7 @@ type Config struct {
 	SessionIdleTTL time.Duration `group:"auth" env:"FANOUT_SESSION_IDLE_TTL" default:"12h"`
 	// SessionAbsoluteTTL limits total session lifetime; it must be at least FANOUT_SESSION_IDLE_TTL.
 	SessionAbsoluteTTL time.Duration `group:"auth" env:"FANOUT_SESSION_ABSOLUTE_TTL" default:"168h"`
-	// OIDCIssuerURL selects the identity provider issuer; required in OIDC mode.
+	// OIDCIssuerURL selects the identity provider issuer; required in OIDC mode. Fanout starts while it is unreachable and retries discovery; a mismatched issuer fails startup.
 	OIDCIssuerURL string `group:"auth" env:"FANOUT_OIDC_ISSUER_URL"`
 	// OIDCClientID identifies Fanout's client registration; required in OIDC mode.
 	OIDCClientID string `group:"auth" env:"FANOUT_OIDC_CLIENT_ID"`

@@ -18,7 +18,7 @@ Everything below is served by the same HTTP listener as the browser client, on
 | Path | Requires | Reports |
 |---|---|---|
 | `/healthz` | nothing | Liveness — the process is up and its own work on the query engine is not stalled |
-| `/readyz` | nothing | Readiness — storage is attached, plus resolved runtime sizing; a busy engine, or a query running past its deadline, reads `degraded` |
+| `/readyz` | nothing | Readiness — storage is attached, plus resolved runtime sizing; a busy engine, a query running past its deadline, or failing OIDC discovery reads `degraded` |
 
 Use `/healthz` for restart decisions and `/readyz` for traffic decisions.
 

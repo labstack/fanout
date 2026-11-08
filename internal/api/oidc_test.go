@@ -204,7 +204,7 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 		AuthMode: "oidc", OIDCIssuerURL: issuer, OIDCClientID: "fanout-client", OIDCClientSecret: "client-secret",
 		PublicURL: "https://fanout.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
 	}
-	if err := RegisterOIDCRoutes(context.Background(), e, cfg, users, identities, sessions, appauth.NewAuditStore(db.DB)); err != nil {
+	if _, err := RegisterOIDCRoutes(context.Background(), e, cfg, users, identities, sessions, appauth.NewAuditStore(db.DB)); err != nil {
 		t.Fatalf("RegisterOIDCRoutes: %v", err)
 	}
 
@@ -354,7 +354,7 @@ func runRejectedOIDCCallback(t *testing.T, mutate func(jwt.MapClaims), badKey, k
 		PublicURL: "https://fanout.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
 		OIDCAutoProvision: false,
 	}
-	if err := RegisterOIDCRoutes(context.Background(), e, cfg, users, appauth.NewIdentityStore(db.DB), sessions, appauth.NewAuditStore(db.DB)); err != nil {
+	if _, err := RegisterOIDCRoutes(context.Background(), e, cfg, users, appauth.NewIdentityStore(db.DB), sessions, appauth.NewAuditStore(db.DB)); err != nil {
 		t.Fatal(err)
 	}
 	start := httptest.NewRecorder()
