@@ -38,8 +38,10 @@ requirement.
 
 Every release's notes start with an **Upgrade notes** section that
 `scripts/release-notes.sh` writes during the tag workflow's `verify` job,
-before anything is published. It compares the tag with the previous release
-tag and marks:
+before anything is published. It compares the tag with the previous
+published, non-draft GitHub Release, which the workflow lists with
+`gh release list`. A tag whose workflow failed has no release and is skipped,
+so the next published release reports its changes. The section marks:
 
 - a batch format change, read from `batchMetadataVersion` in
   `internal/telemetry/parquet.go`, as a **Format change** caution: the release

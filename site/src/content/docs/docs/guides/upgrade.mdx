@@ -12,7 +12,8 @@ status: preview
 ## Release channels
 
 Fanout versions are CalVer tags, `vYYYY.M.N` with an optional maturity suffix.
-`N` counts every release in the month, whatever its suffix.
+`N` counts every release in the month, whatever its suffix. Container image
+tags omit the leading `v`: release `v2026.9.5` is image tag `2026.9.5`.
 
 | Tag | Channel | Example |
 |---|---|---|
@@ -21,24 +22,30 @@ Fanout versions are CalVer tags, `vYYYY.M.N` with an optional maturity suffix.
 | `-beta` | Prerelease | `v2026.9.2-beta` |
 | `-alpha` | Prerelease | `v2026.9.0-alpha` |
 
-Fanout has not published a stable release yet. Every release so far is alpha.
+The tag of each
+[GitHub Release](https://github.com/labstack/fanout/releases) shows its channel.
 
 Every release, stable or prerelease, is a full GitHub Release with the same
 contents: Linux and macOS archives for amd64 and arm64, a `SHA256SUMS` file,
 GitHub build-provenance attestations for each archive and for `SHA256SUMS`, and
 a multi-architecture image on GHCR with a Docker Hub mirror of the same digest.
 [Releases](https://github.com/labstack/fanout/blob/main/docs/release.md#consumer-verification)
-shows how to verify them. A published version is never rebuilt or retagged.
+shows how to verify them. Fix a problem in a published version with a new
+release number, never by replacing that version. A version's image tag can
+still be pushed again, so record the digest you deploy and compare it with the
+one published for the release.
 
 The `latest` image tag and the installer's default follow the newest release
 of either channel. They are not a stable channel. To run stable releases only,
-pin a tag without a suffix, or the image digest it resolves to, and upgrade
-deliberately.
+pin a release tag without a suffix (image tag `2026.9.5` for `v2026.9.5`), or
+the image digest it resolves to, and upgrade deliberately.
 
 ## Read the upgrade notes
 
-Every GitHub Release starts with an **Upgrade notes** section. The release
-workflow writes it by comparing the tag with the previous release tag:
+Each GitHub Release starts with an **Upgrade notes** section. The release
+workflow writes it by comparing the tag with the previous published release.
+A tag whose release workflow failed has no release and is skipped, so its
+changes are reported by the next published release:
 
 - **Format change: batch format X to Y** (a caution callout) marks a release
   that cannot read telemetry written by earlier releases. Follow
@@ -55,8 +62,8 @@ Maintainers add any manual steps below these markers. The markers compare each
 release only with the one before it. When you skip releases, read the notes of
 every release between your version and the target.
 
-Releases up to v2026.11.2-alpha predate the generated section, and their notes
-are handwritten. Among them,
+A release without a generated section predates it. Its notes are
+handwritten; read them for the same changes. For example,
 [v2026.11.0-alpha](https://github.com/labstack/fanout/releases/tag/v2026.11.0-alpha)
 changes the batch format from 4 to 5.
 

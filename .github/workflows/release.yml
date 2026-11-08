@@ -63,9 +63,16 @@ jobs:
       # Before anything is published, so an unreadable batch format stops the
       # release instead of leaving a format change unmarked.
       - name: Write upgrade notes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bash scripts/release-notes.sh "${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/upgrade-notes.md"
+          # Compare with the previous published release, not the previous tag:
+          # a tag whose release failed has no notes to carry its changes.
+          gh release list --repo "${GITHUB_REPOSITORY}" --exclude-drafts --limit 1000 \
+            --json tagName --jq '.[].tagName' > "${RUNNER_TEMP}/published-tags"
+          bash scripts/release-notes.sh "${GITHUB_REF_NAME}" \
+            < "${RUNNER_TEMP}/published-tags" > "${RUNNER_TEMP}/upgrade-notes.md"
           cat "${RUNNER_TEMP}/upgrade-notes.md"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

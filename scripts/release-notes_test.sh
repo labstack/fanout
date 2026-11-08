@@ -61,6 +61,9 @@ test_main() (
   # below would reinitialize the repository running the hook.
   # shellcheck disable=SC2046 # One variable name per word.
   unset $(git rev-parse --local-env-vars)
+  # Nor may a contributor's global or system configuration, hooks or templates
+  # take part.
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
   repo=$(mktemp -d)
   trap 'rm -rf "$repo"' EXIT
   cd "$repo"
@@ -84,24 +87,39 @@ test_main() (
   g commit -q --allow-empty -m 'fix: unrelated (#4)'
   g tag v2026.2.1-alpha
 
-  out=$(main v2026.2.0-alpha)
+  local published=$'v2026.1.0-alpha\nv2026.2.0-alpha\nv2026.2.1-alpha'
+  out=$(main v2026.2.0-alpha <<< "$published")
   contains "$out" "**Format change: batch format 4 to 5.**" main-format
   contains "$out" "\`20260201000000_next.sql\`" main-migration
   lacks "$out" "20260101000000_init.sql" main-migration
   contains "$out" "- refactor(api)!: rename routes (#3)" main-breaking
   lacks "$out" "fix: unrelated" main-breaking
 
-  out=$(main v2026.2.1-alpha)
+  out=$(main v2026.2.1-alpha <<< "$published")
   contains "$out" "**Storage:** batch format 5 is unchanged" main-unchanged
 
-  out=$(main v2026.1.0-alpha)
+  out=$(main v2026.1.0-alpha <<< "$published")
   contains "$out" "First release" main-first
+
+  # v2026.2.0-alpha was tagged but its release failed, so it was never
+  # published: v2026.2.1-alpha must carry its format change and migration.
+  out=$(main v2026.2.1-alpha <<< $'v2026.1.0-alpha\nv2026.2.1-alpha')
+  contains "$out" "**Format change: batch format 4 to 5.**" main-unpublished
+  contains "$out" "cannot read telemetry written by v2026.1.0-alpha" main-unpublished
+  contains "$out" "\`20260201000000_next.sql\`" main-unpublished
+  contains "$out" "- refactor(api)!: rename routes (#3)" main-unpublished
+  lacks "$out" "**Storage:**" main-unpublished
+
+  # A published tag that was not fetched must stop the release.
+  if (main v2026.2.1-alpha <<< $'v2026.1.5-alpha\nv2026.2.1-alpha' >/dev/null 2>&1); then
+    fail "a missing previous tag was accepted"
+  fi
 
   # A renamed or missing constant must stop the release, not hide a format change.
   printf 'const (\n\tbatchFormat = 6\n)\n' > internal/telemetry/parquet.go
   g commit -qam 'refactor: rename the constant (#5)'
   g tag v2026.3.0-alpha
-  if (main v2026.3.0-alpha >/dev/null 2>&1); then
+  if (main v2026.3.0-alpha <<< "$published" >/dev/null 2>&1); then
     fail "an unreadable format version was accepted"
   fi
 )

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Writes the "Upgrade notes" section that release.yml puts above GitHub's
-# generated changelog. It compares the tag with the previous release tag and
-# marks, from the source rather than from memory:
+# generated changelog. It compares the tag with the previous published release
+# and marks, from the source rather than from memory:
 #
 # - a batch format change, which the new release cannot read across, so stored
 #   telemetry must be moved aside (internal/telemetry batchMetadataVersion);
@@ -14,6 +14,12 @@ set -euo pipefail
 # Every release states its storage impact, so a missing marker is never
 # mistaken for "no change". The script fails rather than guessing when the
 # format version cannot be read.
+#
+# Usage: release-notes.sh <tag> < published-tags
+#
+# stdin lists the tags of published (non-draft) GitHub Releases, one per line.
+# Git tags alone are not enough: a tag whose release workflow failed has no
+# release, and comparing with it would hide a change it introduced.
 
 readonly RELEASE_TAG_PATTERN='^v([0-9]{4})\.([1-9]|1[0-2])\.(0|[1-9][0-9]*)(-(alpha|beta|rc))?$'
 readonly FORMAT_SOURCE=internal/telemetry/parquet.go
@@ -25,7 +31,7 @@ die() {
   exit 1
 }
 
-# Reads tags on stdin and prints the newest release tag older than $1.
+# Reads published release tags on stdin and prints the newest one older than $1.
 previous_release_tag() {
   local current=$1
   local tag
@@ -125,9 +131,13 @@ main() {
   local migrations=""
   local breaking=""
 
-  [ -n "$tag" ] || die "usage: release-notes.sh <tag>"
+  [ -n "$tag" ] || die "usage: release-notes.sh <tag> < published-tags"
   git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null || die "tag not found: $tag"
-  previous=$(git tag --list 'v*.*.*' | previous_release_tag "$tag") || exit 1
+  previous=$(previous_release_tag "$tag") || exit 1
+  if [ -n "$previous" ]; then
+    git rev-parse --verify --quiet "refs/tags/${previous}" >/dev/null ||
+      die "previous release tag is not fetched: $previous"
+  fi
   new_format=$(batch_format_at "$tag") || exit 1
   if [ -n "$previous" ]; then
     old_format=$(batch_format_at "$previous") || exit 1
