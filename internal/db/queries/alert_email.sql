@@ -19,10 +19,16 @@ SELECT * FROM alert_email_deliveries WHERE notification_id = ? ORDER BY id;
 UPDATE alert_email_deliveries SET status = 'sending', attempts = attempts + 1 WHERE id = ?;
 
 -- name: FinishAlertEmailDelivery :exec
-UPDATE alert_email_deliveries SET status = ?, last_error = ?, sent_at = ?, next_attempt_at = ? WHERE id = ?;
+UPDATE alert_email_deliveries SET status = ?, last_error = ?, next_attempt_at = ? WHERE id = ?;
 
--- name: CountAlertEmailsSentSince :one
-SELECT COUNT(*) FROM alert_email_deliveries WHERE recipient = ? AND status = 'sent' AND sent_at >= ?;
+-- name: RecordAlertEmailSend :exec
+INSERT INTO alert_email_sends (id, recipient, sent_at) VALUES (?, ?, ?);
+
+-- name: CountAlertEmailSendsSince :one
+SELECT COUNT(*) FROM alert_email_sends WHERE recipient = ? AND sent_at >= ?;
+
+-- name: PruneAlertEmailSends :exec
+DELETE FROM alert_email_sends WHERE sent_at < ?;
 
 -- name: PruneAlertEmailDeliveries :execresult
 DELETE FROM alert_email_deliveries WHERE status IN ('sent', 'failed', 'suppressed') AND created_at < ?;

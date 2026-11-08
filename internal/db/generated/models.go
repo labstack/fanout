@@ -56,8 +56,13 @@ type AlertEmailDelivery struct {
 	Attempts       int64  `json:"attempts"`
 	NextAttemptAt  string `json:"next_attempt_at"`
 	LastError      string `json:"last_error"`
-	SentAt         string `json:"sent_at"`
 	CreatedAt      string `json:"created_at"`
+}
+
+type AlertEmailSend struct {
+	ID        string `json:"id"`
+	Recipient string `json:"recipient"`
+	SentAt    string `json:"sent_at"`
 }
 
 type AlertRule struct {

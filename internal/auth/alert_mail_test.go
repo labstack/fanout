@@ -262,6 +262,29 @@ func TestMailErrorClassification(t *testing.T) {
 	}
 }
 
+func TestMailFailureDetailKeepsTheCodeAndDropsServerText(t *testing.T) {
+	_, cfg := startFakeSMTP(t, "550 private note about oncall@example.com")
+	err := SendAlert(context.Background(), cfg, hostileAlert())
+	if err == nil {
+		t.Fatal("send succeeded")
+	}
+	detail := MailFailureDetail(err)
+	if !strings.Contains(detail, "550") || !strings.Contains(detail, "RCPT TO") {
+		t.Fatalf("detail = %q", detail)
+	}
+	for _, leaked := range []string{"private note", "oncall@example.com"} {
+		if strings.Contains(detail, leaked) {
+			t.Fatalf("detail leaks %q: %q", leaked, detail)
+		}
+	}
+	if got := MailFailureDetail(fmt.Errorf("%w: a@example.com", errInvalidMailAddress)); strings.Contains(got, "a@example.com") {
+		t.Fatalf("address detail = %q", got)
+	}
+	if got := MailFailureDetail(fmt.Errorf("dial a@example.com: %w", context.DeadlineExceeded)); strings.Contains(got, "a@example.com") {
+		t.Fatalf("timeout detail = %q", got)
+	}
+}
+
 func TestSingleLineCapsLengthAndCollapsesWhitespace(t *testing.T) {
 	got := singleLine(strings.Repeat("a", 500)+"\x00", maxAlertNameLength)
 	if len([]rune(got)) != maxAlertNameLength+1 || !strings.HasSuffix(got, "…") {

@@ -141,8 +141,8 @@ only that one interrupted message per recipient can repeat.
 ### The hourly limit
 
 `FANOUT_ALERTS_EMAIL_HOURLY_LIMIT` (default 30) caps the alert emails sent to one
-address in any rolling hour, across all rules. The count is stored, so a restart
-does not reset it. The last email within the limit says that the limit has been
+address in any rolling hour, across all rules. The count is stored apart from
+rules, so neither a restart nor deleting a rule resets it. The last email within the limit says that the limit has been
 reached. Notifications over the limit are suppressed: they are dropped, never
 sent later, and logged as a warning.
 
@@ -158,6 +158,10 @@ in `email_status` and `email_status_detail` on `GET /api/alerting/rules`:
 | `failed` | At least one recipient could not be reached |
 | `suppressed` | At least one recipient was over the hourly limit |
 | `unavailable` | The rule has recipients but SMTP is not configured |
+
+Viewers see `email_status` only. `email_recipients` and `email_status_detail` are
+returned to operators and administrators. The detail gives the failure class and
+SMTP code, not the mail server's response text.
 
 For a rule with no webhook, the alert's delivery status under **History** carries
 `success`, `failed` or `suppressed` for the email. When a rule has a webhook, that

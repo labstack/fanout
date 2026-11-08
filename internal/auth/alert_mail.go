@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,29 @@ func IsPermanentMailError(err error) bool {
 	}
 	var sendErr *mail.SendError
 	return errors.As(err, &sendErr) && !sendErr.IsTemp()
+}
+
+// MailFailureDetail describes a send failure by its class and SMTP code, for
+// logs and status shown to users. It never includes err's text, which can carry
+// server responses and recipient addresses.
+func MailFailureDetail(err error) string {
+	var sendErr *mail.SendError
+	var netErr net.Error
+	switch {
+	case errors.Is(err, errInvalidMailAddress):
+		return "Invalid email address"
+	case errors.As(err, &sendErr):
+		if code := sendErr.ErrorCode(); code != 0 {
+			return fmt.Sprintf("Mail server returned %d while %s", code, sendErr.Reason)
+		}
+		return fmt.Sprintf("Delivery failed while %s", sendErr.Reason)
+	case errors.Is(err, context.DeadlineExceeded):
+		return "Timed out talking to the mail server"
+	case errors.As(err, &netErr):
+		return "Could not reach the mail server"
+	default:
+		return "The exchange with the mail server failed"
+	}
 }
 
 // SendAlert renders and sends one alert notification.

@@ -158,7 +158,7 @@ func TestEmailRetriesWithBackoffWithoutResendingToDelivered(t *testing.T) {
 	h.fire(rule)
 	h.drain()
 	stored := h.ruleStatus(t, rule.ID)
-	if stored.EmailStatus != "retrying" || !strings.Contains(stored.EmailStatusDetail, "451") {
+	if stored.EmailStatus != "retrying" || !strings.Contains(stored.EmailStatusDetail, "Attempt 1 of 5") || strings.Contains(stored.EmailStatusDetail, "try later") {
 		t.Fatalf("rule = %+v", stored)
 	}
 
@@ -196,7 +196,7 @@ func TestExhaustedRetriesShowFailureOnRule(t *testing.T) {
 		t.Fatalf("attempts = %d, want %d", attempts, len(emailBackoff))
 	}
 	stored := h.ruleStatus(t, rule.ID)
-	if stored.EmailStatus != "failed" || !strings.Contains(stored.EmailStatusDetail, "connection refused") {
+	if stored.EmailStatus != "failed" || stored.EmailStatusDetail == "" || strings.Contains(stored.EmailStatusDetail, "connection refused") {
 		t.Fatalf("rule = %+v", stored)
 	}
 	alert, err := h.store.GetAlert(rule.ID, "api")
@@ -291,6 +291,95 @@ func TestLimitSurvivesRestart(t *testing.T) {
 	restarted.drainEmail(context.Background())
 	if len(box.mails) != 0 {
 		t.Fatalf("limit reset by restart: %+v", box.mails)
+	}
+}
+
+func TestDeletingARuleDoesNotResetTheHourlyLimit(t *testing.T) {
+	h := newMailHarness(t, 1)
+	first := h.rule(t, "first", "a@example.com")
+	h.fire(first)
+	h.drain()
+	if err := h.store.DeleteRule(first.ID); err != nil {
+		t.Fatal(err)
+	}
+	second := h.rule(t, "first", "a@example.com")
+	h.fire(second)
+	h.drain()
+	if got := h.box.to("a@example.com"); len(got) != 1 {
+		t.Fatalf("limit reset by deleting the rule: %+v", got)
+	}
+	if status := h.ruleStatus(t, second.ID).EmailStatus; status != "suppressed" {
+		t.Fatalf("rule status = %q", status)
+	}
+}
+
+func TestDeletingAnAlertDoesNotResetTheHourlyLimit(t *testing.T) {
+	h := newMailHarness(t, 1)
+	rule := h.rule(t, "errors", "a@example.com")
+	h.fire(rule)
+	h.drain()
+	alert, err := h.store.GetAlert(rule.ID, "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.DeleteAlert(alert.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.fire(rule)
+	h.drain()
+	if got := h.box.to("a@example.com"); len(got) != 1 {
+		t.Fatalf("limit reset by deleting the alert: %+v", got)
+	}
+}
+
+func TestDeletingARuleCancelsItsQueuedMail(t *testing.T) {
+	h := newMailHarness(t, 30)
+	rule := h.rule(t, "errors", "a@example.com")
+	h.fire(rule)
+	if err := h.store.DeleteRule(rule.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.drain()
+	if len(h.box.mails) != 0 {
+		t.Fatalf("mails = %+v", h.box.mails)
+	}
+}
+
+func TestPruningKeepsSendsInsideTheLimitWindow(t *testing.T) {
+	h := newMailHarness(t, 2)
+	h.fire(h.rule(t, "old", "a@example.com"))
+	h.drain()
+	h.now = h.now.Add(2 * time.Hour)
+	h.fire(h.rule(t, "recent", "a@example.com"))
+	h.drain()
+	if err := h.store.pruneEmailDeliveries(7, h.now); err != nil {
+		t.Fatal(err)
+	}
+	var kept int
+	if err := h.store.db.QueryRow(`SELECT COUNT(*) FROM alert_email_sends`).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != 1 {
+		t.Fatalf("sends kept = %d, want 1", kept)
+	}
+}
+
+func TestStatusDetailLeavesOutServerTextAndAddresses(t *testing.T) {
+	h := newMailHarness(t, 30)
+	rule := h.rule(t, "errors", "a@example.com")
+	h.box.fail = func(auth.AlertMail) error {
+		return fmt.Errorf("auth: send email: %w: 550 private note for a@example.com", &mail.SendError{Reason: mail.ErrSMTPRcptTo})
+	}
+	h.fire(rule)
+	h.drain()
+	stored := h.ruleStatus(t, rule.ID)
+	if stored.EmailStatus != "failed" || !strings.Contains(stored.EmailStatusDetail, "RCPT TO") {
+		t.Fatalf("rule = %+v", stored)
+	}
+	for _, leaked := range []string{"private note", "a@example.com"} {
+		if strings.Contains(stored.EmailStatusDetail, leaked) {
+			t.Fatalf("detail leaks %q: %q", leaked, stored.EmailStatusDetail)
+		}
 	}
 }
 

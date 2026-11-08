@@ -128,6 +128,37 @@ func TestEmailOptionsReportTheDefaultDestinationWithoutItsAddress(t *testing.T) 
 	}
 }
 
+func TestRuleEmailRecipientsAndDetailAreHiddenFromViewers(t *testing.T) {
+	s := newAlertEmailServer(t, false)
+	if _, err := s.store.CreateRule(alert.Rule{Name: "Errors", Enabled: true, Expression: "true", EmailRecipients: []string{"private@example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := s.users.CreateWithAudit("alert-viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, sessionRequest(http.MethodGet, "/api/alerting/rules", nil, s.login(t, viewer)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("viewer list = %d %s", rec.Code, rec.Body)
+	}
+	for _, hidden := range []string{"private@example.com", "email_recipients", "email_status_detail"} {
+		if strings.Contains(rec.Body.String(), hidden) {
+			t.Fatalf("viewer response holds %q: %s", hidden, rec.Body)
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"email_status":"unavailable"`) {
+		t.Fatalf("viewer lost the failure signal: %s", rec.Body)
+	}
+
+	manager := s.do(http.MethodGet, "/api/alerting/rules", "")
+	for _, shown := range []string{"private@example.com", "email_status_detail"} {
+		if !strings.Contains(manager.Body.String(), shown) {
+			t.Fatalf("manager response lacks %q: %s", shown, manager.Body)
+		}
+	}
+}
+
 // A rule saved while SMTP worked stays editable and reports the failure.
 func TestSavedEmailRuleWithoutSMTPShowsFailureAndStaysEditable(t *testing.T) {
 	s := newAlertEmailServer(t, false)

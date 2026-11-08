@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -36,7 +35,6 @@ const (
 	emailPollInterval = 2 * time.Second
 	emailSendTimeout  = 30 * time.Second
 	emailLimitWindow  = time.Hour
-	maxEmailDetail    = 300
 )
 
 // emailBackoff holds the wait before each attempt. Mail servers defer delivery
@@ -257,11 +255,11 @@ func (e *Engine) recoverEmail(ctx context.Context) {
 			continue
 		}
 		if int(row.Attempts) >= len(emailBackoff) {
-			e.finishEmail(ctx, row, emailFailed, "Interrupted during its last attempt", "", row.NextAttemptAt)
+			e.finishEmail(ctx, row, emailFailed, "Interrupted during its last attempt", row.NextAttemptAt)
 			e.settleEmail(ctx, row)
 			continue
 		}
-		e.finishEmail(ctx, row, emailPending, row.LastError, "", now)
+		e.finishEmail(ctx, row, emailPending, row.LastError, now)
 	}
 }
 
@@ -274,7 +272,7 @@ func (e *Engine) failUndeliverableEmail(ctx context.Context) {
 		return
 	}
 	for _, row := range rows {
-		e.finishEmail(ctx, row, emailFailed, EmailUnavailableMessage, "", row.NextAttemptAt)
+		e.finishEmail(ctx, row, emailFailed, EmailUnavailableMessage, row.NextAttemptAt)
 		e.settleEmail(ctx, row)
 	}
 }
@@ -296,44 +294,49 @@ func (e *Engine) drainEmail(ctx context.Context) {
 			return
 		}
 		for _, row := range rows {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || !e.deliverEmail(ctx, row) {
 				return
 			}
-			e.deliverEmail(ctx, row)
+		}
+		if len(rows) < emailBatchSize {
+			return
 		}
 	}
 }
 
 // deliverEmail makes one attempt, or suppresses the row if its recipient has
 // reached the hourly limit. Suppressed mail is dropped rather than delayed, so
-// a burst cannot arrive later as a backlog.
-func (e *Engine) deliverEmail(ctx context.Context, row generated.AlertEmailDelivery) {
+// a burst cannot arrive later as a backlog. It returns false when the database
+// failed and the row is still due, so the drain stops until the next poll.
+func (e *Engine) deliverEmail(ctx context.Context, row generated.AlertEmailDelivery) bool {
 	now := e.clock()
-	sent, err := e.store.q.CountAlertEmailsSentSince(ctx, generated.CountAlertEmailsSentSinceParams{
+	sent, err := e.store.q.CountAlertEmailSendsSince(ctx, generated.CountAlertEmailSendsSinceParams{
 		Recipient: row.Recipient,
 		SentAt:    formatStoredTime(now.Add(-emailLimitWindow)),
 	})
 	if err != nil {
 		slog.Error("alert: count sent email", "err", err)
-		return
+		return false
 	}
 	limit := e.email.HourlyLimit
 	if int(sent) >= limit {
 		slog.Warn("alert: email suppressed by hourly limit", "rule", row.RuleID, "alert", row.AlertID, "limit", limit)
-		e.finishEmail(ctx, row, emailSuppressed, fmt.Sprintf("Over the limit of %d emails per hour to this address", limit), "", row.NextAttemptAt)
+		if !e.finishEmail(ctx, row, emailSuppressed, fmt.Sprintf("Over the limit of %d emails per hour to this address", limit), row.NextAttemptAt) {
+			return false
+		}
 		e.settleEmail(ctx, row)
-		return
+		return true
 	}
 
 	var content emailContent
 	if err := json.Unmarshal([]byte(row.Content), &content); err != nil {
-		e.finishEmail(ctx, row, emailFailed, "The stored message could not be read", "", row.NextAttemptAt)
+		e.finishEmail(ctx, row, emailFailed, "The stored message could not be read", row.NextAttemptAt)
 		e.settleEmail(ctx, row)
-		return
+		return true
 	}
 	if err := e.store.q.ClaimAlertEmailDelivery(ctx, row.ID); err != nil {
 		slog.Error("alert: claim email", "err", err)
-		return
+		return false
 	}
 	attempt := int(row.Attempts) + 1
 
@@ -354,42 +357,76 @@ func (e *Engine) deliverEmail(ctx context.Context, row generated.AlertEmailDeliv
 	err = e.email.Send(sendCtx, mail)
 	cancel()
 
+	detail := ""
+	if err != nil {
+		detail = auth.MailFailureDetail(err)
+	}
 	switch {
 	case err == nil:
-		e.finishEmail(ctx, row, emailSent, "", formatStoredTime(e.clock()), row.NextAttemptAt)
+		e.recordEmailSent(ctx, row)
 		e.settleEmail(ctx, row)
 	case ctx.Err() != nil:
 		// Shutting down: leave the row marked sending for recoverEmail.
 	case auth.IsPermanentMailError(err) || attempt >= len(emailBackoff):
-		slog.Warn("alert: email delivery failed", "rule", row.RuleID, "alert", row.AlertID, "attempt", attempt, "err", err)
-		e.finishEmail(ctx, row, emailFailed, emailErrorDetail(err), "", row.NextAttemptAt)
+		slog.Warn("alert: email delivery failed", "rule", row.RuleID, "alert", row.AlertID, "attempt", attempt, "reason", detail)
+		e.finishEmail(ctx, row, emailFailed, detail, row.NextAttemptAt)
 		e.settleEmail(ctx, row)
 	default:
 		next := e.clock().Add(emailBackoff[attempt])
-		slog.Warn("alert: email attempt failed, will retry", "rule", row.RuleID, "alert", row.AlertID, "attempt", attempt, "err", err)
-		e.finishEmail(ctx, row, emailPending, emailErrorDetail(err), "", formatStoredTime(next))
-		e.setRuleEmailStatus(ctx, row.RuleID, emailRetrying, fmt.Sprintf("Attempt %d of %d failed: %s", attempt, len(emailBackoff), emailErrorDetail(err)))
+		slog.Warn("alert: email attempt failed, will retry", "rule", row.RuleID, "alert", row.AlertID, "attempt", attempt, "reason", detail)
+		e.finishEmail(ctx, row, emailPending, detail, formatStoredTime(next))
+		e.setRuleEmailStatus(ctx, row.RuleID, emailRetrying, fmt.Sprintf("Attempt %d of %d failed: %s", attempt, len(emailBackoff), detail))
+	}
+	return true
+}
+
+// recordEmailSent marks a row sent and counts it toward the hourly limit,
+// atomically. If this fails the row stays sending and is resent after a restart.
+func (e *Engine) recordEmailSent(ctx context.Context, row generated.AlertEmailDelivery) {
+	if err := e.store.recordEmailSent(ctx, row, e.clock()); err != nil {
+		slog.Error("alert: record sent email", "rule", row.RuleID, "err", err)
 	}
 }
 
-func emailErrorDetail(err error) string {
-	detail := []rune(strings.ToValidUTF8(err.Error(), " "))
-	if len(detail) > maxEmailDetail {
-		detail = detail[:maxEmailDetail]
+func (s *Store) recordEmailSent(ctx context.Context, row generated.AlertEmailDelivery, now time.Time) error {
+	id, err := newID()
+	if err != nil {
+		return err
 	}
-	return string(detail)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.q.WithTx(tx)
+	if err := q.FinishAlertEmailDelivery(ctx, generated.FinishAlertEmailDeliveryParams{
+		Status:        emailSent,
+		NextAttemptAt: row.NextAttemptAt,
+		ID:            row.ID,
+	}); err != nil {
+		return err
+	}
+	if err := q.RecordAlertEmailSend(ctx, generated.RecordAlertEmailSendParams{
+		ID:        id,
+		Recipient: row.Recipient,
+		SentAt:    formatStoredTime(now),
+	}); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-func (e *Engine) finishEmail(ctx context.Context, row generated.AlertEmailDelivery, status, detail, sentAt, nextAttemptAt string) {
+func (e *Engine) finishEmail(ctx context.Context, row generated.AlertEmailDelivery, status, detail, nextAttemptAt string) bool {
 	if err := e.store.q.FinishAlertEmailDelivery(ctx, generated.FinishAlertEmailDeliveryParams{
 		Status:        status,
 		LastError:     detail,
-		SentAt:        sentAt,
 		NextAttemptAt: nextAttemptAt,
 		ID:            row.ID,
 	}); err != nil {
 		slog.Error("alert: update email delivery", "rule", row.RuleID, "status", status, "err", err)
+		return false
 	}
+	return true
 }
 
 // settleEmail publishes a notification's result once every recipient is
@@ -401,6 +438,9 @@ func (e *Engine) settleEmail(ctx context.Context, row generated.AlertEmailDelive
 	if err != nil {
 		slog.Error("alert: read notification", "rule", row.RuleID, "err", err)
 		return
+	}
+	if len(rows) == 0 {
+		return // The rule was deleted during the send.
 	}
 	var failed, suppressed int
 	var cause string
@@ -450,13 +490,17 @@ func (e *Engine) setRuleEmailStatus(ctx context.Context, ruleID, status, detail 
 		EmailStatusDetail: detail,
 		EmailStatusAt:     e.clock().Format(time.RFC3339),
 		ID:                ruleID,
-	}); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	}); err != nil {
 		slog.Error("alert: update rule email status", "rule", ruleID, "err", err)
 	}
 }
 
-// pruneEmailDeliveries removes finished rows older than the history window.
+// pruneEmailDeliveries removes finished rows older than the history window,
+// and sends that have aged out of the hourly limit.
 func (s *Store) pruneEmailDeliveries(days int, now time.Time) error {
-	_, err := s.q.PruneAlertEmailDeliveries(context.Background(), formatStoredTime(now.AddDate(0, 0, -days)))
-	return err
+	ctx := context.Background()
+	if _, err := s.q.PruneAlertEmailDeliveries(ctx, formatStoredTime(now.AddDate(0, 0, -days))); err != nil {
+		return err
+	}
+	return s.q.PruneAlertEmailSends(ctx, formatStoredTime(now.Add(-emailLimitWindow)))
 }

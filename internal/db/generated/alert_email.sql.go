@@ -19,30 +19,29 @@ func (q *Queries) ClaimAlertEmailDelivery(ctx context.Context, id string) error 
 	return err
 }
 
-const countAlertEmailsSentSince = `-- name: CountAlertEmailsSentSince :one
-SELECT COUNT(*) FROM alert_email_deliveries WHERE recipient = ? AND status = 'sent' AND sent_at >= ?
+const countAlertEmailSendsSince = `-- name: CountAlertEmailSendsSince :one
+SELECT COUNT(*) FROM alert_email_sends WHERE recipient = ? AND sent_at >= ?
 `
 
-type CountAlertEmailsSentSinceParams struct {
+type CountAlertEmailSendsSinceParams struct {
 	Recipient string `json:"recipient"`
 	SentAt    string `json:"sent_at"`
 }
 
-func (q *Queries) CountAlertEmailsSentSince(ctx context.Context, arg CountAlertEmailsSentSinceParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countAlertEmailsSentSince, arg.Recipient, arg.SentAt)
+func (q *Queries) CountAlertEmailSendsSince(ctx context.Context, arg CountAlertEmailSendsSinceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAlertEmailSendsSince, arg.Recipient, arg.SentAt)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const finishAlertEmailDelivery = `-- name: FinishAlertEmailDelivery :exec
-UPDATE alert_email_deliveries SET status = ?, last_error = ?, sent_at = ?, next_attempt_at = ? WHERE id = ?
+UPDATE alert_email_deliveries SET status = ?, last_error = ?, next_attempt_at = ? WHERE id = ?
 `
 
 type FinishAlertEmailDeliveryParams struct {
 	Status        string `json:"status"`
 	LastError     string `json:"last_error"`
-	SentAt        string `json:"sent_at"`
 	NextAttemptAt string `json:"next_attempt_at"`
 	ID            string `json:"id"`
 }
@@ -51,7 +50,6 @@ func (q *Queries) FinishAlertEmailDelivery(ctx context.Context, arg FinishAlertE
 	_, err := q.db.ExecContext(ctx, finishAlertEmailDelivery,
 		arg.Status,
 		arg.LastError,
-		arg.SentAt,
 		arg.NextAttemptAt,
 		arg.ID,
 	)
@@ -90,7 +88,7 @@ func (q *Queries) InsertAlertEmailDelivery(ctx context.Context, arg InsertAlertE
 }
 
 const listAlertEmailDeliveriesByNotification = `-- name: ListAlertEmailDeliveriesByNotification :many
-SELECT id, notification_id, rule_id, alert_id, recipient, content, status, attempts, next_attempt_at, last_error, sent_at, created_at FROM alert_email_deliveries WHERE notification_id = ? ORDER BY id
+SELECT id, notification_id, rule_id, alert_id, recipient, content, status, attempts, next_attempt_at, last_error, created_at FROM alert_email_deliveries WHERE notification_id = ? ORDER BY id
 `
 
 func (q *Queries) ListAlertEmailDeliveriesByNotification(ctx context.Context, notificationID string) ([]AlertEmailDelivery, error) {
@@ -113,7 +111,6 @@ func (q *Queries) ListAlertEmailDeliveriesByNotification(ctx context.Context, no
 			&i.Attempts,
 			&i.NextAttemptAt,
 			&i.LastError,
-			&i.SentAt,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -130,7 +127,7 @@ func (q *Queries) ListAlertEmailDeliveriesByNotification(ctx context.Context, no
 }
 
 const listDueAlertEmailDeliveries = `-- name: ListDueAlertEmailDeliveries :many
-SELECT id, notification_id, rule_id, alert_id, recipient, content, status, attempts, next_attempt_at, last_error, sent_at, created_at FROM alert_email_deliveries
+SELECT id, notification_id, rule_id, alert_id, recipient, content, status, attempts, next_attempt_at, last_error, created_at FROM alert_email_deliveries
 WHERE status = 'pending' AND next_attempt_at <= ?
 ORDER BY next_attempt_at, id
 LIMIT ?
@@ -161,7 +158,6 @@ func (q *Queries) ListDueAlertEmailDeliveries(ctx context.Context, arg ListDueAl
 			&i.Attempts,
 			&i.NextAttemptAt,
 			&i.LastError,
-			&i.SentAt,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -178,7 +174,7 @@ func (q *Queries) ListDueAlertEmailDeliveries(ctx context.Context, arg ListDueAl
 }
 
 const listOpenAlertEmailDeliveries = `-- name: ListOpenAlertEmailDeliveries :many
-SELECT id, notification_id, rule_id, alert_id, recipient, content, status, attempts, next_attempt_at, last_error, sent_at, created_at FROM alert_email_deliveries WHERE status IN ('pending', 'sending') ORDER BY id
+SELECT id, notification_id, rule_id, alert_id, recipient, content, status, attempts, next_attempt_at, last_error, created_at FROM alert_email_deliveries WHERE status IN ('pending', 'sending') ORDER BY id
 `
 
 func (q *Queries) ListOpenAlertEmailDeliveries(ctx context.Context) ([]AlertEmailDelivery, error) {
@@ -201,7 +197,6 @@ func (q *Queries) ListOpenAlertEmailDeliveries(ctx context.Context) ([]AlertEmai
 			&i.Attempts,
 			&i.NextAttemptAt,
 			&i.LastError,
-			&i.SentAt,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -223,6 +218,30 @@ DELETE FROM alert_email_deliveries WHERE status IN ('sent', 'failed', 'suppresse
 
 func (q *Queries) PruneAlertEmailDeliveries(ctx context.Context, createdAt string) (sql.Result, error) {
 	return q.db.ExecContext(ctx, pruneAlertEmailDeliveries, createdAt)
+}
+
+const pruneAlertEmailSends = `-- name: PruneAlertEmailSends :exec
+DELETE FROM alert_email_sends WHERE sent_at < ?
+`
+
+func (q *Queries) PruneAlertEmailSends(ctx context.Context, sentAt string) error {
+	_, err := q.db.ExecContext(ctx, pruneAlertEmailSends, sentAt)
+	return err
+}
+
+const recordAlertEmailSend = `-- name: RecordAlertEmailSend :exec
+INSERT INTO alert_email_sends (id, recipient, sent_at) VALUES (?, ?, ?)
+`
+
+type RecordAlertEmailSendParams struct {
+	ID        string `json:"id"`
+	Recipient string `json:"recipient"`
+	SentAt    string `json:"sent_at"`
+}
+
+func (q *Queries) RecordAlertEmailSend(ctx context.Context, arg RecordAlertEmailSendParams) error {
+	_, err := q.db.ExecContext(ctx, recordAlertEmailSend, arg.ID, arg.Recipient, arg.SentAt)
+	return err
 }
 
 const updateRuleEmailStatus = `-- name: UpdateRuleEmailStatus :exec

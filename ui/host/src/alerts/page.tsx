@@ -89,7 +89,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
             const now = active(rule);
             return <Table.Tr key={rule.id}>
               <Table.Td><Text size="sm" fw={500}>{rule.name}</Text>{rule.description && <Text size="xs" c="dimmed">{rule.description}</Text>}
-                {rule.email_status && emailIssues[rule.email_status] && <Group gap={6} mt={4} role="status"><StatusBadge tone={emailIssues[rule.email_status].tone}>{emailIssues[rule.email_status].label}</StatusBadge><Text size="xs" c="dimmed">{rule.email_status_detail}</Text></Group>}</Table.Td>
+                {rule.email_status && emailIssues[rule.email_status] && <Group gap={6} mt={4} role="status"><StatusBadge tone={emailIssues[rule.email_status].tone}>{emailIssues[rule.email_status].label}</StatusBadge>{rule.email_status_detail && <Text size="xs" c="dimmed">{rule.email_status_detail}</Text>}</Group>}</Table.Td>
               <Table.Td><Text size="sm">{rule.service || "All services"}</Text></Table.Td>
               <Table.Td><Text size="xs" ff="monospace">{rule.expression}</Text>
                 <Button size="compact-xs" variant="subtle" px={0} onClick={() => onExplore(ruleQuery(rule))}>Open in Explore</Button></Table.Td>

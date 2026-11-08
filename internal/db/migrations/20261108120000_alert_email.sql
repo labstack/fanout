@@ -19,9 +19,16 @@ CREATE TABLE alert_email_deliveries (
     attempts        INTEGER NOT NULL DEFAULT 0,
     next_attempt_at TEXT NOT NULL,
     last_error      TEXT NOT NULL DEFAULT '',
-    sent_at         TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL
 );
 CREATE INDEX alert_email_deliveries_due ON alert_email_deliveries (status, next_attempt_at);
-CREATE INDEX alert_email_deliveries_sent ON alert_email_deliveries (recipient, sent_at) WHERE status = 'sent';
 CREATE INDEX alert_email_deliveries_notification ON alert_email_deliveries (notification_id);
+
+-- Mail accepted per address, counted by the hourly limit. It has no reference
+-- to rules or alerts, so deleting either cannot reset the limit.
+CREATE TABLE alert_email_sends (
+    id        TEXT PRIMARY KEY,
+    recipient TEXT NOT NULL,
+    sent_at   TEXT NOT NULL
+);
+CREATE INDEX alert_email_sends_recipient ON alert_email_sends (recipient, sent_at);

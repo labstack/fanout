@@ -79,8 +79,15 @@ func (h *alertHandler) ListRules(c *echo.Context) error {
 	if rules == nil {
 		rules = []alert.Rule{}
 	}
+	user := GetCurrentUser(c)
+	manager := user != nil && HasCapability(*user, ManageAlerts)
 	for i := range rules {
 		rules[i] = h.engine.WithEmailState(rules[i])
+		// Readers learn that email is failing, not who receives it or why.
+		if !manager {
+			rules[i].EmailRecipients = nil
+			rules[i].EmailStatusDetail = ""
+		}
 	}
 	return c.JSON(200, map[string][]alert.Rule{"rules": rules})
 }
