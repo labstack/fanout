@@ -330,7 +330,7 @@ func TestCheckMaintenance_DegradedWhenNeverRanPastGrace(t *testing.T) {
 
 func TestRegisterHealthRoutes_RegistersReadiness(t *testing.T) {
 	e := echo.New()
-	RegisterHealthRoutes(e, nil, config.Config{DataDir: os.TempDir()})
+	RegisterHealthRoutes(e, nil, config.Config{DataDir: os.TempDir()}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()

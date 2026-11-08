@@ -262,9 +262,6 @@ func main() {
 
 	api.RegisterAuthMiddleware(e, userStore, browserSessions, auditStore, cfg)
 
-	// Health checks (liveness + readiness)
-	api.RegisterHealthRoutes(e, q, cfg)
-
 	// Prometheus metrics (internal/ops)
 	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
 
@@ -327,10 +324,15 @@ func main() {
 	}
 	codeStore := auth.NewCodeStore(sqlite.DB, cfg.AuthCodeSecret)
 	api.RegisterAuthRoutes(e, userStore, codeStore, setup, settingsStore, browserSessions, auditStore, smtpCfg, cfg)
-	if err := api.RegisterOIDCRoutes(ctx, e, cfg, userStore, identityStore, browserSessions, auditStore); err != nil {
+	oidcDiscovery, err := api.RegisterOIDCRoutes(ctx, e, cfg, userStore, identityStore, browserSessions, auditStore)
+	if err != nil {
 		slog.Error("OIDC initialization failed", "err", err)
 		os.Exit(1)
 	}
+
+	// Health checks (liveness + readiness)
+	api.RegisterHealthRoutes(e, q, cfg, oidcDiscovery)
+
 	api.RegisterUserRoutes(e, userStore, smtpCfg, cfg)
 	api.RegisterSettingsRoutes(e, cfg, settingsStore, auditStore)
 	slog.Info("auth enabled")

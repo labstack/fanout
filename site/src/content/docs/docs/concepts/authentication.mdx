@@ -37,6 +37,13 @@ on every login, including for linked identities. Removing a user's eligibility
 blocks their next login; it does not revoke a browser session already issued.
 Suspending the account in Fanout blocks access and revokes its sessions.
 
+Fanout starts even when the identity provider is unreachable, so ingest, MCP
+and existing sessions keep working. Discovery retries in the background with
+backoff capped at 1 minute. Until it succeeds, the OIDC sign-in routes return
+503 and the `oidc` check in `/readyz` reads `degraded`; no restart is needed.
+Invalid configuration, including a provider that answers for a different
+issuer at startup, still fails startup.
+
 If neither `FANOUT_OIDC_ALLOWED_GROUPS` nor `FANOUT_OIDC_ALLOWED_DOMAINS` is
 configured, no eligibility allow policy is enforced; membership is managed locally.
 

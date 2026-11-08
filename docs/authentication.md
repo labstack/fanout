@@ -162,6 +162,24 @@ session cookies are issued with `Secure`.
 
 ## OIDC
 
+### Provider availability
+
+Fanout runs OIDC discovery once at startup, for at most 5 seconds. If the
+provider is unreachable or answers with an error, Fanout starts anyway and
+serves ingest, MCP, and existing browser sessions. Discovery is retried in the
+background, starting after 1 second and doubling to at most 1 minute between
+attempts, until it succeeds or Fanout shuts down. No restart is needed.
+
+Until then `/api/auth/oidc/start` and `/api/auth/oidc/callback` return 503 with
+`Retry-After`, and the `oidc` check in `/readyz` reports `degraded` while the
+endpoint still returns 200. The cause is in the logs.
+
+Invalid configuration still fails startup: a value rejected by configuration
+validation, or a provider that answers for an issuer other than
+`FANOUT_OIDC_ISSUER_URL`. If a mismatch first appears on a background retry,
+because the provider was down at startup, Fanout keeps running and retrying;
+correct the issuer and restart.
+
 ### Public and community access
 
 OIDC can provision a separate viewer account for every visitor whose provider

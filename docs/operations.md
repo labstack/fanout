@@ -202,7 +202,9 @@ proxy and certificate verification behaviour.
   engine reports `degraded` with 200; a stalled one reports 503. A query still
   running 25 seconds past its deadline reports `queries` as `degraded`, logs
   a warning with a hash of the query (never its text), and increments
-  `fanout_duckdb_statement_overruns_total`.
+  `fanout_duckdb_statement_overruns_total`. In OIDC mode, the `oidc` check
+  reports `degraded` with 200 while provider discovery is failing; only new
+  OIDC sign-ins are affected, and discovery retries without a restart.
 - `/metrics` exposes Prometheus metrics. Keep it private or configure
   `FANOUT_METRICS_TOKEN`; do not make it public merely to simplify scraping.
 

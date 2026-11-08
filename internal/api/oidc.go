@@ -29,9 +29,7 @@ const oidcFlowTTL = 10 * time.Minute
 
 type OIDCHandler struct {
 	cfg        config.Config
-	provider   *oidc.Provider
-	verifier   *oidc.IDTokenVerifier
-	oauth      oauth2.Config
+	discovery  *OIDCDiscovery
 	users      *appauth.UserStore
 	identities *appauth.IdentityStore
 	sessions   *appauth.BrowserSessions
@@ -39,35 +37,67 @@ type OIDCHandler struct {
 	limiter    *appauth.KeyedLimiter
 }
 
-func RegisterOIDCRoutes(ctx context.Context, e *echo.Echo, cfg config.Config, users *appauth.UserStore, identities *appauth.IdentityStore, sessions *appauth.BrowserSessions, audit *appauth.AuditStore) error {
+// RegisterOIDCRoutes makes one bounded discovery attempt and registers the
+// login routes. It fails only on invalid configuration; if the provider is
+// merely unavailable the routes answer 503 while discovery retries until ctx
+// ends. The returned discovery is nil outside OIDC mode.
+func RegisterOIDCRoutes(ctx context.Context, e *echo.Echo, cfg config.Config, users *appauth.UserStore, identities *appauth.IdentityStore, sessions *appauth.BrowserSessions, audit *appauth.AuditStore) (*OIDCDiscovery, error) {
+	return registerOIDCRoutes(ctx, e, cfg, users, identities, sessions, audit, defaultOIDCDiscoveryTiming)
+}
+
+func registerOIDCRoutes(ctx context.Context, e *echo.Echo, cfg config.Config, users *appauth.UserStore, identities *appauth.IdentityStore, sessions *appauth.BrowserSessions, audit *appauth.AuditStore, timing oidcDiscoveryTiming) (*OIDCDiscovery, error) {
 	if strings.ToLower(strings.TrimSpace(cfg.AuthMode)) != "oidc" {
-		return nil
+		return nil, nil
 	}
 	if users == nil || identities == nil || sessions == nil || audit == nil {
-		return fmt.Errorf("OIDC dependencies are required")
-	}
-	provider, err := oidc.NewProvider(ctx, cfg.OIDCIssuerURL)
-	if err != nil {
-		return fmt.Errorf("discover OIDC provider: %w", err)
+		return nil, fmt.Errorf("OIDC dependencies are required")
 	}
 	callback := strings.TrimRight(cfg.PublicURL, "/") + "/api/auth/oidc/callback"
-	h := &OIDCHandler{
-		cfg: cfg, provider: provider,
-		verifier: provider.Verifier(&oidc.Config{ClientID: cfg.OIDCClientID}),
-		oauth: oauth2.Config{
-			ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret,
-			Endpoint: provider.Endpoint(), RedirectURL: callback,
-			Scopes: []string{oidc.ScopeOpenID, "profile", "email", "groups"},
+	discovery := &OIDCDiscovery{
+		issuer: cfg.OIDCIssuerURL, timing: timing, done: make(chan struct{}),
+		build: func(provider *oidc.Provider) *oidcClient {
+			return &oidcClient{
+				verifier: provider.Verifier(&oidc.Config{ClientID: cfg.OIDCClientID}),
+				oauth: oauth2.Config{
+					ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret,
+					Endpoint: provider.Endpoint(), RedirectURL: callback,
+					Scopes: []string{oidc.ScopeOpenID, "profile", "email", "groups"},
+				},
+			}
 		},
+	}
+	err := discovery.attempt(ctx)
+	if err != nil && oidcConfigurationInvalid(err) {
+		return nil, fmt.Errorf("discover OIDC provider: %w", err)
+	}
+	h := &OIDCHandler{
+		cfg: cfg, discovery: discovery,
 		users: users, identities: identities, sessions: sessions, audit: audit,
 		limiter: appauth.NewKeyedLimiter(30, 15*time.Minute),
 	}
 	e.GET("/api/auth/oidc/start", h.Start)
 	e.GET("/api/auth/oidc/callback", h.Callback)
-	return nil
+	if err != nil {
+		slog.Warn("OIDC discovery failed at startup; retrying in the background", "issuer", cfg.OIDCIssuerURL, "err", err)
+		go discovery.run(ctx)
+	} else {
+		close(discovery.done)
+	}
+	return discovery, nil
+}
+
+func oidcUnavailable(c *echo.Context) error {
+	c.Response().Header().Set("Retry-After", oidcDiscoveryRetryAfter)
+	return echo.NewHTTPError(http.StatusServiceUnavailable, "OIDC sign-in is temporarily unavailable")
 }
 
 func (h *OIDCHandler) Start(c *echo.Context) error {
+	// Ahead of the limiter: retries during an outage must not spend the
+	// sign-in budget that is needed once the provider is back.
+	client := h.discovery.client()
+	if client == nil {
+		return oidcUnavailable(c)
+	}
 	if !h.limiter.Allow(c.RealIP()) {
 		return rateLimited(c, 15*time.Minute)
 	}
@@ -93,7 +123,7 @@ func (h *OIDCHandler) Start(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
 	}
 	challenge := sha256.Sum256([]byte(verifier))
-	redirect := h.oauth.AuthCodeURL(state,
+	redirect := client.oauth.AuthCodeURL(state,
 		oidc.Nonce(nonce),
 		oauth2.SetAuthURLParam("code_challenge", base64.RawURLEncoding.EncodeToString(challenge[:])),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
@@ -132,6 +162,10 @@ func (c oidcClaims) groupsUnreadable() bool {
 }
 
 func (h *OIDCHandler) Callback(c *echo.Context) error {
+	client := h.discovery.client()
+	if client == nil {
+		return oidcUnavailable(c)
+	}
 	ctx := c.Request().Context()
 	state, expectedNonce, pkceVerifier, returnTo := h.sessions.OIDCFlow(ctx)
 	if state == "" || subtle.ConstantTimeCompare([]byte(state), []byte(c.QueryParam("state"))) != 1 {
@@ -143,7 +177,7 @@ func (h *OIDCHandler) Callback(c *echo.Context) error {
 	if providerError := c.QueryParam("error"); providerError != "" {
 		return h.oidcDenied(c, "identity provider denied login")
 	}
-	token, err := h.oauth.Exchange(ctx, c.QueryParam("code"), oauth2.VerifierOption(pkceVerifier))
+	token, err := client.oauth.Exchange(ctx, c.QueryParam("code"), oauth2.VerifierOption(pkceVerifier))
 	if err != nil {
 		return h.oidcDenied(c, "code exchange failed")
 	}
@@ -151,7 +185,7 @@ func (h *OIDCHandler) Callback(c *echo.Context) error {
 	if !ok || rawIDToken == "" {
 		return h.oidcDenied(c, "missing ID token")
 	}
-	idToken, err := h.verifier.Verify(ctx, rawIDToken)
+	idToken, err := client.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		return h.oidcDenied(c, "invalid ID token")
 	}

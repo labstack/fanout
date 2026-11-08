@@ -24,6 +24,8 @@ type HealthHandler struct {
 	pool    readPool
 	cfg     config.Config
 	started time.Time
+	// oidc is nil outside OIDC mode.
+	oidc *OIDCDiscovery
 }
 
 type readPool interface {
@@ -121,6 +123,9 @@ collect:
 	resp.Checks["data"] = h.checkDataDir()
 	resp.Checks["maintenance"] = h.checkMaintenance()
 	resp.Checks["queries"] = h.checkQueries()
+	if h.oidc != nil {
+		resp.Checks["oidc"] = h.oidc.readiness()
+	}
 
 	// Determine overall status
 	hasUnhealthy := false
@@ -411,8 +416,9 @@ FROM rollup_state`).Scan(&updatedAt, &cacheCount, &ageSeconds)
 }
 
 // RegisterHealthRoutes registers health check endpoints
-func RegisterHealthRoutes(e *echo.Echo, duck *engine.Duck, cfg config.Config) {
+func RegisterHealthRoutes(e *echo.Echo, duck *engine.Duck, cfg config.Config, oidc *OIDCDiscovery) {
 	h := NewHealthHandler(duck, cfg)
+	h.oidc = oidc
 	e.GET("/healthz", h.Liveness)
 	e.GET("/readyz", h.Readiness)
 }
