@@ -20,7 +20,6 @@ Vendor credentials and endpoints keep the vendor's documented names.
 |---|---|---|
 | `FANOUT_AUTH_CODE_SECRET` or `FANOUT_AUTH_CODE_SECRET_FILE` | string · secret | — |
 | `FANOUT_AUTH_MODE` | string | `local` |
-| `FANOUT_FIRST_ADMIN_EMAIL` | string | — |
 | `FANOUT_OIDC_ADMIN_GROUPS` | string | — |
 | `FANOUT_OIDC_ALLOWED_DOMAINS` | string | — |
 | `FANOUT_OIDC_ALLOWED_GROUPS` | string | — |
@@ -45,10 +44,6 @@ Signs local sign-in codes; required in local mode with at least 32 characters.
 ### `FANOUT_AUTH_MODE`
 
 Selects local sign-in or oidc; each mode validates its prerequisites.
-
-### `FANOUT_FIRST_ADMIN_EMAIL`
-
-Creates this address as the first active administrator when the control database has no users, instead of printing the one-time setup URL; ignored once users exist.
 
 ### `FANOUT_OIDC_ADMIN_GROUPS`
 

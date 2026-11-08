@@ -14,9 +14,8 @@ import (
 const ingestKey = "ingest"
 
 // Ingest holds the ingest-auth configuration. TokenHash is set during
-// interactive first-admin setup, or issued and rotated from the Settings page
-// (the only path for an administrator created from FANOUT_FIRST_ADMIN_EMAIL); while unset,
-// the authorizer rejects all OTLP requests. Collectors
+// first-admin setup and rotatable from the Settings page; when unset
+// (pre-setup), the authorizer rejects all OTLP requests. Collectors
 // present the token via `Authorization: Bearer`.
 type Ingest struct {
 	TokenHash string `json:"token_hash"`
