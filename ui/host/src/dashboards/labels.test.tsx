@@ -37,7 +37,8 @@ it("uses shared labels for tables, legends, axes, tooltips and accessible descri
   expect(line.tooltip.formatter([{seriesName:line.series[0].name,value:[0,42]}])).toContain("p95 duration (ms)");
   const scatterResult: PanelResult = {...result,frame:{columns:[{name:"service",type:"string",role:"dimension"},{name:"avg_ms",type:"number",role:"measure",unit:"ms"},column],values:[["checkout_service"],[12],[42]],rows:1}};
   const scatter = analysisOption({...panel,viz:"scatter"},scatterResult,theme) as any;
-  expect(scatter.xAxis.name).toBe("Avg (ms)"); expect(scatter.yAxis.name).toBe("p95 duration (ms)");
+  // Duration ticks print the unit, so the axis names do not repeat it; the tooltip still does.
+  expect(scatter.xAxis.name).toBe("Avg"); expect(scatter.yAxis.name).toBe("p95 duration");
   expect(scatter.tooltip.formatter({seriesName:"Items",name:"checkout_service",value:[12,42]})).toContain("Avg (ms)");
   expect(analysisSummary(panel,scatterResult)).toContain("p95 duration (ms)");
   const bar = barOption({...panel,viz:"bar"},scatterResult.frame!,theme) as any;
