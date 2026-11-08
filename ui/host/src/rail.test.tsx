@@ -74,6 +74,32 @@ describe("Rail", () => {
     document.body.innerHTML = "";
   });
 
+  it("reaches existing chats and dashboards from the collapsed rail", async () => {
+    const { root, handlers, render } = mount({ collapsed: true });
+    await act(async () => render());
+    const open = async (label: string) => {
+      await act(async () => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click());
+      await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+    };
+    const item = (text: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === text);
+
+    await open("Chats");
+    await vi.waitFor(() => expect(item("Checkout latency")).toBeDefined());
+    expect(item("Checkout latency")!.getAttribute("aria-current")).toBe("page");
+    await act(async () => item("Checkout latency")!.click());
+    expect(handlers.onSelectThread).toHaveBeenCalledWith("thread-checkout");
+
+    await open("Dashboards");
+    await vi.waitFor(() => expect(item("Checkout")).toBeDefined());
+    await act(async () => item("Checkout")!.click());
+    expect(handlers.onSelectDashboard).toHaveBeenCalledWith("dash-checkout");
+
+    await open("Dashboards");
+    await act(async () => item("New dashboard")!.click());
+    expect(handlers.onNewDashboard).toHaveBeenCalledOnce();
+    await act(async () => root.unmount());
+  });
+
   it("lists chats and dashboards, marks the active rows, and selects", async () => {
     const { root, handlers, render } = mount();
     await act(async () => render());
@@ -86,7 +112,8 @@ describe("Rail", () => {
     expect(new URL(String(historyRequest?.[0]), "http://localhost").searchParams.get("page_size")).toBe("30");
 
     const activeRows = document.querySelectorAll('[aria-current="page"]');
-    expect(activeRows).toHaveLength(2);
+    expect(activeRows).toHaveLength(1);
+    expect(activeRows[0].textContent).toContain("System overview");
 
     const thread = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Checkout latency"));
     await act(async () => thread?.click());
@@ -99,6 +126,28 @@ describe("Rail", () => {
     const newChat = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim() === "New chat");
     await act(async () => newChat?.click());
     expect(handlers.onNewChat).toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it.each(["/settings", "/logs", "/traces"])("marks only the current route active on %s", async activePath => {
+    const {root, render} = mount({activePath});
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Checkout latency"));
+    const active = document.querySelectorAll('[aria-current="page"]');
+    expect(active).toHaveLength(1);
+    expect(active[0].getAttribute("href")).toBe(activePath);
+    expect(document.querySelectorAll('[data-active="true"]')).toHaveLength(1);
+    await act(async () => root.unmount());
+  });
+
+  it.each(["/chat/thread-checkout", "/dashboards/dash-main"])("keeps the matching record active on %s", async activePath => {
+    const {root, render} = mount({activePath});
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Checkout latency"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
+    const active = document.querySelectorAll('[aria-current="page"]');
+    expect(active).toHaveLength(1);
+    expect(active[0].textContent).toContain(activePath.startsWith("/chat/") ? "Checkout latency" : "System overview");
     await act(async () => root.unmount());
   });
 
@@ -147,15 +196,28 @@ describe("Rail", () => {
     await act(async () => root.unmount());
   });
 
+  it.each(["Commerce health", "Commerce health across every production service and deployment"])("keeps the full dashboard name available for %s", async name => {
+    fetchMock.mockImplementation(async (input, init) => new URL(String(input), "http://localhost").pathname === "/api/dashboards"
+      ? json({dashboards: [{id:"dash-main", name, is_default:true, version:1, panel_count:4}]}) : respond(input, init));
+    const {root, render} = mount();
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.querySelector('a[href="/dashboards/dash-main"] [title]')?.textContent).toBe(name));
+    const row = document.querySelector('a[href="/dashboards/dash-main"]')!;
+    expect(row.querySelector('[title]')?.getAttribute("title")).toBe(name);
+    expect(row.querySelector('[role="img"][aria-label="Default"]')).not.toBeNull();
+    await act(async () => root.unmount());
+  });
+
   it("marks only the default dashboard independently of the active dashboard", async () => {
     const { root, render } = mount({ activeDashboardID: "dash-checkout" });
     await act(async () => render());
     await vi.waitFor(() => expect(document.querySelector('a[href="/dashboards/dash-main"]')).not.toBeNull());
     const defaultRow = document.querySelector('a[href="/dashboards/dash-main"]');
     const activeRow = document.querySelector('a[href="/dashboards/dash-checkout"]');
-    expect(defaultRow?.textContent).toContain("Default");
+    expect(defaultRow?.querySelector('[role="img"][aria-label="Default"]')).not.toBeNull();
+    expect(defaultRow?.querySelector('[title="System overview"]')?.textContent).toBe("System overview");
     expect(defaultRow?.getAttribute("aria-current")).toBeNull();
-    expect(activeRow?.textContent).not.toContain("Default");
+    expect(activeRow?.querySelector('[role="img"][aria-label="Default"]')).toBeNull();
     expect(activeRow?.getAttribute("aria-current")).toBe("page");
     await act(async () => root.unmount());
   });
@@ -367,7 +429,7 @@ describe("Rail", () => {
     const before=fetchMock.mock.calls.filter(([input])=>String(input)==='/api/dashboards').length;
     await act(async()=>document.querySelector<HTMLButtonElement>('button[aria-label="Actions for Checkout latency"]')!.click());
     await act(async()=>[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(el=>el.textContent?.includes('Delete'))!.click());
-    await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(el=>el.textContent?.trim()==='Delete')!.click());
+    await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(el=>el.textContent?.trim()==='Delete chat')!.click());
     await vi.waitFor(()=>expect(document.querySelector('[data-request-provenance]')).toBeNull());expect(fetchMock.mock.calls.filter(([input])=>String(input)==='/api/dashboards').length).toBeGreaterThan(before);expect(document.body.textContent).not.toContain('Private request');
     }finally{await act(async()=>root.unmount());}
   });
@@ -390,7 +452,7 @@ describe("Rail", () => {
     await act(async () => openActions().click());
     const remove = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((item) => item.textContent?.includes("Delete"));
     await act(async () => remove?.click());
-    const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find((button) => button.textContent?.trim() === "Delete");
+    const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find((button) => button.textContent?.trim() === "Delete chat");
     await act(async () => confirm?.click());
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true));
     expect(handlers.onDeletedThread).toHaveBeenCalledWith("thread-checkout");

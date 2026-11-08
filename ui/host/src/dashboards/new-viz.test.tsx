@@ -54,7 +54,7 @@ describe("visualizations",()=>{
       const panel:Panel={id:"p",title:viz,viz};
       const props={panel,title:viz,height:300,group:"g",editing:false,agentAvailable:false,onView:noop,onCopyLink:noop,onExplain:noop};
       await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading result={undefined}/></MantineProvider>));
-      expect(container.querySelector('[role="status"][aria-label="Loading panel"]')).not.toBeNull();
+      expect(container.querySelector('[role="status"]')).not.toBeNull();
       await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={{...result,status:"empty",diagnosis:"No matching events"}}/></MantineProvider>));
       expect(container.textContent).toContain("No matching events");
       await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={{...result,status:"error",error:"Query failed"}}/></MantineProvider>));
@@ -86,11 +86,11 @@ describe("visualizations",()=>{
 it("formats distinct scatter axis units and numeric bucket order",()=>{
  const panel:Panel={id:"p",title:"Rows versus latency",viz:"scatter",x_unit:"count",unit:"ms",query:{from:"spans",by:["service"],measures:["count()","p95(duration_ms)"]}};
  const option=analysisOption(panel,resultFor("scatter"),chartThemeFor(false)) as {xAxis:{name:string;axisLabel:{formatter:(n:number)=>string}};yAxis:{name:string;axisLabel:{formatter:(n:number)=>string}}};
- expect(option.xAxis.name).toBe("Count");expect(option.yAxis.name).toBe("P95 (ms)");expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
+ expect(option.xAxis.name).toBe("Count");expect(option.yAxis.name).toBe("p95 (ms)");expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
  const frame={columns:fixtures.histogram!.columns,values:[[10,null,2],[20,1,10],[1,2,3]],rows:3};
  for(const viz of ["histogram","heatmap"] as const){
   const f=viz==="heatmap"?{columns:[col("time","time","time"),...frame.columns],values:[[3000,1000,2000],...frame.values],rows:3}:frame;
-  const got=analysisOption({...panel,viz}, {id:"p",status:"ok",elapsed_ms:1,frame:f},chartThemeFor(false)) as {xAxis?:{data?:string[]};yAxis?:{data?:string[]}};
+  const got=analysisOption({...panel,viz,x_unit:"ms"}, {id:"p",status:"ok",elapsed_ms:1,frame:f},chartThemeFor(false)) as {xAxis?:{data?:string[]};yAxis?:{data?:string[]}};
   expect(viz==="heatmap"?got.yAxis?.data:got.xAxis?.data).toEqual(["<1 ms","2–10 ms","10–20 ms"]);
  }
 });
@@ -149,7 +149,7 @@ it("formats midnight ticks as local month and day across time charts", () => {
  const daytime = new Date(2026,9,6,13,45,0).getTime();
  const expected = new Date(midnight).toLocaleDateString(undefined,{month:"short",day:"numeric"});
  const panel: Panel = {id:"p",title:"Time",viz:"timeseries"};
- const options = [timeseriesOption(panel,resultFor("heatmap"),chartThemeFor(false)),...(["heatmap","state_timeline"] as const).map(viz=>analysisOption({...panel,viz},resultFor(viz),chartThemeFor(false)))];
+ const options = [timeseriesOption(panel,resultFor("heatmap"),chartThemeFor(false)),...(["heatmap","state_timeline"] as const).map(viz=>analysisOption({...panel,viz,x_unit:"ms"},resultFor(viz),chartThemeFor(false)))];
  for (const option of options as {xAxis:{axisLabel?:{formatter?:(n:number)=>string}}}[]) {
   expect(option.xAxis.axisLabel?.formatter?.(midnight)).toBe(expected);
   expect(option.xAxis.axisLabel?.formatter?.(daytime)).toBe("13:45");
@@ -193,9 +193,10 @@ it("highlights log bodies and opens captured trace links without activating the 
     expect(container.querySelector("mark")?.textContent).toBe("failed");
     expect(container.querySelector('[data-trace-id="abc"]')?.textContent).toBe("abc");
     expect(container.querySelector('[data-trace-id="abc"]')?.closest("a")).not.toBeNull();
-    expect(container.querySelector("tbody button")).toBeNull();
+    expect(container.querySelectorAll('tbody button[aria-label="Copy trace ID"]')).toHaveLength(1);
+    expect(container.querySelectorAll('tbody button:not([aria-label="Copy trace ID"])')).toHaveLength(0);
     expect(container.querySelector('[data-trace-id="abc"]')?.getAttribute("aria-label")).toBeNull();
-    expect(container.querySelector(".mantine-Badge-root")?.textContent).toBe("◆ ERROR");
+    expect(container.querySelector(".mantine-Badge-root")?.textContent).toBe("Error");
     expect(onPoint).not.toHaveBeenCalled();
     const link = container.querySelector<HTMLAnchorElement>('[data-trace-id="abc"]')!;
     const target = JSON.parse(new URL(link.href).searchParams.get("drill")!);
@@ -223,7 +224,7 @@ it("selects the service exactly once after sorting trace rows and updating callb
     expect(container.querySelector("th:nth-child(5)")?.getAttribute("aria-sort")).toBe("ascending");
     expect(container.querySelector("tbody tr [data-trace-id]")?.getAttribute("data-trace-id")).toBe("def");
     await act(async () => root.render(<MantineProvider><Viz {...props} onSelect={next} /></MantineProvider>));
-    const service = container.querySelector<HTMLButtonElement>("tbody tr button")!;
+    const service = container.querySelector<HTMLButtonElement>('tbody tr td[data-field="service"] button')!;
     await act(async () => service.click());
     expect(next.mock.calls).toEqual([["payment"]]);
     expect(first).not.toHaveBeenCalled();

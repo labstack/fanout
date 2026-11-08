@@ -3,9 +3,9 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { MantineProvider } from "@mantine/core";
 import { router } from "./router";
-import { fanoutTheme } from "./theme";
-import { fanoutCssVariables } from "../../theme";
+import { fanoutTheme, fanoutCssVariables } from "../../theme";
 import "@mantine/core/styles.css";
+import "@labstack/ui/styles.css";
 // The typeface is shipped rather than named: one variable file per family
 // covers every weight the app uses.
 import "@fontsource-variable/geist";

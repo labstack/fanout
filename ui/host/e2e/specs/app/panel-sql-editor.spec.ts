@@ -42,11 +42,14 @@ test("cancel discards SQL edits without creating a version", async ({ page, requ
     const dialog = await openSqlEditor(page);
     await dialog.getByRole("textbox", { name: "Panel SQL" }).fill(editedSQL);
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-    await expect(dialog.getByText("Discard changes?", { exact: true })).toBeVisible();
-    await dialog.getByRole("button", { name: "Keep editing", exact: true }).click();
+    // Discarding asks in its own dialog over the editor.
+    const confirm = page.getByRole("dialog", { name: "Discard changes?", exact: true });
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole("button", { name: "Keep editing", exact: true }).click();
+    await expect(confirm).toBeHidden();
     await expect(dialog.getByRole("textbox", { name: "Panel SQL" })).toHaveText(editedSQL);
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-    await dialog.getByRole("button", { name: "Discard changes", exact: true }).click();
+    await confirm.getByRole("button", { name: "Discard changes", exact: true }).click();
     await expect(dialog).toBeHidden();
     const response = await request.get(`/api/dashboards/${record.id}`);
     const next = await response.json();

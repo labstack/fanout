@@ -1,1 +1,0 @@
-function e(e,t){return n=>{if(typeof n!=`string`||n.trim().length===0)throw Error(t);return`${e}-${n}`}}export{e as t};

@@ -60,7 +60,7 @@ describe("AuthGate OAuth return", () => {
     await act(async () => root.unmount());
   });
 
-  it("explains viewer account creation when local self-signup is enabled", async () => {
+  it("tells new visitors that email sign-in creates an account when self-signup is enabled", async () => {
     window.happyDOM.setURL("https://fanout.example.com/");
     fetchMock.mockImplementation(async (input) => {
       const path = String(input);
@@ -78,8 +78,8 @@ describe("AuthGate OAuth return", () => {
       </MantineProvider>,
     ));
 
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in or create an account"));
-    expect(document.body.textContent).toContain("create a viewer account");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in to Fanout"));
+    expect(document.body.textContent).toContain("New here? This creates your account.");
     await act(async () => root.unmount());
   });
 
@@ -271,23 +271,18 @@ describe("AuthGate OAuth return", () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(email, "v@example.com");
       email.dispatchEvent(new InputEvent("input", { bubbles: true, data: "v@example.com", inputType: "insertText" }));
     });
-    const send = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
+    const send = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Continue with email"));
     await act(async () => send?.click());
     await vi.waitFor(() => expect(posts.map((post) => post.path)).toEqual(["/api/auth/code/send"]));
     expect(document.body.textContent).toContain("Check your email");
-    expect(document.body.textContent).toContain("We sent a code to v@example.com");
-    expect(document.body.textContent).toContain("Sent to v@example.com");
+    expect(document.body.textContent).toContain("Enter the code sent to v@example.com");
     expect(document.body.textContent).toContain("Codes expire in 5 minutes");
 
-    const resend = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"));
-    expect(resend?.disabled).toBe(true);
-    expect(resend?.textContent).toMatch(/Resend in \d+s/);
+    expect(document.body.textContent).toContain("Resend in 0:30");
+    expect(Array.from(document.querySelectorAll<HTMLButtonElement>("button")).some(button => button.textContent === "Resend code")).toBe(false);
     await act(async () => { vi.advanceTimersByTime(31_000); });
-    await vi.waitFor(() => expect(Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"))?.disabled).toBe(false));
-    const armed = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"));
-    expect(armed?.textContent).toBe("Resend code");
+    await vi.waitFor(() => expect(Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(button => button.textContent === "Resend code")?.disabled).toBe(false));
     await act(async () => { vi.advanceTimersByTime(5_000); });
-    expect(Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"))?.textContent).toBe("Resend code");
     expect(vi.getTimerCount()).toBe(0);
 
     const change = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Change email"));
@@ -295,7 +290,7 @@ describe("AuthGate OAuth return", () => {
     expect((document.querySelector('input[type="email"]') as HTMLInputElement).disabled).toBe(false);
     expect(document.querySelectorAll('input[inputmode="numeric"]')).toHaveLength(0);
 
-    const resend2 = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
+    const resend2 = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Continue with email"));
     await act(async () => resend2?.click());
     await vi.waitFor(() => expect(posts.map((post) => post.path)).toEqual(["/api/auth/code/send", "/api/auth/code/send"]));
 
@@ -346,13 +341,14 @@ describe("AuthGate OAuth return", () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(email, "v@example.com");
       email.dispatchEvent(new InputEvent("input", { bubbles: true, data: "v@example.com", inputType: "insertText" }));
     });
-    const send = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
+    const send = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Continue with email"));
     await act(async () => send?.click());
     await vi.waitFor(() => expect(document.body.textContent).toContain("Check your email"));
 
     const verify = () => Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Verify code"));
     expect(verify()).toBeDefined();
-    expect(verify()?.disabled).toBe(true);
+    await act(async () => verify()?.click());
+    expect(posts.filter(post => post.path === "/api/auth/code/verify")).toHaveLength(0);
 
     const cells = Array.from(document.querySelectorAll<HTMLInputElement>('input[inputmode="numeric"]'));
     expect(cells).toHaveLength(6);

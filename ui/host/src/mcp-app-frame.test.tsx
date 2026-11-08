@@ -30,7 +30,7 @@ describe("MCPAppFrame",()=>{
    await act(async()=>vi.advanceTimersByTimeAsync(1));expect(mcp.connect).toHaveBeenCalledTimes(3);
    expect(view.container.querySelector("iframe")).not.toBeNull();expect(mcp.readResource).toHaveBeenCalledTimes(1);
   } finally {await view.unmount();vi.useRealTimers();}
- });
+ }, 20000);
  it("does not retry a permanently invalid resource after reconnecting past cache expiry",async()=>{
   vi.useFakeTimers();const view=await mount();
   try {

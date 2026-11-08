@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { chart, series } from "../../../tokens";
+import { contrastRatio } from "@labstack/ui";
+import { chart, series } from "../../../theme";
 
 type Triple = [number, number, number];
 type Mode = "normal" | "protan" | "deutan" | "tritan";
@@ -126,4 +127,63 @@ it("reports transformed surface contrast and rejects malformed or translucent he
   expect(measured.surface_contrast).toHaveLength(6);
   expect(measured.surface_contrast[0].normal).toBeCloseTo(21);
   expect(measurePalette(Array(6).fill(chart.dark.surface), chart.dark.surface).surface_contrast[0].deutan).toBe(1);
+});
+
+it.each(["light", "dark"] as const)("checks all fifteen slot pairs and the %s chart surface", scheme => {
+  const colors = series[scheme];
+  const distances: number[] = [];
+  for (let a = 0; a < colors.length; a++) {
+    expect(contrastRatio(colors[a], chart[scheme].surface)).toBeGreaterThanOrEqual(3);
+    for (let b = a + 1; b < colors.length; b++) distances.push(distance(lab(decode(colors[a])), lab(decode(colors[b]))));
+  }
+  expect(distances).toHaveLength(15);
+  // The retained dark blue/violet pair is the closest, at 9.76. Adjacent
+  // slots retain the stricter 15 normal / 6 CVD thresholds above.
+  expect(Math.min(...distances)).toBeGreaterThanOrEqual(9.7);
+  console.log(`${scheme} minimum all-pairs OKLab distance: ${Math.min(...distances).toFixed(2)}`);
+});
+
+type LCH = { l: number; c: number; h: number };
+function oklch(rgb: Triple): LCH {
+  const [l, a, b] = lab(rgb);
+  return { l, c: Math.hypot(a, b), h: (Math.atan2(b, a) * 180 / Math.PI + 360) % 360 };
+}
+const hueGap = (a: number, b: number) => { const delta = Math.abs(a - b) % 360; return Math.min(delta, 360 - delta); };
+// Identity marks stay in the middle lightness range; ink and highlights have
+// other roles. Apply these bounds and main's chroma floor to every slot.
+function identityColorFailures(candidate: LCH): string[] {
+  const failures: string[] = [];
+  if (candidate.l < .4 || candidate.l > .75) failures.push("lightness");
+  if (candidate.c < .10) failures.push("chroma");
+  return failures;
+}
+
+it.each(["light", "dark"] as const)("keeps every %s series chromatic and away from ink and highlights", scheme => {
+  for (const color of series[scheme]) expect(identityColorFailures(oklch(decode(color))), color).toEqual([]);
+});
+
+it("rejects former lightness extremes and neutral ink as series colors", () => {
+  for (const hex of ["#ffffaf", "#000033"]) expect(identityColorFailures(oklch(decode(hex)))).toContain("lightness");
+  for (const hex of ["#808080", "#111113", "#EDEDEF"]) expect(identityColorFailures(oklch(decode(hex)))).toContain("chroma");
+});
+
+it("enforces identity lightness and chroma boundaries independently", () => {
+  const candidate = { l: .6, c: .15, h: 210 };
+  const check = (change: Partial<LCH>) => identityColorFailures({ ...candidate, ...change });
+  expect(check({ l: .4 })).toEqual([]);
+  expect(check({ l: .75 })).toEqual([]);
+  expect(check({ l: .399999 })).toEqual(["lightness"]);
+  expect(check({ l: .750001 })).toEqual(["lightness"]);
+  expect(check({ c: .10 })).toEqual([]);
+  expect(check({ c: .099999 })).toEqual(["chroma"]);
+});
+
+const sameHueFamily = (dark: string, light: string) => hueGap(oklch(decode(dark)).h, oklch(decode(light)).h) < 30;
+it("preserves each series slot's hue family between schemes", () => {
+  series.dark.forEach((color, slot) => expect(sameHueFamily(color, series.light[slot]), `slot ${slot + 1}`).toBe(true));
+});
+it("rejects a series that changes from magenta to olive across schemes", () => {
+  expect(sameHueFamily("#b350b1", "#6e6200")).toBe(false);
+  expect(hueGap(359, 24)).toBe(25);
+  expect(hueGap(24, 359)).toBe(25);
 });

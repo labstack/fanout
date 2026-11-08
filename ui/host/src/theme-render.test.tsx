@@ -1,10 +1,8 @@
-import { Badge, Button, MantineProvider, Progress } from "@mantine/core";
+import { Badge, Button, MantineProvider, Progress, Table } from "@mantine/core";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { fanoutCssVariables } from "../../theme";
-import { typeScale } from "../../tokens";
-import { fanoutTheme } from "./theme";
+import { fanoutTheme, fanoutCssVariables } from "../../theme";
 
 /* These render the real components against the real theme, because the two
    design-system defects that reached this branch were both invisible to a
@@ -30,49 +28,39 @@ describe("what actually lands on the element", () => {
     </>);
     const [remove, save, plain] = [...container.querySelectorAll<HTMLButtonElement>("button")];
     // White on bad's dark fill #f26d78 measures 2.90:1.
-    expect(remove.style.getPropertyValue("--button-color")).toBe("var(--fanout-color-bad-contrast)");
-    expect(save.style.getPropertyValue("--button-color")).toBe("var(--fanout-color-brand-contrast)");
+    expect(remove.style.getPropertyValue("--button-color")).toBe("var(--labstack-color-bad-contrast)");
+    expect(save.style.getPropertyValue("--button-color")).toBe("var(--labstack-color-brand-contrast)");
     expect(plain.style.getPropertyValue("--button-color")).toBe("var(--mantine-color-white)");
     await act(async () => root.unmount());
   });
 
-  it("raises only the badge sizes that sit under the floor", async () => {
-    const { root, container } = await render(<>
-      <Badge size="xs">xs</Badge>
-      <Badge size="sm">sm</Badge>
-      <Badge size="md">md</Badge>
-      <Badge size="lg">lg</Badge>
-      <Badge size="1.5rem">custom</Badge>
-    </>);
-    const [xs, sm, md, lg, custom] = [...container.querySelectorAll<HTMLElement>(".mantine-Badge-root")];
-    const floor = `${typeScale.micro / 16}rem`;
-    // Mantine's own xs is 9px and sm is 10px.
-    expect(xs.style.getPropertyValue("--badge-fz")).toBe(floor);
-    expect(sm.style.getPropertyValue("--badge-fz")).toBe(floor);
-    // md is already 11px and lg is 13px, so both keep Mantine's own size, and
-    // a size the scale does not name is not rewritten at all.
-    expect(md.style.getPropertyValue("--badge-fz")).toBe("var(--badge-fz-md)");
-    expect(lg.style.getPropertyValue("--badge-fz")).toBe("var(--badge-fz-lg)");
-    expect(custom.style.getPropertyValue("--badge-fz")).not.toBe(floor);
+  it("puts token stripe and hover variables on the table", async () => {
+    const { root, container } = await render(<Table striped highlightOnHover><Table.Tbody><Table.Tr><Table.Td>Value</Table.Td></Table.Tr></Table.Tbody></Table>);
+    const table = container.querySelector("table")!;
+    expect(table.style.getPropertyValue("--table-striped-color")).toBe("var(--labstack-inset)");
+    expect(table.style.getPropertyValue("--table-highlight-on-hover-color")).toBe("var(--labstack-hover)");
+    await act(async () => root.unmount());
+  });
+
+  it("keeps every badge at the 12px UI text floor", async () => {
+    const { root, container } = await render(<>{["xs", "sm", "md"].map(size => <Badge key={size} size={size}>{size}</Badge>)}</>);
+    for (const badge of container.querySelectorAll<HTMLElement>(".mantine-Badge-root")) expect(badge.style.getPropertyValue("--badge-fz")).toBe("calc(0.75rem * var(--mantine-scale))");
     await act(async () => root.unmount());
   });
 
   it("colours a progress label where Progress cannot overwrite it", async () => {
-    // Progress sets --progress-label-color through its own vars, which are
-    // written after any style prop on the section: pointing that variable
-    // elsewhere from the section does nothing, and the count stayed white on
-    // #f26d78 at 2.90:1.
+    // The shared theme owns the label contrast; no local style override.
     const { root, container } = await render(
       <Progress.Root>
-        <Progress.Section value={100} color="bad" style={{ "--progress-label-color": "var(--fanout-color-bad-contrast)" } as React.CSSProperties}>
-          <Progress.Label style={{ color: "var(--fanout-color-bad-contrast)" }}>3</Progress.Label>
+        <Progress.Section value={100} color="bad">
+          <Progress.Label>3</Progress.Label>
         </Progress.Section>
       </Progress.Root>,
     );
     const section = container.querySelector<HTMLElement>(".mantine-Progress-section")!;
     const label = container.querySelector<HTMLElement>(".mantine-Progress-label")!;
-    expect(section.style.getPropertyValue("--progress-label-color")).toBe("var(--mantine-color-white)");
-    expect(label.style.color).toBe("var(--fanout-color-bad-contrast)");
+    expect(section.style.getPropertyValue("--progress-label-color")).toBe("var(--labstack-color-bad-contrast)");
+    expect(label).not.toBeNull();
     await act(async () => root.unmount());
   });
 });

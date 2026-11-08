@@ -1,3 +1,4 @@
+import { themeAlias } from "./build/theme.ts";
 import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
@@ -6,6 +7,7 @@ import { reviewWidths } from "./.storybook/viewports.ts";
 const cells = process.env.VITEST_STORYBOOK === "true" ? [undefined] : Object.keys(reviewWidths).flatMap(viewport => ["light", "dark"].map(colorScheme => ({ viewport, colorScheme })));
 
 export default defineConfig({
+  resolve: { alias: themeAlias },
   test: {
     maxWorkers: 1,
     fileParallelism: false,

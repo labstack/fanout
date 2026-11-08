@@ -12,11 +12,11 @@
    defined until MantineProvider runs — so the function would resolve to its
    light argument every time. */
 html {
-  background: #fcfcfc;
+  background: #F5F5F6;
 }
 
 html[data-mantine-color-scheme="dark"] {
-  background: #0b0e14;
+  background: #0B0B0C;
 }
 
 /* Headings share the body grotesk; a touch of negative tracking at display
@@ -38,13 +38,13 @@ body,
 }
 
 .chat-composer-field {
-  background: var(--mantine-color-body);
+  background: var(--labstack-raised);
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .chat-composer-field:focus-within {
-  border-color: var(--mantine-primary-color-filled);
-  box-shadow: 0 0 0 2px var(--mantine-primary-color-light);
+  --composer-border: var(--labstack-focus);
+  box-shadow: 0 0 0 2px var(--labstack-focus);
 }
 
 .rail-row {
@@ -56,8 +56,12 @@ body,
   background: var(--mantine-color-default-hover);
 }
 
-.rail-row[data-active] {
-  background: var(--mantine-primary-color-light);
+/* Current page: tinted fill and accent text, as in most consoles. A left bar on
+   a rounded row curves into a bracket, so the row carries no edge mark. */
+.rail-row[data-active],
+.rail-row[data-active]:hover {
+  color: var(--mantine-color-accent-text);
+  background: var(--mantine-color-accent-light);
 }
 
 .rail-row-actions {
@@ -190,7 +194,7 @@ body,
 .chat-app-chevron { display: flex; align-items: center; flex: none; }
 .chat-app-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-app-toggle:hover { background: var(--mantine-color-default-hover); }
-.chat-app-toggle:focus-visible { outline: 2px solid var(--mantine-primary-color-filled); outline-offset: -2px; }
+.chat-app-toggle:focus-visible { outline: 2px solid var(--labstack-focus); outline-offset: -2px; }
 
 /* Keyboard users can jump past the header and navigation; the link shows
    only while focused. */
@@ -209,3 +213,22 @@ body,
 .skip-link:focus {
   transform: none;
 }
+
+.mantine-AppShell-main { background: var(--mantine-color-body); }
+/* Keyboard focus only (:focus-visible); a mouse click leaves no ring behind. */
+.rail-row:has(:focus-visible) { outline: 2px solid var(--labstack-focus); outline-offset: -2px; }
+.rail-row .mantine-UnstyledButton-root:focus-visible { outline: none; }
+
+.mantine-Table-td:is([data-field$="_id"], [data-field="time"], [data-field="start"]) { font-family: var(--mantine-font-family-monospace); font-size: inherit; }
+.chat-table td[align="right"], .panel-markdown td[align="right"] { font-family: var(--mantine-font-family-monospace); text-align: right; }
+
+/* The composer owns the focus indicator for its complete input/action group. */
+.chat-composer-field .mantine-Textarea-input,
+.chat-composer-field .mantine-Textarea-input:focus,
+.chat-composer-field .mantine-Textarea-input:focus-visible {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  padding: 6px 8px;
+}
+

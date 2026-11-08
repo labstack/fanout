@@ -92,7 +92,7 @@ it("formats error-rate status badges with the measure unit and keeps the status 
  const panel: Panel = { ...formattedPanel, options: { columns: [{ field: "error_rate", format: "status" }] }, thresholds: [{ value: 1, status: "bad" }] };
  const frame: Frame = { columns: [{ name: "error_rate", type: "number", role: "measure", unit: "percent" }], values: [[1.2746]], rows: 1 };
  const {host} = await render(<TableViz panel={panel} result={{...result,frame}} height={200}/>);
- expect(host.querySelector("tbody td")?.textContent).toBe("◆ 1.27%");
+ expect(host.querySelector("tbody td")?.textContent).toBe("1.27%");
  expect(columnDisplay({field:"error_rate",format:"status",unit:"percent"},1.2746,0,panel).text).toBe("1.27%");
 });
 
@@ -101,7 +101,7 @@ it("pairs a formatted row value with its sparkline", async () => {
  const frame: Frame = {columns:[{name:"latency",type:"number",role:"measure",unit:"ms"}],values:[[900]],rows:1,trends:{latency:[[1,2,3]]}};
  const {host} = await render(<TableViz panel={panel} result={{...result,frame}} height={200}/>);
  const cell = host.querySelector("tbody td");
- expect(cell?.textContent).toContain("900ms");
+ expect(cell?.textContent).toContain("900 ms");
  expect(cell?.querySelector('svg[role="img"]')).not.toBeNull();
 });
 
@@ -118,11 +118,11 @@ it("renders all formats safely and keeps trends and current callbacks aligned af
  const props={panel:formattedPanel,result:{...result,frame:formattedFrame},height:300,onPoint,onVariable,onSelect};
  const {host,rerender}=await render(<TableViz {...props}/>);
  expect(host.querySelectorAll('svg[role="img"]')).toHaveLength(2);
- expect(host.querySelector("tbody svg path")?.getAttribute("d")).toBe("M0.0,30.0M200.0,2.0");
+ expect(host.querySelector('tbody svg[role="img"] path')?.getAttribute("d")).toBe("M0.0,30.0M200.0,2.0");
  expect(host.querySelector("tbody tr td:nth-child(4)")?.textContent).toBe("3");
  expect(host.querySelector<HTMLElement>("tbody tr td:nth-child(4) div div div")?.style.width).toBe("50%");
- expect(host.querySelector("tbody tr td:nth-child(5)")?.textContent).toBe("◆ 12");
- expect(host.querySelector("tbody tr td:nth-child(6)")?.textContent).toBe("900ms");
+ expect(host.querySelector("tbody tr td:nth-child(5)")?.textContent).toBe("12");
+ expect(host.querySelector("tbody tr td:nth-child(6)")?.textContent).toBe("900 ms");
  expect(host.querySelector("tbody tr:nth-child(2) td:nth-child(6)")?.textContent).toBe("—");
  expect([...host.querySelectorAll("[data-template-chip]")].map(mark=>mark.textContent)).toEqual(["<*>","<*>","<*>"]);
  expect(host.querySelector("img,script")).toBeNull();
@@ -130,7 +130,7 @@ it("renders all formats safely and keeps trends and current callbacks aligned af
  await act(async()=>host.querySelector<HTMLButtonElement>("th:nth-child(3) button")!.click());
  await act(async()=>host.querySelector<HTMLButtonElement>("th:nth-child(3) button")!.click());
  expect(host.querySelector("tbody tr td")?.textContent).toBe("payment");
- expect(host.querySelector("tbody svg path")?.getAttribute("d")).toBe("M0.0,30.0L100.0,16.0L200.0,2.0");
+ expect(host.querySelector('tbody svg[role="img"] path')?.getAttribute("d")).toBe("M0.0,30.0L100.0,16.0L200.0,2.0");
  const nextPoint=vi.fn(),nextVariable=vi.fn();
  await rerender(<TableViz {...props} onPoint={nextPoint} onVariable={nextVariable}/>);
  const link=host.querySelector<HTMLAnchorElement>("tbody tr a")!;

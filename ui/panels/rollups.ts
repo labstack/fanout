@@ -1,3 +1,4 @@
+import { percent } from "../format";
 import type { Cell, Frame, PanelResult, Status } from "./types";
 
 export const healthGlyph: Record<string, string> = { healthy: "●", degraded: "■", unhealthy: "◆", unknown: "○" };
@@ -41,6 +42,6 @@ export function worstHealthServices(rows: Record<string,Cell>[]) {
     const n=Math.max(0,number(r.spans)??0),error=number(r.error_rate);
     const eligible=n>=20&&error!==null;
     return {name:String(r.service),health:String(r.health??"unknown"),n,eligible,
-      score:eligible?wilson(error!,n):0,metric:error!==null?`${error.toFixed(1)}%`:"—"};
+      score:eligible?wilson(error!,n):0,metric:error!==null?percent(error / 100):"—"};
   }).sort((a,b)=>Number(b.eligible)-Number(a.eligible)||(a.eligible?b.score-a.score:0)||b.n-a.n||order(a.name,b.name)).slice(0,4);
 }

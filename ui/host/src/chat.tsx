@@ -1,5 +1,6 @@
+import { DataState, Notice, PageHeader, labstackContentWidths } from "@labstack/ui";
 import type { Message } from "@ag-ui/client";
-import { ActionIcon, Alert, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Box, Button, Container, Group, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
 import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight, ArrowDown } from "@phosphor-icons/react";
 import { lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
@@ -125,9 +126,9 @@ function ChatAppView({ view }: { view: AppView }) {
   const status = fragment.dashboard.panels.length>1
     ? Array.from(counts,([status,count])=>`${count} ${status}`).join(" · ")
     : counts.size ? [...counts.keys()].join(", ") : `${rows} ${rows === 1 ? "row" : "rows"}`;
-  return <Paper data-chat-app data-chat-anchor withBorder radius="lg" style={{ overflow: "hidden" }}>
+  return <Paper data-chat-app data-chat-anchor withBorder radius="md" style={{ overflow: "hidden" }}>
     <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><span className="chat-app-chevron" aria-hidden="true">{expanded ? <CaretDown size={14} /> : <CaretRight size={14} />}</span><span className="chat-app-summary">{[title, viz, status].filter(Boolean).join(" · ")}</span></UnstyledButton>
-    {expanded && <Suspense fallback={<Center mih={180}><Loader size="sm" /></Center>}><MCPAppFrame content={view.content} /></Suspense>}
+    {expanded && <Suspense fallback={<DataState state="loading" loadingLabel="Preparing view…" />}><MCPAppFrame content={view.content} /></Suspense>}
   </Paper>;
 }
 
@@ -143,7 +144,7 @@ export function ChatPage() {
   const receipts = useDashboardReceipts(messages);
   const lastSent = messages.filter((message) => message.role === "user").at(-1)?.id;
   const { scrollRef, contentRef, turnRef, showJump, jumpToLatest } = useTurnAnchor<HTMLDivElement, HTMLDivElement>(lastSent);
-  if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1} fz={28}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
+  if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="md" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><PageHeader title="Chat" description="Chat is not configured" /><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
   const appViews = chatAppViews(messages);
   const failures = toolFailures(messages);
   const visibleMessages = messages.filter((message) => {
@@ -173,19 +174,20 @@ export function ChatPage() {
       {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} running={running && message.id === lastSent} awaitingAnswer={!hasFinalText} activity={activity} /></Box>}
     </Box>;
   return <Box className="chat-pane">
+    <Container size={880} w="100%" px={{ base: "md", sm: "xl" }} py="md"><PageHeader title="Chat" description="Investigate your telemetry with Fanout." /></Container>
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
         scroller focusable only when it holds no focusable children, and this
         one holds copy buttons and links, so it says so itself. */}
     <Box className="chat-viewport">
       <Box className="chat-scroll" ref={scrollRef} tabIndex={0} role="log" aria-label="Conversation">
         <Container size={880} px={{ base: "md", sm: "xl" }} py="lg" ref={contentRef}>
-          {threadMissing && <Alert color="warn" radius="lg" title="This chat no longer exists"><Group justify="space-between"><Text size="sm">It was deleted, or the link is wrong.</Text><Button size="compact-sm" variant="light" onClick={newThread}>New chat</Button></Group></Alert>}
+          {threadMissing && <Notice tone="warning" title="This chat no longer exists"><Group justify="space-between"><Text size="sm">It was deleted, or the link is wrong.</Text><Button size="compact-sm" variant="light" onClick={newThread}>New chat</Button></Group></Notice>}
           {/* A thread whose load failed never becomes ready, so showing the
               loader here would spin forever: state the failure instead. Retry
               here asks the server for the thread again; there is no run to
               retry, because the conversation never arrived. */}
           {!threadMissing && !ready && error && <RunError message={error} onRetry={reloadThread} onNewThread={newThread} />}
-          {!threadMissing && !ready && !error && <Center mih="40vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading chat</Text></Center>}
+          {!threadMissing && !ready && !error && <DataState state="loading" loadingLabel="Loading chat" rows={5} />}
           {!threadMissing && ready && <>
             {visibleMessages.length === 0 && <Welcome onSelect={send} />}
             <Stack gap="lg">
@@ -195,7 +197,7 @@ export function ChatPage() {
                   {answer && <Box data-answer-position key={`answer-${lastSent ?? "draft"}`}>
                     <ChatMessage message={answer!} time={messageTimes[answer!.id]} />
                   </Box>}
-                  {running && !hasFinalText && !receipts.has(lastSent ?? "") && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
+                  {running && !hasFinalText && !receipts.has(lastSent ?? "") && <DataState state="loading" loadingLabel={activity || "Analyzing your system"} rows={0} />}
                   {stopped && <Text c="dimmed" size="sm">Stopped</Text>}
                   {error && <RunError message={error} onRetry={retry} />}
                 </>}
@@ -204,14 +206,14 @@ export function ChatPage() {
           </>}
         </Container>
       </Box>
-      {showJump && <Tooltip label="Jump to latest"><ActionIcon className="chat-jump" variant="default" size={36} radius="xl" aria-label="Jump to latest" onClick={jumpToLatest}><ArrowDown size={18} aria-hidden="true" /></ActionIcon></Tooltip>}
+      {showJump && <Tooltip label="Jump to latest"><ActionIcon className="chat-jump" variant="default" size={36} aria-label="Jump to latest" onClick={jumpToLatest}><ArrowDown size={18} aria-hidden="true" /></ActionIcon></Tooltip>}
     </Box>
     {!threadMissing && <Composer />}
   </Box>;
 }
 
 function RunError({ message, onRetry, onNewThread }: { message: string; onRetry: () => void; onNewThread?: () => void }) {
-  return <Alert color="bad" radius="lg" title="Something went wrong">
+  return <Notice tone="danger" title="Something went wrong">
     <Group justify="space-between" gap="sm" wrap="nowrap">
       <Text size="sm">{message}</Text>
       <Group gap="xs" wrap="nowrap">
@@ -219,19 +221,19 @@ function RunError({ message, onRetry, onNewThread }: { message: string; onRetry:
         <Button size="compact-sm" variant="light" color="bad" onClick={onRetry}>Retry</Button>
       </Group>
     </Group>
-  </Alert>;
+  </Notice>;
 }
 
 function Composer() {
   const { input, setInput, inputRef, submit, send, stop, ready, running } = useFanoutApp();
   return <Box className="chat-composer">
     <Container size={880} px={{ base: "md", sm: "xl" }}>
-      <Paper component="form" onSubmit={submit} className="chat-composer-field" withBorder radius={24} py={6} pl="lg" pr={6}>
+      <Paper component="form" onSubmit={submit} className="chat-composer-field" style={{ borderColor: "var(--composer-border, var(--labstack-control-border))" }} withBorder radius="sm" py={6} pl="lg" pr={6}>
         <Group align="flex-end" gap="xs" wrap="nowrap">
           <Textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is working…" : "Ask about health, errors, or latency…"} disabled={!ready} autosize minRows={1} maxRows={8} variant="unstyled" flex={1} />
           {running
-            ? <Tooltip label="Stop"><ActionIcon type="button" variant="default" size={40} radius="xl" aria-label="Stop" onClick={stop}><Stop size={16} weight="fill" /></ActionIcon></Tooltip>
-            : <ActionIcon type="submit" variant="filled" size={40} radius="xl" disabled={!input.trim() || !ready} aria-label="Send message"><PaperPlaneTilt size={17} weight="fill" /></ActionIcon>}
+            ? <Tooltip label="Stop"><ActionIcon type="button" variant="default" size={40} aria-label="Stop" onClick={stop}><Stop size={16} weight="fill" /></ActionIcon></Tooltip>
+            : <ActionIcon type="submit" variant="filled" size={40} disabled={!input.trim() || !ready} aria-label="Send message"><PaperPlaneTilt size={17} weight="fill" /></ActionIcon>}
         </Group>
       </Paper>
       <Text c="dimmed" size="xs" ta="center" mt={6}>Enter to send, Shift+Enter for a new line</Text>
@@ -242,9 +244,9 @@ function Composer() {
 function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
   return <Stack align="center" gap="md" pt={{ base: 32, sm: 88 }} pb="xl" ta="center">
     <BrandMark size="large" />
-    <Title order={1} fz={24} fw={500} lh={1.25} maw={560}>What do you want to know about your system?</Title>
-    <Group justify="center" gap="xs" mt="xs" maw={720}>
-      {suggestions.map((suggestion) => <Button key={suggestion} variant="default" size="sm" radius="xl" onClick={() => void onSelect(suggestion)}>{suggestion}</Button>)}
+    <Title order={2} fz={24} fw={500} lh={1.25} maw={560}>What do you want to know about your system?</Title>
+    <Group justify="center" gap="xs" mt="xs" maw={labstackContentWidths.prose}>
+      {suggestions.map((suggestion) => <Button key={suggestion} variant="default" size="sm" onClick={() => void onSelect(suggestion)}>{suggestion}</Button>)}
     </Group>
   </Stack>;
 }
@@ -253,9 +255,9 @@ function ChatMessage({ message, time, appView }: { message: Message; time?: numb
 
   if (message.role === "activity") {
     if (message.activityType === "agent-outcome" && message.content && typeof message.content === "object" && "message" in message.content && typeof message.content.message === "string") {
-      return "status" in message.content && message.content.status === "stopped" ? <Text c="dimmed" size="sm" data-chat-anchor>{message.content.message}</Text> : <Alert color="bad" title="Something went wrong" data-chat-anchor>{message.content.message}</Alert>;
+      return "status" in message.content && message.content.status === "stopped" ? <Text c="dimmed" size="sm" data-chat-anchor>{message.content.message}</Text> : <Box data-chat-anchor><Notice tone="danger" title="Something went wrong">{message.content.message}</Notice></Box>;
     }
-    if (message.activityType === "mcp-app") return appView ? <ChatAppView view={appView} /> : <Alert color="bad" data-chat-anchor>This view could not be loaded. Please try again.</Alert>;
+    if (message.activityType === "mcp-app") return appView ? <ChatAppView view={appView} /> : <Box data-chat-anchor><Notice tone="danger">This view could not be loaded. Please try again.</Notice></Box>;
     return null;
   }
   if (message.role === "assistant" && message.toolCalls?.length) return null;
@@ -265,8 +267,8 @@ function ChatMessage({ message, time, appView }: { message: Message; time?: numb
   const stamp = time ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(time)) : "";
   return <Box className="chat-message" data-chat-anchor data-role={user ? "user" : "assistant"}>
     {user
-      ? <Paper radius="lg" px="md" py="sm" bg="var(--mantine-color-brand-light)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
-      : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}
+      ? <Paper radius="md" px="md" py="sm" bg="var(--labstack-inset)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
+      : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm, answerStructure]} components={markdownComponents}>{content}</Markdown></Typography>}
     {(stamp || !user) && <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4} h={24}>
       {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}
       {!user && <CopyButton text={content} label="Copy message" />}
@@ -283,16 +285,41 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   </Tooltip>;
 }
 
+type MarkdownNode = { type: string; depth?: number; value?: string; align?: ("left" | "right" | "center" | null)[]; children?: MarkdownNode[] };
+
+/** Answers follow the page heading and give numeric table columns one alignment. */
+function answerStructure() {
+  return (tree: MarkdownNode) => {
+    const parents: number[] = [];
+    const visit = (node: MarkdownNode) => {
+      if (node.type === "table" && node.children) {
+        const text = (cell: MarkdownNode): string => cell.value ?? cell.children?.map(text).join("") ?? "";
+        const rows = node.children.slice(1);
+        node.align = (node.children[0]?.children ?? []).map((_, index) =>
+          rows.length && rows.every(row => /^[-+−]?\d[\d,.]*(?:%|\s?(?:ms|s|K|M))?$/.test(text(row.children?.[index] ?? {type: "text"}).trim())) ? "right" : node.align?.[index] ?? null);
+      }
+      if (node.type === "heading" && node.depth !== undefined) {
+        const depth = node.depth;
+        while (parents.length && parents.at(-1)! >= depth) parents.pop();
+        parents.push(depth);
+        node.depth = Math.min(6, parents.length + 1);
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
+}
+
 /* Every block the model can emit gets product chrome: tables scroll inside
    their own container instead of widening the column, code blocks carry a
    copy button, links open in a new tab. */
 const markdownComponents: Components = {
-  table: ({ children }) => <Box className="chat-table"><Table striped highlightOnHover withTableBorder verticalSpacing="xs" fz="sm">{children}</Table></Box>,
+  table: ({ children }) => <Box className="chat-table"><Table stickyHeader highlightOnHover withTableBorder verticalSpacing="xs" fz="sm">{children}</Table></Box>,
   thead: ({ children }) => <Table.Thead>{children}</Table.Thead>,
   tbody: ({ children }) => <Table.Tbody>{children}</Table.Tbody>,
   tr: ({ children }) => <Table.Tr>{children}</Table.Tr>,
-  th: ({ children }) => <Table.Th>{children}</Table.Th>,
-  td: ({ children }) => <Table.Td>{children}</Table.Td>,
+  th: ({ children, style }) => <Table.Th style={style}>{children}</Table.Th>,
+  td: ({ children, style }) => <Table.Td style={style} ta={typeof children === "string" && /^[-+−]?\d[\d,.]*(?:%|\s?(?:ms|s|K|M))?$/.test(children.trim()) ? "right" : undefined} ff={typeof children === "string" && /^[-+−]?\d/.test(children.trim()) ? "monospace" : undefined}>{children}</Table.Td>,
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
 };

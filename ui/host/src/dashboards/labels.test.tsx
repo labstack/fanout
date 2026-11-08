@@ -8,10 +8,10 @@ import type { Column, Panel, PanelResult } from "../../../panels/types";
 import { TableViz } from "./viz/table";
 
 it.each([
-  ["avg_ms", "Avg (ms)"], ["p95_duration_ms", "P95 duration (ms)"],
+  ["avg_ms", "Avg (ms)"], ["p95_duration_ms", "p95 duration (ms)"],
   ["error_rate", "Error rate"], ["body_template", "Message template"],
   ["http_status_code", "HTTP status code"], ["trace_id", "Trace ID"],
-  ["cpu_time_ns", "CPU time (ns)"], ["CAST(time AS TIMESTAMPTZ_NS)", "Value"], ["p99(duration_ms)", "P99 duration (ms)"],
+  ["cpu_time_ns", "CPU time (ns)"], ["CAST(time AS TIMESTAMPTZ_NS)", "Value"], ["p99(duration_ms)", "p99 duration (ms)"],
   ["service_rollup", "Service rollup"], ["edge_rollup", "Edge rollup"], ["resource_inventory", "Resource inventory"],
 ])("displays %s as %s", (key, label) => expect(displayLabel(key)).toBe(label));
 
@@ -28,20 +28,20 @@ it("uses shared labels for tables, legends, axes, tooltips and accessible descri
   const original = JSON.stringify(result);
   const table = renderToStaticMarkup(<MantineProvider><TableViz panel={panel} result={result} height={240}/></MantineProvider>);
   // Table cells print durations in their own unit, so the header names none.
-  expect(table).toContain(">P95 duration<");
-  expect(table).not.toContain("P95 duration (ms)");
+  expect(table).toContain(">p95 duration<");
+  expect(table).not.toContain("p95 duration (ms)");
   expect(table).toContain('data-field="p95_duration_ms"');
   const theme = chartThemeFor(false);
   const line = timeseriesOption({...panel,viz:"timeseries"},result,theme) as any;
-  expect(line.series[0].name).toBe("P95 duration (ms)");
-  expect(line.tooltip.formatter([{seriesName:line.series[0].name,value:[0,42]}])).toContain("P95 duration (ms)");
+  expect(line.series[0].name).toBe("p95 duration (ms)");
+  expect(line.tooltip.formatter([{seriesName:line.series[0].name,value:[0,42]}])).toContain("p95 duration (ms)");
   const scatterResult: PanelResult = {...result,frame:{columns:[{name:"service",type:"string",role:"dimension"},{name:"avg_ms",type:"number",role:"measure",unit:"ms"},column],values:[["checkout_service"],[12],[42]],rows:1}};
   const scatter = analysisOption({...panel,viz:"scatter"},scatterResult,theme) as any;
-  expect(scatter.xAxis.name).toBe("Avg (ms)"); expect(scatter.yAxis.name).toBe("P95 duration (ms)");
+  expect(scatter.xAxis.name).toBe("Avg (ms)"); expect(scatter.yAxis.name).toBe("p95 duration (ms)");
   expect(scatter.tooltip.formatter({seriesName:"Items",name:"checkout_service",value:[12,42]})).toContain("Avg (ms)");
-  expect(analysisSummary(panel,scatterResult)).toContain("P95 duration (ms)");
+  expect(analysisSummary(panel,scatterResult)).toContain("p95 duration (ms)");
   const bar = barOption({...panel,viz:"bar"},scatterResult.frame!,theme) as any;
-  expect(bar.series.map((s:any)=>s.name)).toEqual(["Avg (ms)","P95 duration (ms)"]);
+  expect(bar.series.map((s:any)=>s.name)).toEqual(["Avg (ms)","p95 duration (ms)"]);
   expect(bar.yAxis.data).toEqual(["checkout_service"]);
   expect(JSON.stringify(result)).toBe(original);
 });
@@ -53,7 +53,7 @@ it("heads a table duration column without the unit its cells already print", () 
   const table = renderToStaticMarkup(<MantineProvider><TableViz panel={panel} result={result} height={240}/></MantineProvider>);
   expect(table).toContain(">Max<");
   expect(table).not.toContain("Max (ms)");
-  expect(table).toContain(">10m<");
+  expect(table).toContain(">10 m<");
   // Without a duration unit the cell is a bare number and the header keeps the name's unit.
   const bare = renderToStaticMarkup(<MantineProvider><TableViz panel={{...panel,unit:undefined}} result={result} height={240}/></MantineProvider>);
   expect(bare).toContain("Max (ms)");

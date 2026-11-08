@@ -84,7 +84,7 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
   let rightOffset = share ? 16 : typeof grid.right === "number" ? grid.right : 16;
   const chips = labels.map(l=>{
     const width = measure(l.text);
-    const chip = {type:"text",right:rightOffset,top:bandTop,annotation:true,style:{text:l.text,fill:theme.muted,backgroundColor:theme.surface,padding:[1,3],fontSize:11,fontFamily:theme.font,width,stroke:theme.surface,lineWidth:3},tooltip:{formatter:()=>l.details}};
+    const chip = {type:"text",right:rightOffset,top:bandTop,annotation:true,style:{text:l.text,fill:theme.muted,backgroundColor:theme.surface,padding:[1,3],fontSize:12,fontFamily:theme.font,width,stroke:theme.surface,lineWidth:3},tooltip:{formatter:()=>l.details}};
     rightOffset += width+12; return chip;
   });
   const adaptAxis = (axis:Record<string,unknown>): Record<string,unknown> => {
@@ -102,7 +102,7 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
       const old=graphics.find(g=>(g as {style?:{text?:string}}).style?.text?.match(/^\+\d+ rows$/)) as {style:{text:string};tooltip:{formatter():string}} | undefined;
       const count=names.length-capacity+Number(old?.style.text.match(/\d+/)?.[0]??0);
       graphics=graphics.filter(g=>g!==old);
-      graphics.push({type:"text",right:0,bottom:0,style:{text:`+${count} rows`,fill:theme.muted,fontSize:11,fontFamily:theme.font},tooltip:{formatter:()=>names.slice(capacity).map(escapeHTML).join("<br/>")+(old?"<br/>"+old.tooltip.formatter():"")}});
+      graphics.push({type:"text",right:0,bottom:0,style:{text:`+${count} rows`,fill:theme.muted,fontSize:12,fontFamily:theme.font},tooltip:{formatter:()=>names.slice(capacity).map(escapeHTML).join("<br/>")+(old?"<br/>"+old.tooltip.formatter():"")}});
     }
   }
   return {

@@ -1,4 +1,5 @@
 import "@mantine/core/styles.css";
+import "@labstack/ui/styles.css";
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "react-grid-layout/css/styles.css";
@@ -10,8 +11,7 @@ import { type Args, INTERNAL_DEFAULT_PROJECT_ANNOTATIONS, type Preview, type Sto
 import { UPDATE_STORY_ARGS } from "storybook/internal/core-events";
 import { addons } from "storybook/preview-api";
 import { configure, expect, mocked, sb, spyOn } from "storybook/test";
-import { fanoutTheme } from "../src/theme";
-import { fanoutCssVariables } from "../../theme";
+import { fanoutTheme, fanoutCssVariables } from "../../theme";
 import { makeService, type CatalogService, type Scenario } from "../src/catalog/requests";
 import { createID } from "../src/id";
 import { storyNow } from "../src/catalog/fixtures";
@@ -37,7 +37,7 @@ const preview: Preview = {
     colorScheme: { description: "Color scheme", toolbar: { title: "Color scheme", items: ["light", "dark"], dynamicTitle: true } },
     pace: { description: "Mock stream pacing", toolbar: { title: "Stream pace", items: [{ value: "fast", title: "Fast" }, { value: "recording", title: "Recording" }], dynamicTitle: true } },
   },
-  initialGlobals: { colorScheme: "light", pace: "fast", viewport: { value: "desktop", isRotated: false } },
+  initialGlobals: { colorScheme: "dark", pace: "fast", viewport: { value: "desktop", isRotated: false } },
   renderToCanvas: async (renderContext, canvas) => {
     const render = INTERNAL_DEFAULT_PROJECT_ANNOTATIONS.renderToCanvas;
     if (!render) throw new Error("Storybook React renderer is unavailable");

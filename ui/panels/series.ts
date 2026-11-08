@@ -28,7 +28,7 @@ export function visibleSeries<T extends { name: string }>(items: T[], panel: Pan
 }
 
 export function hiddenSeriesNote(hidden: number, muted: string): Record<string, unknown>[] {
-  return hidden > 0 ? [{ type: "text", right: 8, bottom: 2, silent: true, style: { text: `${hidden} more series not shown`, fill: muted, fontSize: 11 } }] : [];
+  return hidden > 0 ? [{ type: "text", right: 8, bottom: 2, silent: true, style: { text: `${hidden} more series not shown`, fill: muted, fontSize: 12 } }] : [];
 }
 
 /** Match the legend's explicit icon, text and gap sizes, reserving each wrapped
@@ -45,6 +45,6 @@ export function wrappingLegend(names: string[], width: number, show: boolean, co
   const scroll = rows > 2;
   return { top: show ? (scroll ? 30 : rows * 20 + 2) : 12,
     option: { type: scroll ? "scroll" : "plain", show, top: 0, left: 0, right: 0, padding: 0, itemGap: 6,
-      icon: "roundRect", itemWidth: 10, itemHeight: 10, itemStyle: {borderColor:color,borderWidth:1}, textStyle: { color, fontSize: 12, lineHeight: 14 },
+      icon: "roundRect", itemWidth: 10, itemHeight: 10, textStyle: { color, fontSize: 12, lineHeight: 14 },
       data: names, formatter, tooltip: { show: true, renderMode: "html", formatter: (params: { name: string }) => escapeHTML(params.name) } } };
 }

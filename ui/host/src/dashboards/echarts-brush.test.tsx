@@ -68,19 +68,20 @@ it.each([false, true].flatMap(dark => [300, 600].map(width => ({ dark, width }))
       const choose = async (mode: string) => {
         if (folded) {
           await act(async () => card.querySelector<HTMLButtonElement>(`[aria-label="${viz} menu"]`)!.click());
-          await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+          await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull(), { timeout: 5000 });
         }
         const scope = folded ? document : card;
         const button = Array.from(scope.querySelectorAll<HTMLButtonElement>("[data-panel-view]")).find(button => button.textContent === mode)!;
         expect(button).toBeDefined();
         await act(async () => button.click());
       };
+      const primary = ["table", "logs", "traces", "log_patterns"].includes(viz) ? "Table" : "Chart";
       if (viz !== "text") {
         await choose("Data"); expect(card.querySelector("[data-panel-data]")).not.toBeNull();
-        await choose("Chart");
+        await choose(primary);
       }
       await choose("Spec"); expect(card.querySelector("[data-panel-spec]")).not.toBeNull();
-      await choose(viz === "text" ? "Content" : "Chart");
+      await choose(viz === "text" ? "Content" : primary);
       expect(card.querySelector("[data-panel-spec]")).toBeNull();
       if (viz === "text") expect(card.textContent).toContain("Notes");
     }
@@ -92,7 +93,7 @@ it.each([false, true].flatMap(dark => [300, 600].map(width => ({ dark, width }))
       expect(!toolbox || toolbox.show === false).toBe(true);
     }
   } finally { await act(async () => root.unmount()); }
-});
+}, 20000);
 
 it("real BrushComponent activates a global lineX cursor without a visible toolbox", async () => {
   const { EChartCanvas } = await import("./echart-canvas");

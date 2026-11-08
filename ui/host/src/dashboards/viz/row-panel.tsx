@@ -1,4 +1,7 @@
-import { ActionIcon, Anchor, Badge, Group, Text } from "@mantine/core";
+import { TraceIdCopy } from "../../trace-id-copy";
+import { statusLabel } from "./status-label";
+import { StatusBadge } from "@labstack/ui";
+import { ActionIcon, Anchor, Group, Text } from "@mantine/core";
 import { MinusCircle } from "@phosphor-icons/react";
 import { useCallback, useMemo, type CSSProperties } from "react";
 import { makeDrill } from "../drill-state";
@@ -8,10 +11,8 @@ import type { AnalysisProps } from "./analysis-chart";
 import { TableViz, type TableCellProps } from "./table";
 import { RowText } from "./cell-text";
 import { seriesSlot } from "../../../../chart";
-import { chartThemeFor } from "../../../../panels/compile";
-import { statusInk, tint } from "../../../../panels/style";
 
-const traceIdStyle: CSSProperties = { display: "block", width: "16ch", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const traceIdStyle: CSSProperties = { display: "block", width: "17ch", fontSize: "12px", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const traceStatuses: Record<string, string> = { STATUS_CODE_ERROR: "Error", STATUS_CODE_OK: "OK", STATUS_CODE_UNSET: "Unset" };
 
 const serviceStyle: CSSProperties = { display: "block", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
@@ -32,16 +33,16 @@ export function RowPanel(props: AnalysisProps) {
     const name = column.name;
     if (name === "trace_id" && value) {
       const target = makeDrill(props.panel, props.result, selection);
-      if (!target) return <Text size="sm" ff="monospace" style={traceIdStyle} title={String(value)} data-trace-id={String(value)}>{String(value).slice(0,16)}</Text>;
-      if (props.traceLinks === "button") return <Anchor component="button" type="button" style={traceIdStyle} title={String(value)} data-trace-id={String(value)} ff="monospace" onClick={event => {
+      if (!target) return <TraceIdCopy value={String(value)}><Text fz={12} ff="monospace" style={traceIdStyle} title={String(value)} data-trace-id={String(value)}>{(String(value).length > 16 ? `${String(value).slice(0,16)}…` : String(value))}</Text></TraceIdCopy>;
+      if (props.traceLinks === "button") return <TraceIdCopy value={String(value)}><Anchor component="button" type="button" style={traceIdStyle} title={String(value)} data-trace-id={String(value)} ff="monospace" onClick={event => {
         event.stopPropagation(); props.onPoint?.(selection);
-      }}>{String(value).slice(0,16)}</Anchor>;
+      }}>{(String(value).length > 16 ? `${String(value).slice(0,16)}…` : String(value))}</Anchor></TraceIdCopy>;
       const href = drillHref(window.location.href, target);
-      return <Anchor style={traceIdStyle} title={String(value)} data-trace-id={String(value)} ff="monospace" href={href} onClick={event => {
+      return <TraceIdCopy value={String(value)}><Anchor style={traceIdStyle} title={String(value)} data-trace-id={String(value)} ff="monospace" href={href} onClick={event => {
         if (props.onPoint && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
           event.preventDefault(); event.stopPropagation(); props.onPoint(selection);
         }
-      }}>{String(value).slice(0,16)}</Anchor>;
+      }}>{(String(value).length > 16 ? `${String(value).slice(0,16)}…` : String(value))}</Anchor></TraceIdCopy>;
     }
     const exclude = props.controls?.exclude;
     if (exclude && props.panel.viz === "traces" && (name === "service" || name === "operation") && value) {
@@ -52,15 +53,14 @@ export function RowPanel(props: AnalysisProps) {
       </Group>;
     }
     if (name === "service" && value) return props.onSelect
-      ? <Anchor component="button" type="button" className="dashboard-dimension-nowrap" style={serviceStyle} title={String(value)} onClick={() => props.onSelect?.(String(value))}>{String(value)}</Anchor>
+      ? <Anchor fz="inherit" component="button" type="button" className="dashboard-dimension-nowrap" style={serviceStyle} title={String(value)} onClick={() => props.onSelect?.(String(value))}>{String(value)}</Anchor>
       : <Text fz={12} className="dashboard-dimension-nowrap" style={serviceStyle} title={String(value)}>{String(value)}</Text>;
     if (name === "health" || name === "severity" || name === "status") {
       const severity = name === "severity" ? severityLabel(value) : undefined;
       const bad = severity ? severity === "ERROR" || severity === "FATAL" : String(value).includes("ERROR") || value === "FATAL" || value === "CRITICAL" || value === "unhealthy";
       const warn = severity ? severity === "WARN" : value === "degraded" || String(value).startsWith("WARN");
       const label = severity ?? (name === "status" ? traceStatuses[String(value)] ?? String(value ?? "Unknown") : String(value ?? "Unknown"));
-      const theme=chartThemeFor(props.dark);
-      return <Badge title={String(value ?? "UNSPECIFIED")} variant="light" color={bad ? "bad" : warn ? "warn" : "gray"} style={{color:theme.text,background:tint(bad?theme.status.bad:warn?theme.status.warn:theme.muted,.14)}}>{name === "severity" && <span style={{color:bad||warn?statusInk(bad?"bad":"warn",props.dark):theme.text}}>{bad ? "◆" : warn ? "■" : "●"} </span>}{label}</Badge>;
+      return <span title={String(value ?? "UNSPECIFIED")}><StatusBadge tone={bad ? "danger" : warn ? "warning" : "neutral"}>{statusLabel(label)}</StatusBadge></span>;
     }
     if (name === "body" || name === "body_template") return <RowText text={String(value ?? "")} template={name === "body_template"} highlight={props.panel.options?.highlight} />;
     if (name === "trend") {

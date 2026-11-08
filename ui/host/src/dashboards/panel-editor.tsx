@@ -1,4 +1,5 @@
-import { Alert, Button, Loader, Modal, Text, TextInput } from "@mantine/core";
+import { DataState, Notice } from "@labstack/ui";
+import { Box,  Button, Modal, Text, TextInput } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ALL, type DashboardSpec, type DashboardTime, type Panel, type VarValue } from "../../../panels/types";
@@ -132,16 +133,16 @@ export default function PanelEditor({ dashboardId, version: openedVersion, spec:
   const variables = spec.variables ?? [];
   return <Modal opened onClose={discard.request} closeOnEscape={false} title={openedPanel ? `Edit panel · ${openedPanel.title}` : "Add panel"} size="min(1280px, 100vw - 32px)" onKeyDown={discard.onKeyDown}>
     {discard.prompt}
-    {conflict && <Alert color={conflict === "stale" || conflict === "loading" ? "warn" : "bad"} title="Someone saved this dashboard since you opened it" mb="sm">
+    {conflict && <Box mb="sm"><Notice tone={conflict === "stale" || conflict === "loading" ? "warning" : "danger"} title="Someone saved this dashboard since you opened it">
       <Text size="sm">{conflict === "stale" || conflict === "loading" ? "Load the latest version, then save again. Your draft stays as it is." : conflict}</Text>
       <Button ref={loadLatest} mt="sm" size="compact-sm" loading={conflict === "loading"} onClick={() => void reload()}>Load latest</Button>
-    </Alert>}
+    </Notice></Box>}
     <TextInput label="Panel title" px="lg" value={title} onChange={event => setTitle(event.currentTarget.value)} placeholder={openedPanel ? undefined : "Named after the query"} />
     {variables.length > 0 && <Text size="xs" c="dimmed" px="lg" pt="xs" data-editor-variables>
       Runs with the dashboard&apos;s variables: {variables.map((v, index) => <span key={v.name}>{index > 0 && " · "}<code>${v.name}</code> = {shown(vars[v.name])}</span>)}
     </Text>}
-    {formatted.error ? <Alert color="bad" title="This panel's query could not be opened">{formatted.error.message}</Alert>
-      : !current ? <Loader size="sm" role="status" aria-label="Loading the panel's query" />
+    {formatted.error ? <Box><Notice tone="danger" title="This panel's query could not be opened">{formatted.error.message}</Notice></Box>
+      : !current ? <DataState state="loading" loadingLabel="Loading the panel's query" rows={3} />
       : <ExplorePage search={current} onSearch={setSearch}
           context={{ spec, vars, panel, compose: panel ? draft => composePanel(panel, draft) : undefined, onDirtyChange: setQueryDirty, cancel: discard.request,
             save: { label: openedPanel ? "Save panel" : "Add panel", run: save },

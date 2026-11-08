@@ -73,7 +73,7 @@ describe("PanelGrid", () => {
     expect(host.textContent).toContain("Degraded");
     expect(host.textContent).not.toContain("+100%"); // Comparison is off.
     expect(host.textContent).toContain("/cart");
-    expect(host.textContent).toContain("900ms");
+    expect(host.textContent).toContain("900 ms");
     expect(host.textContent).toContain("Could not convert");
     expect(host.querySelector("strong")?.textContent).toBe("Checkout");
   });
@@ -131,13 +131,14 @@ describe("PanelGrid", () => {
     const table: DashboardSpec = { ...spec, panels: [{ ...spec.panels[2], thresholds: [{ value: 100, status: "warn" }], click: { set_variable: "service" } }] };
     const { host, props } = await render({ spec: table });
     const values = () => [...host.querySelectorAll("tbody tr")].map((row) => row.textContent);
-    expect(values()).toEqual(["/cart900ms", "/quote40.0ms"]);
+    expect(values()).toEqual(["/cart900 ms", "/quote40 ms"]);
     expect(host.querySelector("tbody tr:first-child td:nth-child(2) p")!.getAttribute("style")).toContain(statusInk("warn",false));
     await act(async () => { host.querySelector<HTMLButtonElement>("thead th:nth-child(2) button")!.click(); });
     await act(async () => { host.querySelector<HTMLButtonElement>("thead th:nth-child(2) button")!.click(); });
-    expect(values()).toEqual(["/quote40.0ms", "/cart900ms"]);
+    expect(values()).toEqual(["/quote40 ms", "/cart900 ms"]);
     await act(async () => { host.querySelector<HTMLTableRowElement>("tbody tr")!.click(); });
     expect(props.onVariable).toHaveBeenCalledWith("service", "/quote");
+    expect(host.querySelector("tbody tr")?.getAttribute("data-selected")).toBe("true");
   });
 
   it("opens Data and Spec within the card with query and timing", async () => {
@@ -166,7 +167,7 @@ describe("PanelGrid", () => {
     extraResults.delete("by_service");
     const { host } = await render({ results: extraResults, fetching: true, agentAvailable: false });
     expect(host.textContent).toContain("No requests here.");
-    expect(host.querySelector('.mantine-Loader-root')).not.toBeNull();
+    expect(host.querySelector('[role="status"]')).not.toBeNull();
     expect(host.textContent).not.toContain("Ask Fanout to fix it");
     expect(host.textContent).toContain("Could not convert");
     expect(host.querySelector("strong")!.textContent).toBe("Checkout");

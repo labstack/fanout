@@ -439,6 +439,8 @@ describe("ChatPage", () => {
     const table = document.querySelector(".chat-markdown table");
     expect(table).not.toBeNull();
     expect(table?.closest(".chat-table")).not.toBeNull();
+    expect(table?.querySelectorAll("th")[1].style.textAlign).toBe("right");
+    expect(table?.querySelectorAll("td")[1].style.textAlign).toBe("right");
     expect(document.querySelector(".chat-markdown pre code")?.textContent).toContain("SELECT 1");
     expect(document.querySelector('button[aria-label="Copy code"]')).not.toBeNull();
     expect(document.querySelector('button[aria-label="Copy message"]')).not.toBeNull();
@@ -739,4 +741,11 @@ it("labels a structural answer-only refusal as read-only instead of save or tool
  const root=await mount(value({messages:[user(),call("refused","create_dashboard"),result("refused",{error:{code:"answer_only",message:"Read-only"},isError:true},"Read-only")]}));
  try { expect(document.body.textContent).toContain("Not saved: Explain is read-only");expect(document.body.textContent).not.toMatch(/Save failed|tool calls? failed/); }
  finally { await act(async()=>root.unmount());document.body.innerHTML=""; }
+});
+
+it("normalizes answer headings below the page title without skipping levels", async () => {
+ const root=await mount(value({messages:[{id:"headings",role:"assistant",content:"### Latency by service\n\n###### Slow endpoints\n\n# Summary\n\n### Next steps\n\n## Details"}]}));
+ try {const headings=[...document.querySelectorAll("h1,h2,h3,h4,h5,h6")];
+ expect(headings.map(h=>[h.tagName,h.textContent])).toEqual([["H1","Chat"],["H2","Latency by service"],["H3","Slow endpoints"],["H2","Summary"],["H3","Next steps"],["H3","Details"]]);
+ } finally {await act(async()=>root.unmount());document.body.innerHTML="";}
 });

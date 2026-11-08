@@ -1,12 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect } from "storybook/test";
 import { Product, pageParameters } from "./product";
-import { railRules } from "./accessibility";
 import { analysisReady, sendQuestion, threadInRail } from "./interactions";
 import { question } from "./fixtures";
 const meta = {
   id: "flows-ask-a-question", title: "Flows/Ask a question", component: Product,
-  parameters: { ...pageParameters, a11y: { config: { rules: railRules } }, scenario: { run: "question", empty: true }, docs: { ...pageParameters.docs, description: { component: "Ask about the commerce fleet, receive a streamed answer, and review the real health app inline. Primary recording size: 1280 × 800." } } },
+  parameters: { ...pageParameters, scenario: { run: "question", empty: true }, docs: { ...pageParameters.docs, description: { component: "Ask about the commerce fleet, receive a streamed answer, and review the real health app inline. Primary recording size: 1280 × 800." } } },
 } satisfies Meta<typeof Product>;
 export default meta;
 type Story = StoryObj<typeof meta>;

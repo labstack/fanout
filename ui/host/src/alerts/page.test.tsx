@@ -55,6 +55,14 @@ async function render() {
 }
 
 describe("AlertsPage", () => {
+  it.each([false, true])("keeps section headings directly below the page title with empty rules=%s", async empty => {
+    if (empty) rules=[];
+    const {ui, wait}=await render();
+    await wait(()=>expect(ui.getByRole("heading", {name:"Rules", level:2})).toBeTruthy());
+    expect(ui.getByRole("heading", {name:"Alerts", level:1})).toBeTruthy();
+    expect(ui.getByRole("heading", {name:"History", level:2})).toBeTruthy();
+  });
+
   it("opens what each rule watches in Explore", async () => {
     rules = [rule, { ...rule, id: "r3", name: "Log flood", service: "", expression: "service == \"error_rate\" && [1].exists(p95x, p95x > 0) && log_count_delta > 50" }, { ...rule, id: "r4", name: "Slow \"api\"", service: "a\"b", expression: "p95 > 500" }];
     const { ui, wait } = await render();
@@ -71,16 +79,19 @@ describe("AlertsPage", () => {
   it("lists rules with their firing alerts and the history", async () => {
     const { ui, wait } = await render();
     await wait(() => expect(ui.getAllByText("Checkout errors").length).toBeGreaterThan(0));
-    expect(ui.getByText("firing · checkout")).toBeTruthy();
+    expect(ui.getByText("Firing · checkout")).toBeTruthy();
     expect(ui.getByText("error_rate > 0.05")).toBeTruthy();
     expect(ui.getByText("9%")).toBeTruthy();
   });
 
   it("keeps state badges whole, lets the keyboard scroll the history, and does not tint rows under dimmed text", async () => {
     const { ui, wait } = await render();
-    await wait(() => expect(ui.getByText("firing · checkout")).toBeTruthy());
-    // A narrow screen squeezes the table's columns; a badge must not shrink to "FIR…".
-    for (const label of document.querySelectorAll<HTMLElement>(".mantine-Badge-label")) expect(label.style.overflow).toBe("visible");
+    await wait(() => expect(ui.getByText("Firing · checkout")).toBeTruthy());
+    // A narrow screen squeezes the table's columns; the state badge keeps one
+    // line and its width instead of wrapping or shrinking to "Firing · che…".
+    const label = ui.getByText("Firing · checkout").closest<HTMLElement>(".mantine-Badge-label")!;
+    expect(label.style.whiteSpace).toBe("nowrap");
+    expect(label.closest<HTMLElement>(".mantine-Badge-root")!.style.flexShrink).toBe("0");
     const history = ui.getByRole("region", { name: "Alert history" });
     expect(history.tabIndex).toBe(0);
     expect(history.querySelector("table")).not.toBeNull();
@@ -262,7 +273,7 @@ describe("AlertsPage", () => {
     await wait(() => expect(ui.getByRole("button", { name: "Checkout errors actions" })).toBeTruthy());
     await act(async () => ui.getByRole("button", { name: "Checkout errors actions" }).click());
     await act(async () => ui.getByRole("menuitem", { name: "Test against current data", hidden: true }).click());
-    await wait(() => expect(ui.getByLabelText("Testing the rule")).toBeTruthy());
+    await wait(() => expect(ui.getByText("Testing the rule")).toBeTruthy());
     await act(async () => ui.getByRole("button", { name: "Close test" }).click());
     await act(async () => answer(json({ rule, results: [{ service: "checkout", triggered: true, env: {} }] })));
     await act(async () => {});

@@ -106,7 +106,9 @@ export async function openSurface(page: Page, request: APIRequestContext, info: 
 
 export async function chooseView(surface: Page | Frame, card: Locator, mode: "Data" | "Spec" | "Chart") {
   const direct = card.locator(`button[data-panel-view="${mode}"]`);
-  if (await direct.isVisible()) await direct.click();
+  // A card measures its header before choosing inline view buttons or the
+  // menu, so give the buttons a moment to appear instead of sampling once.
+  if (await direct.waitFor({ state: "visible", timeout: 2_000 }).then(() => true, () => false)) await direct.click();
   else {
     await card.getByRole("button", { name: / menu/ }).click();
     await surface.locator(`[role="menuitemradio"][data-panel-view="${mode}"]`).click();

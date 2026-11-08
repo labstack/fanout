@@ -1,9 +1,11 @@
+import { themeAlias } from "./build/theme.ts";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { defineConfig } from "vite";
 import { excludeCatalog } from "./build/catalog.ts";
 
 export default defineConfig({
+  resolve: { alias: themeAlias },
   plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react(), excludeCatalog()],
   server: {
     proxy: {

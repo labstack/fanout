@@ -1,14 +1,16 @@
+import { WarningCircle } from "@phosphor-icons/react";
 import { Box, Table, Text } from "@mantine/core";
 import { useMemo } from "react";
 import type { TraceSpan } from "../../../../contracts";
 import { seriesSlot } from "../../../../chart";
+import { criticalPathSegments } from "./critical-path";
+import { spanStarts } from "./span-timing";
 import { duration } from "../../../../format";
 
 /** Parents before their children, siblings by start time. A span whose parent
  *  is not in the trace is a root; spans caught in a parent cycle follow, flat. */
-function spanTree(spans: TraceSpan[]): { span: TraceSpan; depth: number }[] {
+function spanTree(spans: TraceSpan[], start: Map<TraceSpan, number>): { span: TraceSpan; depth: number }[] {
   const ids = new Set(spans.map(span => span.span_id));
-  const start = new Map(spans.map(span => [span, new Date(span.start).valueOf()]));
   const byStart = (a: TraceSpan, b: TraceSpan) => start.get(a)! - start.get(b)!;
   const children = new Map<string, TraceSpan[]>();
   const roots: TraceSpan[] = [];
@@ -35,16 +37,23 @@ function spanTree(spans: TraceSpan[]): { span: TraceSpan; depth: number }[] {
 }
 
 /** Every span of the trace in one scrolling list, indented by depth. */
-export function Waterfall({ spans, dark, onSpan, selected }: { spans: TraceSpan[]; dark: boolean; onSpan?: (span: TraceSpan) => void; selected?: string }) {
+export function Waterfall({ spans, dark, onSpan, selected, showCriticalPath = true }: { spans: TraceSpan[]; dark: boolean; onSpan?: (span: TraceSpan) => void; selected?: string; showCriticalPath?: boolean }) {
+  const critical = useMemo(() => {
+    const bySpan = new Map<string, ReturnType<typeof criticalPathSegments>>();
+    for (const segment of criticalPathSegments(spans)) {
+      const list = bySpan.get(segment.span_id);
+      if (list) list.push(segment); else bySpan.set(segment.span_id, [segment]);
+    }
+    return bySpan;
+  }, [spans]);
   const rows = useMemo(() => {
-    const starts = spans.map(span => new Date(span.start).valueOf());
-    const start = Math.min(...starts);
-    const total = Math.max(Math.max(...spans.map((span, i) => starts[i] + span.duration_ms)) - start, 1);
+    const starts = spanStarts(spans);
+    const total = spans.reduce((end, span) => Math.max(end, starts.get(span)! + span.duration_ms), 1);
     const services = [...new Set(spans.map(span => span.service))];
-    return spanTree(spans).map(({ span, depth }) => {
-      const offset = ((new Date(span.start).valueOf() - start) / total) * 100;
+    return spanTree(spans, starts).map(({ span, depth }) => {
+      const offset = (starts.get(span)! / total) * 100;
       const color = seriesSlot(services.indexOf(span.service), dark);
-      return { span, depth, offset, width: Math.min(Math.max((span.duration_ms / total) * 100, 0.6), 100 - offset), color, failed: span.status === "STATUS_CODE_ERROR" };
+      return { span, depth, offset, total, width: Math.min(Math.max((span.duration_ms / total) * 100, 0.6), 100 - offset), color, failed: span.status === "STATUS_CODE_ERROR" };
     });
   }, [spans, dark]);
   return <Box data-waterfall style={{ maxHeight: 520, overflow: "auto" }}>
@@ -54,10 +63,12 @@ export function Waterfall({ spans, dark, onSpan, selected }: { spans: TraceSpan[
         <Table.Tr><Table.Th>Operation</Table.Th><Table.Th>Timeline</Table.Th><Table.Th ta="right">Duration</Table.Th></Table.Tr>
       </Table.Thead>
       <Table.Tbody>
-        {rows.map(({ span, depth, offset, width, color, failed }) => {
-          const label = `${span.service} · ${span.operation} · ${duration(span.duration_ms)}`;
-          return <Table.Tr key={span.span_id} data-depth={depth} aria-selected={onSpan ? span.span_id === selected : undefined}
-            bg={span.span_id === selected ? "var(--mantine-primary-color-light)" : undefined}
+        {rows.map(({ span, depth, offset, total, width, color, failed }) => {
+          const segments = showCriticalPath ? critical.get(span.span_id) ?? [] : [];
+          const share = segments.reduce((sum, segment) => sum + segment.end - segment.start, 0);
+          const criticalLabel = segments.length ? ` · on critical path · ${duration(share)} (${(share / span.duration_ms * 100).toFixed(1)}% of span)` : "";
+          const label = `${span.service} · ${span.operation} · ${duration(span.duration_ms)}${criticalLabel}`;
+          return <Table.Tr key={span.span_id} data-depth={depth} data-selected={span.span_id === selected || undefined} aria-selected={onSpan ? span.span_id === selected : undefined}
             tabIndex={onSpan ? 0 : undefined} onClick={onSpan ? () => onSpan(span) : undefined}
             onKeyDown={onSpan ? event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSpan(span); } } : undefined}
             style={{ cursor: onSpan ? "pointer" : undefined }}>
@@ -65,15 +76,19 @@ export function Waterfall({ spans, dark, onSpan, selected }: { spans: TraceSpan[
               <Box style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: Math.min(depth, 16) * 10, minWidth: 0 }}>
                 <Box w={8} h={8} bg={color} style={{ borderRadius: "50%", flex: "0 0 auto" }} />
                 <Box miw={0}>
-                  <Text fw={600} size="sm" truncate>{span.operation}</Text>
+                  <Text fw={600} size="sm" truncate>{failed && <WarningCircle size={14} aria-label="Error" color="var(--mantine-color-bad-text)" />}{span.operation}</Text>
                   <Text c="dimmed" size="xs" truncate>{span.service}</Text>
                 </Box>
               </Box>
             </Table.Td>
             <Table.Td>
               <Box pos="relative" h={14} bg="var(--mantine-color-default-hover)" role="img" title={label}
-                aria-label={`${span.operation} on ${span.service} took ${duration(span.duration_ms)}`} style={{ borderRadius: "var(--mantine-radius-sm)" }}>
+                aria-label={`${span.operation} on ${span.service} took ${duration(span.duration_ms)}${criticalLabel}`} style={{ borderRadius: "var(--mantine-radius-sm)" }}>
                 <Box pos="absolute" left={`${offset}%`} w={`${width}%`} h="100%" bg={failed ? "bad" : color} style={{ borderRadius: "var(--mantine-radius-sm)", minWidth: 3 }} />
+                {/* A body-colored halo keeps the text-color band readable on every series and status fill. */}
+                {segments.map((segment, i) => <Box key={i} data-critical-path-segment={span.span_id} aria-hidden="true"
+                  pos="absolute" left={`${segment.start / total * 100}%`} w={`${(segment.end - segment.start) / total * 100}%`} top="50%" bg="var(--mantine-color-text)"
+                  style={{ height: 3, transform: "translateY(-50%)", pointerEvents: "none", boxShadow: "0 0 0 1px var(--mantine-color-body)" }} />)}
               </Box>
             </Table.Td>
             <Table.Td ta="right"><Text size="sm" ff="monospace">{duration(span.duration_ms)}</Text></Table.Td>

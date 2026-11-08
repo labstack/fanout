@@ -15,7 +15,12 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@labstack/ui": [
+        "./node_modules/@labstack/ui/dist/types/index.d.ts"
+      ]
+    }
   },
   "include": [
     "build/*.ts",

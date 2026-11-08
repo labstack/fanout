@@ -281,8 +281,9 @@ it("announces loading drill data with a status role", async () => {
   wire.exemplars.mockImplementation(() => new Promise(() => undefined));
   const drawer = await mountDrawer();
   try {
-    const loader = document.body.querySelector('[aria-label="Loading drill data"]');
-    expect(loader?.getAttribute("role")).toBe("status");
+    // One status region names the load; no outer region announces it twice.
+    const regions = [...document.body.querySelectorAll('[role="status"]')].filter(node => node.textContent?.includes("Loading drill data"));
+    expect(regions).toHaveLength(1);
   } finally { await drawer.cleanup(); }
 });
 

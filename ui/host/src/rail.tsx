@@ -1,9 +1,11 @@
-import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Kbd, Loader, Menu, Modal, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
+import { ConfirmDialog, DataState, Notice } from "@labstack/ui";
+import { ActionIcon, Box, Button, Group, Kbd, Menu, Modal, ScrollArea, Stack, Text, TextInput, ThemeIcon, Tooltip, UnstyledButton } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
-import { Bell, Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
+import { Bell, ChatCircle, SquaresFour, Gear, Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Star, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { getJSON, threadHistoryQueryKey } from "./api";
+import { formatTimestamp } from "../../panels/units";
 import { authorizedFetch } from "./auth";
 import { dashboardsKey, dashboardsStaleTime, listDashboards } from "./dashboards/api";
 
@@ -11,6 +13,7 @@ export type RailHandle = { focusSearch(): void };
 
 export type RailProps = {
   agentAvailable: boolean;
+  collapsed?: boolean;
   activeThreadID?: string;
   activeDashboardID?: string;
   /** The current path, to mark the matching page link. */
@@ -28,12 +31,13 @@ export type RailProps = {
   ref?: Ref<RailHandle>;
 };
 
-export type PagePath = "/explore" | "/logs" | "/traces" | "/alerts";
+export type PagePath = "/explore" | "/logs" | "/traces" | "/alerts" | "/settings";
 const pages = [
   { path: "/explore", label: "Explore", Icon: Compass },
   { path: "/logs", label: "Logs", Icon: ListMagnifyingGlass },
   { path: "/traces", label: "Traces", Icon: Path },
   { path: "/alerts", label: "Alerts", Icon: Bell },
+  { path: "/settings", label: "Settings", Icon: Gear },
 ] as const;
 
 type ThreadSummary = { id: string; title: string; updated_at: string };
@@ -48,7 +52,7 @@ async function fetchThreads(query: string, cursor: string): Promise<ThreadPage> 
   return response.json();
 }
 
-export default function Rail({ agentAvailable, activeThreadID, activeDashboardID, activePath, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, onNewDashboard, onNavigate, onInvestigateService, ref }: RailProps) {
+export default function Rail({ collapsed = false, agentAvailable, activeThreadID, activeDashboardID, activePath, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, onNewDashboard, onNavigate, onInvestigateService, ref }: RailProps) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query] = useDebouncedValue(search.trim(), 250);
@@ -123,26 +127,50 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
     } finally { setBusy(false); }
   }
 
+  /* Collapsed, the rail keeps every destination: chats and dashboards open as
+     menus beside it, so reaching one never means expanding the rail first. */
+  if (collapsed) return <Stack gap={4} component="nav" aria-label="Navigation">
+    {agentAvailable && <ActionIcon variant="subtle" color="gray" size={46} aria-label="New chat" title="New chat" onClick={onNewChat}><Plus size={18} /></ActionIcon>}
+    {agentAvailable && <Menu position="right-start" withinPortal shadow="md">
+      <Menu.Target><ActionIcon variant="subtle" color="gray" size={46} aria-label="Chats" title="Chats" className="rail-row" data-active={Boolean(activeThreadID) || undefined}><ChatCircle size={18} /></ActionIcon></Menu.Target>
+      <Menu.Dropdown maw={280}>
+        <Menu.Label>Recent chats</Menu.Label>
+        {threads.length === 0 && <Menu.Item disabled>No chats yet</Menu.Item>}
+        {threads.slice(0, 10).map(thread => <Menu.Item key={thread.id} aria-current={thread.id === activeThreadID ? "page" : undefined} fw={thread.id === activeThreadID ? 600 : undefined} onClick={() => onSelectThread(thread.id)}><Text size="sm" truncate>{thread.title || "Untitled chat"}</Text></Menu.Item>)}
+      </Menu.Dropdown>
+    </Menu>}
+    {pages.map(({path, label, Icon}) => <ActionIcon key={path} component="a" href={path} title={label} aria-label={label} aria-current={activePath === path ? "page" : undefined} className="rail-row" data-active={activePath === path || undefined} variant="subtle" color="gray" size={46} onClick={event => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); onNavigate(path); }}><Icon size={18} /></ActionIcon>)}
+    <Menu position="right-start" withinPortal shadow="md">
+      <Menu.Target><ActionIcon variant="subtle" color="gray" size={46} aria-label="Dashboards" title="Dashboards" className="rail-row" data-active={Boolean(activeDashboardID) || undefined}><SquaresFour size={18} /></ActionIcon></Menu.Target>
+      <Menu.Dropdown maw={280}>
+        <Menu.Label>Dashboards</Menu.Label>
+        {(dashboards.data ?? []).map(dashboard => <Menu.Item key={dashboard.id} aria-current={dashboard.id === activeDashboardID ? "page" : undefined} fw={dashboard.id === activeDashboardID ? 600 : undefined} onClick={() => onSelectDashboard(dashboard.id)}><Text size="sm" truncate>{dashboard.name}</Text></Menu.Item>)}
+        {dashboards.data?.length ? <Menu.Divider /> : null}
+        <Menu.Item leftSection={<Plus size={14} />} onClick={onNewDashboard}>New dashboard</Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
+  </Stack>;
+
   return <Stack gap="sm" h="100%" component="nav" aria-label="Navigation">
     {agentAvailable && <Button leftSection={<Plus size={16} weight="bold" />} onClick={onNewChat}>New chat</Button>}
     <ScrollArea type="auto" offsetScrollbars flex={1} mx={-4} px={4}>
       <Stack gap="lg" pb="sm">
         {agentAvailable && <Stack gap={4}>
           <SectionLabel>Chats</SectionLabel>
-          {history.isLoading && <Center py="md"><Loader size="xs" /></Center>}
-          {history.isError && <Alert color="bad" radius="md" p="xs">Chats could not be loaded.</Alert>}
-          {!history.isLoading && !history.isError && threads.length === 0 && <Text c="dimmed" size="sm" px="sm" py="xs">{query ? "No matching chats" : "No chats yet"}</Text>}
+          {history.isLoading && <DataState state="loading" rows={3} />}
+          {history.isError && <DataState state="error" error={{ message: "Chats could not be loaded.", onRetry: () => void history.refetch() }} />}
+          {!history.isLoading && !history.isError && threads.length === 0 && <Text size="xs" c="dimmed" px="sm">{query ? "No matching chats. Try another name." : "No chats yet. Start one above."}</Text>}
           {groups.map((group) => <Stack key={group.label} gap={2}>
             {groups.length > 1 && <Text c="dimmed" size="xs" px="sm" pt={4}>{group.label}</Text>}
-            {group.threads.map((thread) => <ThreadRow key={thread.id} thread={thread} active={thread.id === activeThreadID} onSelect={() => onSelectThread(thread.id)} onRename={() => beginRename(thread)} onDelete={() => { setMutationError(""); setDeleting(thread); }} />)}
+            {group.threads.map((thread) => <ThreadRow key={thread.id} thread={thread} active={(activePath ? activePath.startsWith("/chat/") : !activeDashboardID) && thread.id === activeThreadID} onSelect={() => onSelectThread(thread.id)} onRename={() => beginRename(thread)} onDelete={() => { setMutationError(""); setDeleting(thread); }} />)}
           </Stack>)}
           {history.hasNextPage && <Button variant="subtle" color="gray" size="compact-sm" loading={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>See all</Button>}
         </Stack>}
-        {agentAvailable && query && onInvestigateService && schema.isLoading && <Center py="md"><Loader size="xs" /></Center>}
+        {agentAvailable && query && onInvestigateService && schema.isLoading && <DataState state="loading" rows={3} />}
         {agentAvailable && query && onInvestigateService && (schema.isSuccess || schema.isError) && <Stack gap={4}>
           <SectionLabel>Services</SectionLabel>
           {schema.isError && <Text c="dimmed" size="sm" px="sm">Services could not be searched</Text>}
-          {schema.isSuccess && matchingServices.length === 0 && <Text c="dimmed" size="sm" px="sm">No matching services</Text>}
+          {schema.isSuccess && matchingServices.length === 0 && <DataState state="empty" variant="inline" empty={{title: "No matching services", description: "Try a different service name.", action: <Button variant="subtle" size="compact-xs" onClick={() => setSearch("")}>Clear search</Button>}} />}
           {matchingServices.map((service) => <UnstyledButton key={service} className="rail-row" p="sm" onClick={() => onInvestigateService(service)}>
             <Text size="sm" fw={500} truncate>{service}</Text>
           </UnstyledButton>)}
@@ -162,22 +190,22 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
         </Stack>
         <Stack gap={4}>
           <SectionLabel>Dashboards</SectionLabel>
-          {dashboards.isLoading && <Center py="md"><Loader size="xs" /></Center>}
-          {dashboards.isError && <Alert color="bad" radius="md" p="xs">Dashboards could not be loaded.</Alert>}
+          {dashboards.isLoading && <DataState state="loading" rows={3} />}
+          {dashboards.isError && <Notice tone="danger">Dashboards could not be loaded.</Notice>}
           {/* A search that matches nothing here would otherwise leave the
               label sitting on top of the Create button with no word about
               why the list emptied. */}
-          {!dashboards.isLoading && !dashboards.isError && query && visibleDashboards.length === 0 && <Text c="dimmed" size="sm" px="sm" py="xs">No matching dashboards</Text>}
+          {!dashboards.isLoading && !dashboards.isError && query && visibleDashboards.length === 0 && <DataState state="empty" variant="inline" empty={{title: "No matching dashboards", description: "Try a different dashboard name.", action: <Button variant="subtle" size="compact-xs" onClick={() => setSearch("")}>Clear search</Button>}} />}
           {visibleDashboards.map((dashboard) => {
-            const active = dashboard.id === activeDashboardID;
+            const active = (!activePath || activePath.startsWith("/dashboards")) && dashboard.id === activeDashboardID;
             return <Stack key={dashboard.id} gap={0}><UnstyledButton component="a" href={`/dashboards/${encodeURIComponent(dashboard.id)}`} className="rail-row" data-active={active || undefined} aria-current={active ? "page" : undefined} p="sm" onClick={(event) => {
               if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
               event.preventDefault();
               onSelectDashboard(dashboard.id);
             }}>
               <Group justify="space-between" gap="sm" wrap="nowrap">
-                <Text size="sm" fw={active ? 600 : 500} truncate>{dashboard.name}</Text>
-                {dashboard.is_default && <Badge size="xs" variant="light" color="gray">Default</Badge>}
+                <Group gap="xs" wrap="nowrap" style={{minWidth: 0, flex: 1}}><SquaresFour size={16} style={{flexShrink: 0}} /><Text size="sm" fw={active ? 600 : 500} truncate title={dashboard.name}>{dashboard.name}</Text></Group>
+                {dashboard.is_default && <Tooltip label="Default"><ThemeIcon size={16} variant="light" color="gray" role="img" aria-label="Default" style={{flexShrink: 0}}><Star size={12} weight="fill" aria-hidden="true" /></ThemeIcon></Tooltip>}
               </Group>
             </UnstyledButton>
               {agentAvailable && dashboard.origin && <UnstyledButton component="a" href={`/chat/${encodeURIComponent(dashboard.origin.thread_id)}`} data-request-provenance px="sm" pb="xs" onClick={(event) => {
@@ -188,8 +216,8 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
               </UnstyledButton>}
             </Stack>;
           })}
-          <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Plus size={14} />} onClick={onNewDashboard}>New dashboard</Button>
-          {agentAvailable && <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>Create with AI</Button>}
+          <Button variant="subtle" color="gray" size="sm" px="sm" justify="flex-start" leftSection={<Plus size={14} />} onClick={onNewDashboard}>New dashboard</Button>
+          {agentAvailable && <Button variant="subtle" color="gray" size="sm" px="sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>Create with AI</Button>}
         </Stack>
       </Stack>
     </ScrollArea>
@@ -198,7 +226,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
       <form onSubmit={(event) => { event.preventDefault(); void renameThread(); }}>
         <Stack>
           <TextInput label="Name" value={renameTitle} onChange={(event) => setRenameTitle(event.currentTarget.value)} maxLength={120} autoFocus />
-          {mutationError && <Alert color="bad">{mutationError}</Alert>}
+          {mutationError && <Notice tone="danger">{mutationError}</Notice>}
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setRenaming(null)} disabled={busy}>Cancel</Button>
             <Button type="submit" loading={busy} disabled={!renameTitle.trim()}>Save</Button>
@@ -206,16 +234,9 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
         </Stack>
       </form>
     </Modal>
-    <Modal opened={deleting !== null} onClose={() => !busy && setDeleting(null)} title="Delete chat?" centered>
-      <Stack>
-        <Text size="sm">This permanently removes <Text span fw={650}>{deleting?.title}</Text> and its saved messages.</Text>
-        {mutationError && <Alert color="bad">{mutationError}</Alert>}
-        <Group justify="flex-end">
-          <Button variant="default" onClick={() => setDeleting(null)} disabled={busy}>Cancel</Button>
-          <Button color="bad" loading={busy} onClick={() => void deleteThread()}>Delete</Button>
-        </Group>
-      </Stack>
-    </Modal>
+    <ConfirmDialog opened={deleting !== null} onClose={() => setDeleting(null)} title="Delete chat?" confirmLabel="Delete chat" tone="danger" pending={busy ? "confirm" : null} error={mutationError || undefined} onConfirm={() => void deleteThread()}>
+      This permanently removes <Text span ff="monospace">{deleting?.title}</Text> and its saved messages.
+    </ConfirmDialog>
   </Stack>;
 }
 
@@ -230,9 +251,10 @@ function ThreadRow({ thread, active, onSelect, onRename, onDelete }: { thread: T
           about a hundred pixels of a 219px row, and the cut point moved with
           the length of the time. On its own line the title gets the row. */}
       <UnstyledButton onClick={onSelect} aria-current={active ? "page" : undefined} p="sm" flex={1} style={{ minWidth: 0 }}>
-        <Stack gap={0}>
+        <Stack gap={0} pl={24} style={{position: "relative"}}>
+          <ChatCircle size={16} style={{position: "absolute", left: 0, top: 2}} />
           <Text size="sm" fw={active ? 600 : 500} truncate title={thread.title}>{thread.title}</Text>
-          <Text c="dimmed" size="xs">{threadTime(thread.updated_at)}</Text>
+          <Text c="dimmed" size="xs" ff="monospace">{threadTime(thread.updated_at)}</Text>
         </Stack>
       </UnstyledButton>
       <Menu position="bottom-end" withinPortal>
@@ -277,9 +299,5 @@ function groupThreads(threads: ThreadSummary[]): Array<{ label: string; threads:
 }
 
 function threadTime(value: string): string {
-  const date = parseSQLiteTime(value);
-  const today = dayStart(new Date());
-  const age = Math.floor((today - dayStart(date)) / (24 * 60 * 60 * 1000));
-  if (age <= 1) return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+  return formatTimestamp(parseSQLiteTime(value).valueOf());
 }
