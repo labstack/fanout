@@ -97,9 +97,8 @@ describe("alert rule email", () => {
     rules = [{ ...rule, email_recipients: ["a@example.com"], email_status: "unavailable", email_status_detail: smtpMessage }];
     const { ui, wait } = await render();
     await wait(() => ui.getByRole("button", { name: "Checkout errors actions" }));
-    await act(async () => { fireEvent.click(ui.getByRole("button", { name: "Checkout errors actions" })); });
-    await wait(() => ui.getByRole("menuitem", { name: "Edit" }));
-    await act(async () => { fireEvent.click(ui.getByRole("menuitem", { name: "Edit" })); });
+    await act(async () => ui.getByRole("button", { name: "Checkout errors actions" }).click());
+    await act(async () => ui.getByRole("menuitem", { name: "Edit", hidden: true }).click());
     await wait(() => expect(field(ui).value).toBe("a@example.com"));
     expect(field(ui).disabled).toBe(false);
   });
