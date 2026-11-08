@@ -259,7 +259,7 @@ access, including browser sessions and OAuth tokens, through
 | Setup URL | Creates the first administrator | One-time, expires in 1 hour |
 | Login URL | Authenticates one existing active local user | One-time, expires in 15 minutes; mint with `fanout login-link` |
 | Browser session | Interactive access | Idle and absolute TTL; revoked on role, email, or status change |
-| Ingest token | OTLP ingest | Settings page |
+| Ingest token | OTLP ingest | Settings page; `FANOUT_INGEST_TOKEN` sets only the first token |
 | Metrics token | `/metrics` scrape | `FANOUT_METRICS_TOKEN` |
 | MCP OAuth tokens | MCP clients | 30-day access tokens, checked on every request; 90-day refresh tokens renewed on each use. Refresh rotation with replay-family revocation, admitting the same client's rotated token for one access-token lifetime so processes sharing a credential can refresh from stale copies. Users disconnect individual agents in Settings; admins can still revoke all of a user's access |
 
