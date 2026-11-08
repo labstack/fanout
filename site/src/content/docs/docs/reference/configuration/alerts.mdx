@@ -1,9 +1,10 @@
 ---
 title: "Alert settings"
-description: "Whether the alert engine runs, how often it evaluates, and how long history is kept."
-summary: "Settings for the alert evaluation loop."
+description: "Whether the alert engine runs, how often it evaluates, how long history is kept, and how alert email is addressed and limited."
+summary: "Settings for the alert evaluation loop and alert email."
 read_when:
   - "Alerts are evaluating too slowly, or not at all."
+  - "You are setting a default alert email destination or changing the per-address limit."
 status: preview
 generated: true
 ---
@@ -17,11 +18,21 @@ Vendor credentials and endpoints keep the vendor's documented names.
 
 | Environment variable | Type | Default |
 |---|---|---|
+| `FANOUT_ALERTS_EMAIL_DEFAULT_TO` | string | — |
+| `FANOUT_ALERTS_EMAIL_HOURLY_LIMIT` | integer | `30` |
 | `FANOUT_ALERTS_ENABLED` | boolean | `true` |
 | `FANOUT_ALERTS_EVALUATION_INTERVAL` | duration | `30s` |
 | `FANOUT_ALERTS_HISTORY_DAYS` | integer | `7` |
 
 ## Notes
+
+### `FANOUT_ALERTS_EMAIL_DEFAULT_TO`
+
+A comma-separated list of addresses that receive alerts from rules with no webhook and no email recipients of their own; requires SMTP.
+
+### `FANOUT_ALERTS_EMAIL_HOURLY_LIMIT`
+
+Caps the alert emails sent to one address in any rolling hour, across all rules. Notifications over the limit are suppressed, not delayed, and shown on the rule; 0 suppresses all alert email.
 
 ### `FANOUT_ALERTS_ENABLED`
 

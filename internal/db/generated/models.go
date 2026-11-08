@@ -45,23 +45,42 @@ type Alert struct {
 	CreatedAt          string          `json:"created_at"`
 }
 
+type AlertEmailDelivery struct {
+	ID             string `json:"id"`
+	NotificationID string `json:"notification_id"`
+	RuleID         string `json:"rule_id"`
+	AlertID        string `json:"alert_id"`
+	Recipient      string `json:"recipient"`
+	Content        string `json:"content"`
+	Status         string `json:"status"`
+	Attempts       int64  `json:"attempts"`
+	NextAttemptAt  string `json:"next_attempt_at"`
+	LastError      string `json:"last_error"`
+	SentAt         string `json:"sent_at"`
+	CreatedAt      string `json:"created_at"`
+}
+
 type AlertRule struct {
-	ID              string         `json:"id"`
-	Name            string         `json:"name"`
-	Description     sql.NullString `json:"description"`
-	Enabled         int64          `json:"enabled"`
-	Service         sql.NullString `json:"service"`
-	Namespace       sql.NullString `json:"namespace"`
-	Expression      string         `json:"expression"`
-	ForSeconds      int64          `json:"for_seconds"`
-	CooldownS       int64          `json:"cooldown_s"`
-	RepeatIntervalS int64          `json:"repeat_interval_s"`
-	WebhookURL      sql.NullString `json:"webhook_url"`
-	WebhookHeaders  sql.NullString `json:"webhook_headers"`
-	WebhookTemplate sql.NullString `json:"webhook_template"`
-	NotifyOnResolve int64          `json:"notify_on_resolve"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
+	ID                string         `json:"id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	Enabled           int64          `json:"enabled"`
+	Service           sql.NullString `json:"service"`
+	Namespace         sql.NullString `json:"namespace"`
+	Expression        string         `json:"expression"`
+	ForSeconds        int64          `json:"for_seconds"`
+	CooldownS         int64          `json:"cooldown_s"`
+	RepeatIntervalS   int64          `json:"repeat_interval_s"`
+	WebhookURL        sql.NullString `json:"webhook_url"`
+	WebhookHeaders    sql.NullString `json:"webhook_headers"`
+	WebhookTemplate   sql.NullString `json:"webhook_template"`
+	NotifyOnResolve   int64          `json:"notify_on_resolve"`
+	CreatedAt         string         `json:"created_at"`
+	UpdatedAt         string         `json:"updated_at"`
+	EmailRecipients   sql.NullString `json:"email_recipients"`
+	EmailStatus       string         `json:"email_status"`
+	EmailStatusDetail string         `json:"email_status_detail"`
+	EmailStatusAt     string         `json:"email_status_at"`
 }
 
 type AuthAuditEvent struct {

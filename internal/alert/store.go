@@ -15,12 +15,13 @@ var ErrNotFound = errors.New("not found")
 
 // Store provides CRUD operations for alert rules and alert instances.
 type Store struct {
-	q *generated.Queries
+	db *sql.DB
+	q  *generated.Queries
 }
 
 // NewStore creates a Store backed by the given database connection.
 func NewStore(db *sql.DB) *Store {
-	return &Store{q: generated.New(db)}
+	return &Store{db: db, q: generated.New(db)}
 }
 
 // newID returns a new UUIDv7 string.
@@ -49,6 +50,7 @@ func ruleToCreateParams(r Rule) generated.CreateRuleParams {
 		WebhookHeaders:  nullString(r.WebhookHeaders),
 		WebhookTemplate: nullString(r.WebhookTemplate),
 		NotifyOnResolve: boolToInt64(r.NotifyOnResolve),
+		EmailRecipients: encodeRecipients(r.EmailRecipients),
 	}
 }
 
@@ -69,28 +71,33 @@ func ruleToReplaceParams(r Rule) generated.ReplaceRuleParams {
 		WebhookHeaders:  nullString(r.WebhookHeaders),
 		WebhookTemplate: nullString(r.WebhookTemplate),
 		NotifyOnResolve: boolToInt64(r.NotifyOnResolve),
+		EmailRecipients: encodeRecipients(r.EmailRecipients),
 	}
 }
 
 // alertRuleToRule converts a generated.AlertRule to a domain Rule.
 func alertRuleToRule(ar generated.AlertRule) Rule {
 	return Rule{
-		ID:              ar.ID,
-		Name:            ar.Name,
-		Description:     ar.Description.String,
-		Enabled:         ar.Enabled != 0,
-		Service:         ar.Service.String,
-		Namespace:       ar.Namespace.String,
-		Expression:      ar.Expression,
-		ForSeconds:      int(ar.ForSeconds),
-		CooldownS:       int(ar.CooldownS),
-		RepeatIntervalS: int(ar.RepeatIntervalS),
-		WebhookURL:      ar.WebhookURL.String,
-		WebhookHeaders:  ar.WebhookHeaders.String,
-		WebhookTemplate: ar.WebhookTemplate.String,
-		NotifyOnResolve: ar.NotifyOnResolve != 0,
-		CreatedAt:       ar.CreatedAt,
-		UpdatedAt:       ar.UpdatedAt,
+		ID:                ar.ID,
+		Name:              ar.Name,
+		Description:       ar.Description.String,
+		Enabled:           ar.Enabled != 0,
+		Service:           ar.Service.String,
+		Namespace:         ar.Namespace.String,
+		Expression:        ar.Expression,
+		ForSeconds:        int(ar.ForSeconds),
+		CooldownS:         int(ar.CooldownS),
+		RepeatIntervalS:   int(ar.RepeatIntervalS),
+		WebhookURL:        ar.WebhookURL.String,
+		WebhookHeaders:    ar.WebhookHeaders.String,
+		WebhookTemplate:   ar.WebhookTemplate.String,
+		NotifyOnResolve:   ar.NotifyOnResolve != 0,
+		EmailRecipients:   decodeRecipients(ar.ID, ar.EmailRecipients),
+		EmailStatus:       ar.EmailStatus,
+		EmailStatusDetail: ar.EmailStatusDetail,
+		EmailStatusAt:     ar.EmailStatusAt,
+		CreatedAt:         ar.CreatedAt,
+		UpdatedAt:         ar.UpdatedAt,
 	}
 }
 
@@ -216,13 +223,17 @@ func (s *Store) DeleteRule(id string) error {
 // UpsertAlert inserts an alert episode, or updates the one with a.ID. Each
 // episode is its own row; at most one per (rule_id, service) is open.
 func (s *Store) UpsertAlert(a Alert) (Alert, error) {
+	return upsertAlert(s.q, a)
+}
+
+func upsertAlert(q *generated.Queries, a Alert) (Alert, error) {
 	// Only the engine starts an episode. An update without a start keeps the
 	// stored one; a new alert must bring its own.
 	if a.CreatedAt == "" {
 		if a.ID == "" {
 			return Alert{}, fmt.Errorf("store: new alert (%q, %q) needs created_at", a.RuleID, a.Service)
 		}
-		if _, err := s.q.GetAlertByID(context.Background(), a.ID); errors.Is(err, sql.ErrNoRows) {
+		if _, err := q.GetAlertByID(context.Background(), a.ID); errors.Is(err, sql.ErrNoRows) {
 			return Alert{}, fmt.Errorf("store: new alert (%q, %q) needs created_at", a.RuleID, a.Service)
 		} else if err != nil {
 			return Alert{}, fmt.Errorf("store: get alert: %w", err)
@@ -241,7 +252,7 @@ func (s *Store) UpsertAlert(a Alert) (Alert, error) {
 		}
 		a.ID = id
 	}
-	ga, err := s.q.UpsertAlert(context.Background(), alertToUpsertParams(a))
+	ga, err := q.UpsertAlert(context.Background(), alertToUpsertParams(a))
 	if err != nil {
 		return Alert{}, fmt.Errorf("store: upsert alert: %w", err)
 	}

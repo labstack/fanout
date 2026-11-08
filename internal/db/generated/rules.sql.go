@@ -14,9 +14,9 @@ const createRule = `-- name: CreateRule :one
 INSERT INTO alert_rules (
     id, name, description, enabled, service, namespace, expression,
     for_seconds, cooldown_s, repeat_interval_s, webhook_url,
-    webhook_headers, webhook_template, notify_on_resolve
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, name, description, enabled, service, namespace, expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at
+    webhook_headers, webhook_template, notify_on_resolve, email_recipients
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, name, description, enabled, service, namespace, expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at, email_recipients, email_status, email_status_detail, email_status_at
 `
 
 type CreateRuleParams struct {
@@ -34,6 +34,7 @@ type CreateRuleParams struct {
 	WebhookHeaders  sql.NullString `json:"webhook_headers"`
 	WebhookTemplate sql.NullString `json:"webhook_template"`
 	NotifyOnResolve int64          `json:"notify_on_resolve"`
+	EmailRecipients sql.NullString `json:"email_recipients"`
 }
 
 func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) (AlertRule, error) {
@@ -52,6 +53,7 @@ func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) (AlertRu
 		arg.WebhookHeaders,
 		arg.WebhookTemplate,
 		arg.NotifyOnResolve,
+		arg.EmailRecipients,
 	)
 	var i AlertRule
 	err := row.Scan(
@@ -71,6 +73,10 @@ func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) (AlertRu
 		&i.NotifyOnResolve,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailRecipients,
+		&i.EmailStatus,
+		&i.EmailStatusDetail,
+		&i.EmailStatusAt,
 	)
 	return i, err
 }
@@ -85,7 +91,7 @@ func (q *Queries) DeleteRule(ctx context.Context, id string) error {
 }
 
 const getRule = `-- name: GetRule :one
-SELECT id, name, description, enabled, service, namespace, expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at FROM alert_rules WHERE id = ?
+SELECT id, name, description, enabled, service, namespace, expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at, email_recipients, email_status, email_status_detail, email_status_at FROM alert_rules WHERE id = ?
 `
 
 func (q *Queries) GetRule(ctx context.Context, id string) (AlertRule, error) {
@@ -108,12 +114,16 @@ func (q *Queries) GetRule(ctx context.Context, id string) (AlertRule, error) {
 		&i.NotifyOnResolve,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailRecipients,
+		&i.EmailStatus,
+		&i.EmailStatusDetail,
+		&i.EmailStatusAt,
 	)
 	return i, err
 }
 
 const listEnabledRules = `-- name: ListEnabledRules :many
-SELECT id, name, description, enabled, service, namespace, expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at FROM alert_rules WHERE enabled = 1 ORDER BY created_at DESC
+SELECT id, name, description, enabled, service, namespace, expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at, email_recipients, email_status, email_status_detail, email_status_at FROM alert_rules WHERE enabled = 1 ORDER BY created_at DESC
 `
 
 func (q *Queries) ListEnabledRules(ctx context.Context) ([]AlertRule, error) {
@@ -142,6 +152,10 @@ func (q *Queries) ListEnabledRules(ctx context.Context) ([]AlertRule, error) {
 			&i.NotifyOnResolve,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EmailRecipients,
+			&i.EmailStatus,
+			&i.EmailStatusDetail,
+			&i.EmailStatusAt,
 		); err != nil {
 			return nil, err
 		}
@@ -157,7 +171,7 @@ func (q *Queries) ListEnabledRules(ctx context.Context) ([]AlertRule, error) {
 }
 
 const listRules = `-- name: ListRules :many
-SELECT id, name, description, enabled, service, namespace, expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at FROM alert_rules ORDER BY created_at DESC
+SELECT id, name, description, enabled, service, namespace, expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at, email_recipients, email_status, email_status_detail, email_status_at FROM alert_rules ORDER BY created_at DESC
 `
 
 func (q *Queries) ListRules(ctx context.Context) ([]AlertRule, error) {
@@ -186,6 +200,10 @@ func (q *Queries) ListRules(ctx context.Context) ([]AlertRule, error) {
 			&i.NotifyOnResolve,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EmailRecipients,
+			&i.EmailStatus,
+			&i.EmailStatusDetail,
+			&i.EmailStatusAt,
 		); err != nil {
 			return nil, err
 		}
@@ -205,9 +223,9 @@ UPDATE alert_rules SET
     name = ?, description = ?, enabled = ?, service = ?, namespace = ?,
     expression = ?, for_seconds = ?, cooldown_s = ?, repeat_interval_s = ?,
     webhook_url = ?, webhook_headers = ?, webhook_template = ?,
-    notify_on_resolve = ?, updated_at = datetime('now')
+    notify_on_resolve = ?, email_recipients = ?, updated_at = datetime('now')
 WHERE id = ?
-RETURNING id, name, description, enabled, service, namespace, expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at
+RETURNING id, name, description, enabled, service, namespace, expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at, email_recipients, email_status, email_status_detail, email_status_at
 `
 
 type ReplaceRuleParams struct {
@@ -224,6 +242,7 @@ type ReplaceRuleParams struct {
 	WebhookHeaders  sql.NullString `json:"webhook_headers"`
 	WebhookTemplate sql.NullString `json:"webhook_template"`
 	NotifyOnResolve int64          `json:"notify_on_resolve"`
+	EmailRecipients sql.NullString `json:"email_recipients"`
 	ID              string         `json:"id"`
 }
 
@@ -242,6 +261,7 @@ func (q *Queries) ReplaceRule(ctx context.Context, arg ReplaceRuleParams) (Alert
 		arg.WebhookHeaders,
 		arg.WebhookTemplate,
 		arg.NotifyOnResolve,
+		arg.EmailRecipients,
 		arg.ID,
 	)
 	var i AlertRule
@@ -262,6 +282,10 @@ func (q *Queries) ReplaceRule(ctx context.Context, arg ReplaceRuleParams) (Alert
 		&i.NotifyOnResolve,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailRecipients,
+		&i.EmailStatus,
+		&i.EmailStatusDetail,
+		&i.EmailStatusAt,
 	)
 	return i, err
 }

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,8 +30,10 @@ type Engine struct {
 	interval    time.Duration
 	histDays    int
 	lastPrune   time.Time
-	envOverride map[string]Env // for testing — bypasses DuckDB query
-	afterList   func()         // for testing — runs once a tick has listed its rules
+	envOverride map[string]Env   // for testing — bypasses DuckDB query
+	afterList   func()           // for testing — runs once a tick has listed its rules
+	email       *EmailConfig     // nil without SMTP
+	now         func() time.Time // for testing — the email clock
 }
 
 // NewEngine creates an Engine ready to Run.
@@ -76,7 +79,7 @@ func (e *Engine) DisableRule(rule Rule) {
 			a.State = "resolved"
 			a.ResolvedAt = now
 			a.LastEvaluatedAt = now
-			saved, err := e.store.UpsertAlert(a)
+			saved, err := e.saveAlert(rule, a, resolveEvent(rule))
 			if err != nil {
 				slog.Error("alert: resolve alert of disabled rule", "rule", rule.ID, "service", a.Service, "err", err)
 				continue
@@ -108,6 +111,12 @@ func (e *Engine) Run(ctx context.Context) {
 		slog.Error("alert: evaluation interval must be positive", "interval", e.interval)
 		return
 	}
+	if e.email != nil {
+		go e.runEmail(ctx)
+	} else {
+		e.failUndeliverableEmail(ctx)
+	}
+
 	ticker := time.NewTicker(e.interval)
 	defer ticker.Stop()
 
@@ -262,7 +271,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env, now 
 			LastEvaluatedAt: nowStr,
 			CreatedAt:       began,
 		}
-		saved, upsertErr := e.store.UpsertAlert(a)
+		saved, upsertErr := e.saveAlert(rule, a, "firing")
 		if upsertErr != nil {
 			slog.Error("alert: upsert firing", "rule", rule.ID, "service", svc, "err", upsertErr)
 			return
@@ -299,7 +308,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env, now 
 			existing.State = "firing"
 			existing.FiredAt = nowStr
 			existing.LastEvaluatedAt = nowStr
-			saved, upsertErr := e.store.UpsertAlert(existing)
+			saved, upsertErr := e.saveAlert(rule, existing, "firing")
 			if upsertErr != nil {
 				slog.Error("alert: promote to firing", "rule", rule.ID, "service", svc, "err", upsertErr)
 				return
@@ -335,7 +344,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env, now 
 			repeatInterval := time.Duration(rule.RepeatIntervalS) * time.Second
 			if parseErr == nil && now.Sub(refTime) >= repeatInterval {
 				existing.RepeatedAt = nowStr
-				saved, upsertErr := e.store.UpsertAlert(existing)
+				saved, upsertErr := e.saveAlert(rule, existing, "reminder")
 				if upsertErr != nil {
 					slog.Error("alert: update repeated_at", "rule", rule.ID, "service", svc, "err", upsertErr)
 					return
@@ -353,7 +362,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env, now 
 		existing.State = "resolved"
 		existing.ResolvedAt = nowStr
 		existing.LastEvaluatedAt = nowStr
-		saved, upsertErr := e.store.UpsertAlert(existing)
+		saved, upsertErr := e.saveAlert(rule, existing, resolveEvent(rule))
 		if upsertErr != nil {
 			slog.Error("alert: resolve alert", "rule", rule.ID, "service", svc, "err", upsertErr)
 			return
@@ -387,7 +396,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env, now 
 		if rule.ForSeconds == 0 {
 			a.State = "firing"
 			a.FiredAt = nowStr
-			saved, upsertErr := e.store.UpsertAlert(a)
+			saved, upsertErr := e.saveAlert(rule, a, "firing")
 			if upsertErr != nil {
 				slog.Error("alert: re-fire from resolved", "rule", rule.ID, "service", svc, "err", upsertErr)
 				return
@@ -453,8 +462,22 @@ func (e *Engine) Test(ctx context.Context, rule Rule) ([]TestResult, error) {
 	return results, nil
 }
 
+// resolveEvent is the event a resolve notifies, or empty when the rule does not
+// notify on resolve.
+func resolveEvent(rule Rule) string {
+	if rule.NotifyOnResolve {
+		return "resolved"
+	}
+	return ""
+}
+
 // fireWebhookAsync fires the webhook for an alert in a goroutine and updates delivery status.
+// A rule delivering only by email has no webhook result to record; the email
+// worker reports on the alert instead.
 func (e *Engine) fireWebhookAsync(rule Rule, alert Alert, env Env, event string) {
+	if strings.TrimSpace(rule.WebhookURL) == "" && len(e.emailRecipients(rule)) > 0 {
+		return
+	}
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -575,6 +598,10 @@ func (e *Engine) pruneOldAlerts() {
 	n, err := e.store.PruneResolved(days)
 	if err != nil {
 		slog.Warn("alert: prune resolved", "err", err)
+		return
+	}
+	if err := e.store.pruneEmailDeliveries(days, time.Now()); err != nil {
+		slog.Warn("alert: prune email deliveries", "err", err)
 		return
 	}
 	e.lastPrune = time.Now()

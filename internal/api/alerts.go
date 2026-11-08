@@ -3,11 +3,13 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/alert"
+	"github.com/labstack/fanout/internal/auth"
 )
 
 // RegisterAlertRoutes registers alert management REST endpoints.
@@ -19,6 +21,7 @@ func RegisterAlertRoutes(e *echo.Echo, store *alert.Store, engine *alert.Engine)
 	e.GET("/api/alerting/alerts", h.ListAlerts, read)
 	e.GET("/api/alerting/summary", h.AlertSummary, read)
 	e.GET("/api/alerting/rules", h.ListRules, read)
+	e.GET("/api/alerting/email", h.EmailOptions, read)
 	e.POST("/api/alerting/rules", h.CreateRule, manage)
 	e.PUT("/api/alerting/rules/:id", h.ReplaceRule, manage)
 	e.DELETE("/api/alerting/rules/:id", h.DeleteRule, manage)
@@ -76,7 +79,15 @@ func (h *alertHandler) ListRules(c *echo.Context) error {
 	if rules == nil {
 		rules = []alert.Rule{}
 	}
+	for i := range rules {
+		rules[i] = h.engine.WithEmailState(rules[i])
+	}
 	return c.JSON(200, map[string][]alert.Rule{"rules": rules})
+}
+
+// EmailOptions reports whether rules can deliver by email on this instance.
+func (h *alertHandler) EmailOptions(c *echo.Context) error {
+	return c.JSON(200, h.engine.EmailOptions())
 }
 
 // CreateRule creates a new alert rule.
@@ -96,6 +107,9 @@ func (h *alertHandler) CreateRule(c *echo.Context) error {
 	if err := checkRule(req, true); err != nil {
 		return err
 	}
+	if err := h.checkRecipients(&req); err != nil {
+		return err
+	}
 
 	created, err := h.store.CreateRule(req)
 	if err != nil {
@@ -110,7 +124,7 @@ func (h *alertHandler) CreateRule(c *echo.Context) error {
 		}
 	}
 
-	return c.JSON(201, created)
+	return c.JSON(201, h.engine.WithEmailState(created))
 }
 
 // ReplaceRule replaces an existing alert rule.
@@ -133,6 +147,12 @@ func (h *alertHandler) ReplaceRule(c *echo.Context) error {
 	if err := checkRule(req, changed); err != nil {
 		return err
 	}
+	// Likewise for recipients: a saved rule stays editable after SMTP is removed.
+	if err != nil || !slices.Equal(stored.EmailRecipients, req.EmailRecipients) {
+		if err := h.checkRecipients(&req); err != nil {
+			return err
+		}
+	}
 
 	updated, err := h.store.ReplaceRule(req)
 	if err != nil {
@@ -153,7 +173,7 @@ func (h *alertHandler) ReplaceRule(c *echo.Context) error {
 		}
 	}
 
-	return c.JSON(200, updated)
+	return c.JSON(200, h.engine.WithEmailState(updated))
 }
 
 // DeleteRule deletes an alert rule and its associated alerts.
@@ -205,6 +225,23 @@ func (h *alertHandler) TestRule(c *echo.Context) error {
 		"rule":    rule,
 		"results": results,
 	})
+}
+
+// checkRecipients normalizes a rule's email recipients in place, rejecting
+// invalid addresses, too many of them, or any when email is unavailable.
+func (h *alertHandler) checkRecipients(rule *alert.Rule) error {
+	if len(rule.EmailRecipients) == 0 {
+		return nil
+	}
+	if options := h.engine.EmailOptions(); !options.Available {
+		return newAPIError(http.StatusBadRequest, "email_unavailable", options.Message)
+	}
+	recipients, err := auth.NormalizeRecipients(rule.EmailRecipients)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	rule.EmailRecipients = recipients
+	return nil
 }
 
 // checkRule rejects an expression that does not compile and, when headers is

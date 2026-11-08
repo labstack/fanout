@@ -299,7 +299,7 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
 	case path == "/api/insights":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
-	case path == "/api/alerting/alerts" || path == "/api/alerting/summary" || path == "/api/alerting/rules":
+	case path == "/api/alerting/alerts" || path == "/api/alerting/summary" || path == "/api/alerting/rules" || path == "/api/alerting/email":
 		if read {
 			return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, true
 		}

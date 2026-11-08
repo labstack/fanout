@@ -500,9 +500,9 @@ var groups = map[string]groupPage{
 	},
 	"alerts": {
 		Title:       "Alert settings",
-		Description: "Whether the alert engine runs, how often it evaluates, and how long history is kept.",
-		Summary:     "Settings for the alert evaluation loop.",
-		ReadWhen:    []string{"Alerts are evaluating too slowly, or not at all."},
+		Description: "Whether the alert engine runs, how often it evaluates, how long history is kept, and how alert email is addressed and limited.",
+		Summary:     "Settings for the alert evaluation loop and alert email.",
+		ReadWhen:    []string{"Alerts are evaluating too slowly, or not at all.", "You are setting a default alert email destination or changing the per-address limit."},
 	},
 	"metrics": {
 		Title:       "Metrics settings",

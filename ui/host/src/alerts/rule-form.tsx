@@ -3,7 +3,7 @@ import { Box,  Autocomplete, Button, Group, Menu, Modal, NumberInput, Stack, Swi
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useDiscard } from "../dashboards/discard";
-import { listServices, type Rule, type RuleDraft } from "./api";
+import { emailOptionsKey, getEmailOptions, listServices, type Rule, type RuleDraft } from "./api";
 import { percentMistake } from "./values";
 
 /** Starters for the documented variables (site docs: reference/alert-expressions). */
@@ -18,7 +18,7 @@ const blank: RuleDraft = { name: "", description: "", enabled: true, service: ""
 
 function draftOf(rule?: Rule): RuleDraft {
   if (!rule) return blank;
-  const { id: _id, created_at: _created, updated_at: _updated, ...draft } = rule;
+  const { id: _id, created_at: _created, updated_at: _updated, email_status: _status, email_status_detail: _detail, email_status_at: _at, ...draft } = rule;
   return { ...blank, ...draft };
 }
 
@@ -41,6 +41,16 @@ function headersProblem(headers: string | undefined): string | undefined {
   return undefined;
 }
 
+const parseRecipients = (text: string) => text.split(/[,\s]+/).filter(Boolean);
+/** A bare address; the server does the full check (internal/auth/email.go NormalizeRecipients). */
+const bareAddress = /^[^\s@,<>]+@[^\s@,<>]+$/;
+
+function recipientsProblem(recipients: string[], max: number): string | undefined {
+  const invalid = recipients.find(recipient => !bareAddress.test(recipient));
+  if (invalid) return `"${invalid}" is not an email address`;
+  return new Set(recipients.map(r => r.toLowerCase())).size > max ? `Enter at most ${max} addresses` : undefined;
+}
+
 /** Creates or replaces a rule; the server checks the expression and returns why it is invalid. */
 export function RuleForm({ rule, onClose, onSave }: { rule?: Rule; onClose(): void; onSave(draft: RuleDraft): Promise<void> }) {
   const [draft, setDraft] = useState<RuleDraft>(() => draftOf(rule));
@@ -50,7 +60,13 @@ export function RuleForm({ rule, onClose, onSave }: { rule?: Rule; onClose(): vo
   const set = (patch: Partial<RuleDraft>) => { setDraft(current => ({ ...current, ...patch })); setError(undefined); };
   // Like the server, check headers only when they change, so other edits still save.
   const headers = draft.webhook_headers === rule?.webhook_headers ? undefined : headersProblem(draft.webhook_headers);
-  const ready = draft.name.trim() !== "" && draft.expression.trim() !== "" && !headers;
+  const email = useQuery({ queryKey: emailOptionsKey, queryFn: ({ signal }) => getEmailOptions(signal), staleTime: 60_000, retry: false });
+  const [emailText, setEmailText] = useState(() => (rule?.email_recipients ?? []).join(", "));
+  const savedRecipients = (rule?.email_recipients?.length ?? 0) > 0;
+  const recipientsChanged = JSON.stringify(draft.email_recipients ?? []) !== JSON.stringify(rule?.email_recipients ?? []);
+  // Like the server, check recipients only when they change, so a rule stays editable after SMTP is removed.
+  const recipients = recipientsChanged ? recipientsProblem(draft.email_recipients ?? [], email.data?.max_recipients ?? 10) : undefined;
+  const ready = draft.name.trim() !== "" && draft.expression.trim() !== "" && !headers && !recipients;
   // A misspelled service saves, but would never fire; say so without blocking.
   const services = useQuery({ queryKey: ["alerting", "services"], queryFn: ({ signal }) => listServices(signal), staleTime: 60_000, retry: false });
   const service = draft.service?.trim() ?? "";
@@ -90,6 +106,13 @@ export function RuleForm({ rule, onClose, onSave }: { rule?: Rule; onClose(): vo
         {seconds("Cooldown (s)", "cooldown_s", "Quiet period after resolving")}
         {seconds("Repeat every (s)", "repeat_interval_s", "0 delivers once")}
       </Group>
+      <Stack gap={4}>
+        <TextInput label="Email recipients" placeholder="oncall@example.com, team@example.com" disabled={!email.data?.available && !savedRecipients} value={emailText} error={recipients}
+          description={email.data?.available ? `Separate addresses with commas, up to ${email.data.max_recipients}.${email.data.default_destination ? " Leave this and the webhook empty to use the default destination." : ""}` : undefined}
+          onChange={event => { const text = event.currentTarget.value, parsed = parseRecipients(text); setEmailText(text); set({ email_recipients: parsed.length > 0 ? parsed : undefined }); }} />
+        {email.data && !email.data.available && <Text size="xs" c="warn" role="status">{email.data.message}</Text>}
+        {email.isError && <Text size="xs" c="warn" role="status">Email availability could not be checked.</Text>}
+      </Stack>
       <TextInput label="Webhook URL" value={draft.webhook_url ?? ""} onChange={event => set({ webhook_url: event.currentTarget.value })} />
       <Textarea label="Webhook headers" description="A JSON object, for example {&quot;Authorization&quot;: &quot;Bearer …&quot;}" autosize minRows={1} ff="monospace" value={draft.webhook_headers ?? ""} error={headers} onChange={event => set({ webhook_headers: event.currentTarget.value })} />
       <Textarea label="Webhook body template" description="Go text/template; leave empty for the default payload." autosize minRows={1} ff="monospace" value={draft.webhook_template ?? ""} onChange={event => set({ webhook_template: event.currentTarget.value })} />

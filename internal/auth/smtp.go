@@ -58,7 +58,10 @@ func send(cfg SMTPConfig, to, subject, bodyText, bodyHTML string) error {
 	if err != nil {
 		return err
 	}
+	return deliver(context.Background(), cfg, message)
+}
 
+func deliver(ctx context.Context, cfg SMTPConfig, message *mail.Msg) error {
 	options := []mail.Option{
 		mail.WithPort(cfg.Port),
 		mail.WithTimeout(10 * time.Second),
@@ -75,7 +78,7 @@ func send(cfg SMTPConfig, to, subject, bodyText, bodyHTML string) error {
 	if err != nil {
 		return fmt.Errorf("auth: configure SMTP client: %w", err)
 	}
-	if err := client.DialAndSendWithContext(context.Background(), message); err != nil {
+	if err := client.DialAndSendWithContext(ctx, message); err != nil {
 		return fmt.Errorf("auth: send email: %w", err)
 	}
 	return nil

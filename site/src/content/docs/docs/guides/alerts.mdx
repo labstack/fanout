@@ -1,7 +1,7 @@
 ---
 title: Set up alerts
-description: Write alert rules as expressions over service metrics, and deliver them by webhook.
-summary: The rule model, the variables available to an expression, the pending/firing/resolved lifecycle, and webhook delivery.
+description: Write alert rules as expressions over service metrics, and deliver them by webhook or email.
+summary: The rule model, the variables available to an expression, the pending/firing/resolved lifecycle, and webhook and email delivery.
 read_when:
   - You want to be told when a service degrades.
   - A rule is not firing when you expect it to.
@@ -10,23 +10,26 @@ status: preview
 
 The alert engine runs inside the binary and is on by default. It evaluates
 persisted rules every `FANOUT_ALERTS_EVALUATION_INTERVAL` (30s) against service
-rollups, and delivers by webhook.
+rollups, and delivers by webhook, by email, or both.
 
 ## Create and manage a rule
 
 Open **Alerts** in the sidebar, then choose **New rule**. Enter a name and
-expression, plus an optional description and webhook URL. Without a webhook
-URL, the rule records alerts but delivers nothing. Leave **Service** empty to
+expression, plus an optional description, email recipients and webhook URL. A
+rule with neither email recipients nor a webhook URL goes to the
+[default email destination](#email-delivery) when one is configured. Without
+one, the rule records alerts but delivers nothing. Leave **Service** empty to
 evaluate every service, or select one service. Choose **Start from a template**
 for an example expression, then set the timers and save.
 
 The new-rule form starts enabled, with **Hold for (s)** 60, **Cooldown (s)**
 300 and **Repeat every (s)** 3600. **Notify when resolved** starts off. The name,
-description, service, expression and webhook fields start empty.
+description, service, expression, email and webhook fields start empty.
 
 Use the **Enabled** toggle to pause or resume a rule. The rule's actions menu
 has **Edit**, **Test against current data** and **Delete**. Testing evaluates
-the saved expression without changing alert state or sending a webhook.
+the saved expression without changing alert state, sending a webhook or
+sending email.
 Deleting removes the rule and its alert history.
 
 Choose **Open in Explore** to chart a watched measure from raw telemetry.
@@ -54,7 +57,8 @@ An expression, an optional service to scope it to, timing, and delivery:
 | `for_seconds` | How long the condition must hold before firing |
 | `cooldown_s` | Minimum quiet period after resolving before firing again |
 | `repeat_interval_s` | How often to re-deliver while still firing |
-| `webhook_url` | Where to deliver |
+| `email_recipients` | Array of up to 10 addresses to email; omit for none |
+| `webhook_url` | Where to deliver by webhook |
 | `webhook_headers` | JSON-encoded object of extra headers, supplied as a string |
 | `webhook_template` | Go text/template payload body; omit for the default |
 | `notify_on_resolve` | Also deliver when the alert clears |
@@ -85,8 +89,8 @@ An alert moves through three states:
 
 - **pending**: the condition is true but has not held for `for_seconds` yet.
   With `for_seconds: 0` a rule skips this and fires immediately.
-- **firing**: it has held. The webhook is delivered, and re-delivered every
-  `repeat_interval_s` while it stays true.
+- **firing**: it has held. The webhook and email are delivered, and re-delivered
+  every `repeat_interval_s` while it stays true.
 - **resolved**: the expression went false. If `notify_on_resolve` is set, that
   is delivered too.
 
@@ -95,14 +99,73 @@ what stops a metric hovering at the threshold from delivering repeatedly.
 
 Each alert records its last delivery status and timestamp in `GET /api/alerting/alerts`.
 Setting `repeat_interval_s` to zero disables repeat delivery. Disabling a rule
-removes pending alerts and resolves firing alerts, sending a resolve webhook
-when `notify_on_resolve` is set.
+removes pending alerts and resolves firing alerts, sending a resolve
+notification when `notify_on_resolve` is set.
 
 :::caution[The namespace field on a rule is not applied]
 A rule stores `namespace`, but evaluation combines service rollups across
 namespaces. Scope with `service`; services with the same name in different
 namespaces are evaluated together.
 :::
+
+## Email delivery
+
+Email uses the [SMTP settings](/docs/reference/configuration/smtp) Fanout already
+uses for sign-in codes. Without SMTP the option is disabled in the rule form, and
+the API rejects `email_recipients` with the code `email_unavailable`.
+`GET /api/alerting/email` reports whether email is available.
+
+Set `FANOUT_ALERTS_EMAIL_DEFAULT_TO` to a comma-separated list of addresses to
+give every rule a destination. It applies only to a rule with no webhook and no
+recipients of its own, including rules created before email existed. A rule with
+a webhook and no recipients stays webhook-only.
+
+Email follows the rule's existing timing: `for_seconds`, `cooldown_s`,
+`repeat_interval_s` and `notify_on_resolve` apply as they do to webhooks.
+
+Addresses are checked when saved. Each must be a bare address, without a display
+name. They are stored in lowercase and a rule can have up to 10.
+
+### Retries and restarts
+
+A notification is queued in the control database in the same transaction as the
+alert's state change, with one row per recipient. Fanout makes up to five
+attempts, waiting 1, 5, 15, then 30 minutes between them. Connection failures and
+4xx SMTP replies are retried. A 5xx reply or an unusable address fails at once.
+
+Delivery is at least once. A restart resumes queued mail. If Fanout stops while a
+message is being handed to the mail server, it cannot tell whether the server
+took it, so it sends the message again. The repeat has the same `Message-ID`, and
+only that one interrupted message per recipient can repeat.
+
+### The hourly limit
+
+`FANOUT_ALERTS_EMAIL_HOURLY_LIMIT` (default 30) caps the alert emails sent to one
+address in any rolling hour, across all rules. The count is stored, so a restart
+does not reset it. The last email within the limit says that the limit has been
+reached. Notifications over the limit are suppressed: they are dropped, never
+sent later, and logged as a warning.
+
+### Seeing what happened
+
+A rule whose latest email did not go through shows it in the **Rules** table, and
+in `email_status` and `email_status_detail` on `GET /api/alerting/rules`:
+
+| `email_status` | Means |
+|---|---|
+| `sent` | Every recipient accepted the latest notification |
+| `retrying` | An attempt failed and another is scheduled |
+| `failed` | At least one recipient could not be reached |
+| `suppressed` | At least one recipient was over the hourly limit |
+| `unavailable` | The rule has recipients but SMTP is not configured |
+
+For a rule with no webhook, the alert's delivery status under **History** carries
+`success`, `failed` or `suppressed` for the email. When a rule has a webhook, that
+column stays the webhook's result.
+
+Rule names, descriptions and service names are reduced to a single line of
+printable text in the subject and body, and escaped in the HTML part, so a
+hostile service name cannot add mail headers or markup.
 
 ## Why alerts lag the raw data
 
