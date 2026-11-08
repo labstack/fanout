@@ -10,6 +10,7 @@ import (
 	"time"
 
 	appauth "github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/secret"
 )
 
 const maxIngestBatchSize = 50_000
@@ -60,6 +61,11 @@ type Config struct {
 	// until durable publication. Zero is unbounded. A single request is admitted
 	// when no other request holds budget, even if it exceeds the limit.
 	IngestMaxInFlightBytes int `group:"ingest" env:"FANOUT_INGEST_MAX_IN_FLIGHT_BYTES" default:"268435456"`
+	// IngestToken sets the first ingest token when none is stored, so an automated
+	// install accepts telemetry as soon as it starts. Use foi_ plus 43 base64url
+	// characters. Only its hash is stored. It is ignored once a token exists, so a
+	// token rotated in the UI survives restarts.
+	IngestToken string `group:"ingest" env:"FANOUT_INGEST_TOKEN" secret:"true"`
 	// RollupInterval schedules analytical rollups; use a Go duration of at least 1s.
 	RollupInterval time.Duration `group:"storage" env:"FANOUT_ROLLUP_INTERVAL" default:"1m"`
 	// MCPEnabled serves the MCP endpoint at /mcp.
@@ -284,6 +290,9 @@ func (c Config) Validate() error {
 	}
 	if c.IngestBatchSize <= 0 || c.IngestBatchSize > maxIngestBatchSize {
 		return fmt.Errorf("FANOUT_INGEST_BATCH_SIZE must be between 1 and %d, got %d", maxIngestBatchSize, c.IngestBatchSize)
+	}
+	if c.IngestToken != "" && !secret.ValidSecret(c.IngestToken, "foi_") {
+		return fmt.Errorf("FANOUT_INGEST_TOKEN must be foi_ followed by 43 base64url characters")
 	}
 	if c.RollupInterval < time.Second {
 		return fmt.Errorf("FANOUT_ROLLUP_INTERVAL must be at least 1s, got %s", c.RollupInterval)

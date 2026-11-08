@@ -25,14 +25,28 @@ with `POST /api/settings/ingest/token/rotate`. Save the new token when it is
 shown. Rotation invalidates the old token immediately and cuts off existing
 exporters until you update their credentials.
 
+An automated install can accept telemetry as soon as it starts, before any
+administrator exists. Generate a token in the same format and pass it as
+`FANOUT_INGEST_TOKEN`, or `FANOUT_INGEST_TOKEN_FILE` for a mounted secret:
+
+```sh
+printf 'foi_%s\n' "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+```
+
+Fanout stores the token's hash at startup only when no token exists, and setup
+then shows no token. Once a token exists the setting is ignored, so a token
+rotated in the UI survives restarts and changing the setting replaces nothing.
+A value in any other format fails startup with an error naming the setting.
+
 Send it as a bearer token; this is the only accepted ingest credential form:
 
 ```text
 Authorization: Bearer foi_<token>
 ```
 
-Ingest is available after administrator setup. Exporters require the ingest
-token; browser sessions and MCP OAuth tokens cannot authorize exports.
+Ingest is available after administrator setup, or as soon as Fanout starts when
+`FANOUT_INGEST_TOKEN` set the token. Exporters require the ingest token; browser
+sessions and MCP OAuth tokens cannot authorize exports.
 
 ## Configure an SDK
 

@@ -189,6 +189,14 @@ func main() {
 	}
 	defer sqlite.Close()
 
+	settingsStore := settings.NewStore(sqlite.DB)
+	auditStore := auth.NewAuditStore(sqlite.DB)
+	// Runs before the alert engine, the control database's first other writer.
+	if err := applyConfiguredIngestToken(ctx, settingsStore, auditStore, cfg.IngestToken); err != nil {
+		slog.Error("configured ingest token init failed", "err", err)
+		os.Exit(1)
+	}
+
 	// Start alert engine
 	var alertStore *alert.Store
 	var alertEngine *alert.Engine
@@ -203,11 +211,9 @@ func main() {
 		slog.Info("alert engine enabled", "interval", cfg.AlertEvaluationInterval)
 	}
 
-	settingsStore := settings.NewStore(sqlite.DB)
 	userStore := auth.NewUserStore(sqlite.DB)
 	identityStore := auth.NewIdentityStore(sqlite.DB)
 	browserSessions := auth.NewBrowserSessions(sqlite.DB, cfg.SessionIdleTTL, cfg.SessionAbsoluteTTL, cfg.SecureCookies())
-	auditStore := auth.NewAuditStore(sqlite.DB)
 	setup := auth.NewSetup()
 
 	userCount, err := userStore.CountUsers()
@@ -750,6 +756,24 @@ func createLoginLink(cfg config.Config, rawEmail string, breakGlass bool, output
 	query.Set("login_token", token)
 	loginURL.RawQuery = query.Encode()
 	fmt.Fprintf(output, "fanout: %s for %s (valid 15 minutes, single use)\n  %s\n", label, email, loginURL.String())
+	return nil
+}
+
+// applyConfiguredIngestToken seeds the first ingest token from configuration.
+// It logs the outcome by setting name and never the token or its hash.
+func applyConfiguredIngestToken(ctx context.Context, store *settings.Store, audit *auth.AuditStore, token string) error {
+	if token == "" {
+		return nil
+	}
+	applied, err := store.ApplyConfiguredIngestToken(ctx, token, audit)
+	if err != nil {
+		return err
+	}
+	if applied {
+		slog.Info("ingest token set from FANOUT_INGEST_TOKEN")
+	} else {
+		slog.Info("FANOUT_INGEST_TOKEN ignored because an ingest token already exists")
+	}
 	return nil
 }
 

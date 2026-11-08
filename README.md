@@ -39,7 +39,7 @@ docker run --name fanout --restart unless-stopped -p 7520:7520 \
 ```
 
 Open the one-time setup URL printed by the container and create the first administrator. Fanout
-displays the ingest token exactly once; save it with your collector secrets. For later sign-in
+displays the ingest token exactly once, unless `FANOUT_INGEST_TOKEN` already set it; save it with your collector secrets. For later sign-in
 without SMTP, mint a 15-minute, single-use link against the running container's control database:
 
 ```sh

@@ -46,8 +46,8 @@ func (a *ingestAuthorizer) Unary() grpc.UnaryServerInterceptor {
 	}
 }
 
-// authorize requires a valid ingest token on every request (set up during
-// admin creation, rotatable from the settings page). Peer IP is not
+// authorize requires a valid ingest token on every request (set from
+// configuration or during admin creation, rotatable from the settings page). Peer IP is not
 // considered — operators decide who reaches the port.
 func (a *ingestAuthorizer) authorize(ctx context.Context) error {
 	err := a.authorizeToken(ctx, ingestTokenFromContext(ctx))
@@ -82,8 +82,8 @@ func (a *ingestAuthorizer) authorizeToken(ctx context.Context, token string) err
 		return fmt.Errorf("%w: %v", errIngestAuthUnavailable, err)
 	}
 	if ingestCfg.TokenHash == "" {
-		// Pre-setup (no admin yet) — no token exists to check against. Reject
-		// all requests until setup completes; collectors must wait.
+		// No token exists to check against: none was configured and setup has
+		// not issued one. Reject all requests; collectors must wait.
 		slog.Warn("ingest: rejecting request — no ingest token configured (setup not complete)")
 		return errIngestNotInitialized
 	}

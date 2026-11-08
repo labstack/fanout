@@ -13,6 +13,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -28,6 +29,7 @@ import (
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/server"
+	"github.com/labstack/fanout/internal/settings"
 	"github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -762,5 +764,49 @@ func TestCheckHealthDerivedIgnoresEnvironmentProxy(t *testing.T) {
 				t.Fatalf("explicit %s probe must use the unreachable proxy, got %v", scheme, err)
 			}
 		})
+	}
+}
+
+func TestApplyConfiguredIngestTokenLogsWithoutToken(t *testing.T) {
+	sqlite, err := store.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	defer sqlite.Close()
+	settingsStore := settings.NewStore(sqlite.DB)
+	audit := auth.NewAuditStore(sqlite.DB)
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	first := "foi_" + strings.Repeat("A", 43)
+	second := "foi_" + strings.Repeat("B", 43)
+	if err := applyConfiguredIngestToken(context.Background(), settingsStore, audit, ""); err != nil {
+		t.Fatalf("apply without setting: %v", err)
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("logs without the setting = %q, want none", logs.String())
+	}
+	got, err := settingsStore.GetIngest(context.Background())
+	if err != nil || got.TokenHash != "" {
+		t.Fatalf("hash without the setting = %q err = %v", got.TokenHash, err)
+	}
+
+	if err := applyConfiguredIngestToken(context.Background(), settingsStore, audit, first); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	if err := applyConfiguredIngestToken(context.Background(), settingsStore, audit, second); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+
+	output := logs.String()
+	hash := settings.HashIngestToken(first)
+	if strings.Contains(output, first) || strings.Contains(output, second) || strings.Contains(output, hash) {
+		t.Fatalf("logs exposed token material: %s", output)
+	}
+	if strings.Count(output, "FANOUT_INGEST_TOKEN") != 2 {
+		t.Fatalf("logs must report both outcomes by setting name: %s", output)
 	}
 }

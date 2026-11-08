@@ -21,6 +21,7 @@ Vendor credentials and endpoints keep the vendor's documented names.
 | `FANOUT_DEFAULT_NAMESPACE` | string | `default` |
 | `FANOUT_INGEST_BATCH_SIZE` | integer | `50000` |
 | `FANOUT_INGEST_MAX_IN_FLIGHT_BYTES` | integer | `268435456` |
+| `FANOUT_INGEST_TOKEN` or `FANOUT_INGEST_TOKEN_FILE` | string · secret | — |
 
 ## Notes
 
@@ -35,3 +36,13 @@ Sets the group-commit row target; valid values are 1–50000. Individual request
 ### `FANOUT_INGEST_MAX_IN_FLIGHT_BYTES`
 
 Caps decoded telemetry held across concurrent requests until durable publication. Zero is unbounded. A single request is admitted when no other request holds budget, even if it exceeds the limit.
+
+### `FANOUT_INGEST_TOKEN`
+
+Sets the first ingest token when none is stored, so an automated install accepts telemetry as soon as it starts. Use foi_ plus 43 base64url characters. Only its hash is stored. It is ignored once a token exists, so a token rotated in the UI survives restarts.
+
+:::caution[Secrets]
+Settings marked `secret` are redacted from Fanout's startup configuration
+log. Supply either the value or its `_FILE` path, never both. File contents
+lose exactly one trailing newline (LF or CRLF); empty secrets fail startup.
+:::

@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/settings"
 	appstore "github.com/labstack/fanout/internal/store"
 )
@@ -141,5 +142,28 @@ func TestMalformedIngestSecretsSkipSettingsLookup(t *testing.T) {
 		if err := a.authorizeToken(context.Background(), token); !errors.Is(err, errInvalidIngestToken) {
 			t.Fatalf("malformed token: %v", err)
 		}
+	}
+}
+
+func TestAuthorize_AcceptsTokenAppliedFromConfiguration(t *testing.T) {
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlite.Close() })
+	store := settings.NewStore(sqlite.DB)
+	token := "foi_" + strings.Repeat("A", 43)
+	if applied, err := store.ApplyConfiguredIngestToken(context.Background(), token, auth.NewAuditStore(sqlite.DB)); err != nil || !applied {
+		t.Fatalf("applied = %v err = %v", applied, err)
+	}
+
+	authorizer := newIngestAuthorizer(store)
+	valid := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
+	if err := authorizer.authorize(valid); err != nil {
+		t.Fatalf("authorize configured token: %v", err)
+	}
+	other := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer foi_"+strings.Repeat("B", 43)))
+	if status.Code(authorizer.authorize(other)) != codes.Unauthenticated {
+		t.Fatal("a different token must be rejected")
 	}
 }

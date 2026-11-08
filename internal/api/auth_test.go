@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -1019,5 +1020,42 @@ func TestLocalModeRefusesBreakGlassLink(t *testing.T) {
 	}
 	if rec := s.redeemLink(token); rec.Code != http.StatusUnauthorized || hasSessionCookie(rec) {
 		t.Fatalf("break-glass link in local mode = %d %s, want 401", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetupKeepsTokenAppliedFromConfiguration(t *testing.T) {
+	s := newTestAuthServer(t)
+	store := settings.NewStore(s.db.DB)
+	token := "foi_" + strings.Repeat("A", 43)
+	if applied, err := store.ApplyConfiguredIngestToken(context.Background(), token, s.audit); err != nil || !applied {
+		t.Fatalf("applied = %v err = %v", applied, err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("setup = %d %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["status"] != "authenticated" {
+		t.Fatalf("status = %q", body["status"])
+	}
+	if _, issued := body["ingest_token"]; issued {
+		t.Fatal("setup must not issue a token when configuration already supplied one")
+	}
+	if strings.Contains(rec.Body.String(), token) {
+		t.Fatal("setup response exposed the configured token")
+	}
+	got, err := store.GetIngest(context.Background())
+	if err != nil {
+		t.Fatalf("GetIngest: %v", err)
+	}
+	if !settings.CheckIngestToken(token, got.TokenHash) {
+		t.Fatal("setup replaced the configured token")
 	}
 }

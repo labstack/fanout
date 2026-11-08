@@ -559,3 +559,80 @@ func TestLogStartupWarnsAboutUnusableBreakGlassSecret(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadIngestToken(t *testing.T) {
+	const name = "FANOUT_INGEST_TOKEN"
+	valid := "foi_" + strings.Repeat("A", 43)
+
+	t.Run("absent by default", func(t *testing.T) {
+		cfg, err := Load(LoadOptions{Environ: validEnvironment()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.IngestToken != "" {
+			t.Fatal("ingest token must default to empty")
+		}
+	})
+
+	t.Run("environment value", func(t *testing.T) {
+		cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"="+valid)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.IngestToken != valid {
+			t.Fatal("ingest token was not loaded from the environment")
+		}
+	})
+
+	t.Run("file value", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "ingest-token")
+		if err := os.WriteFile(path, []byte(valid+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"_FILE="+path)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.IngestToken != valid {
+			t.Fatal("ingest token was not loaded from its file")
+		}
+	})
+
+	for _, malformed := range []string{
+		"synthetic-private-value",
+		"foi_" + strings.Repeat("A", 42),
+		"foi_" + strings.Repeat("A", 44),
+		"foi_" + strings.Repeat("A", 42) + "+",
+		"fo_" + strings.Repeat("A", 43),
+		strings.Repeat("A", 43),
+		" " + valid,
+	} {
+		t.Run("rejects malformed environment value", func(t *testing.T) {
+			_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"="+malformed)})
+			if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), malformed) {
+				t.Fatal("expected redacted error naming the setting")
+			}
+		})
+		t.Run("rejects malformed file value", func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ingest-token")
+			if err := os.WriteFile(path, []byte(malformed), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"_FILE="+path)})
+			if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), malformed) {
+				t.Fatal("expected redacted error naming the setting")
+			}
+		})
+	}
+
+	t.Run("rejects both forms", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "ingest-token")
+		if err := os.WriteFile(path, []byte(valid), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"="+valid, name+"_FILE="+path)})
+		if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), valid) {
+			t.Fatal("expected redacted conflict error naming the setting")
+		}
+	})
+}
