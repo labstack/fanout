@@ -1,7 +1,7 @@
 ---
 title: First boot
 description: What Fanout checks before it opens a listener, and how to claim the first administrator account.
-summary: Configuration validation, the one-time setup URL or a configured first administrator, and the ingest token you are shown once.
+summary: Configuration validation, the one-time setup URL, and the ingest token you are shown once.
 read_when:
   - The process refuses to start and you want to know what it validated.
   - You have a running instance and need to create the first administrator.
@@ -56,52 +56,6 @@ The setup form sends `email`, `display_name`, and `setup_token` to
 The setup URL is an administrator credential. Restrict access to process logs
 until it is consumed or expires. Treat a leaked setup URL as a compromised
 installation and rebuild with a fresh data directory before repeating setup.
-
-## Naming the first administrator instead
-
-Set `FANOUT_FIRST_ADMIN_EMAIL` to skip the setup URL. When the control database
-holds no users at startup, Fanout creates that address as an active
-administrator and prints no setup banner, so no administrator credential reaches
-the logs:
-
-```sh
-docker run --name fanout --restart unless-stopped -p 7520:7520 \
-  -v fanout-data:/var/lib/fanout/data \
-  -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
-  -e FANOUT_FIRST_ADMIN_EMAIL=admin@example.com \
-  labstack/fanout:latest
-```
-
-Fanout validates the address when it loads configuration and stops with an
-error if it is malformed. The setting takes effect only on first start with an
-empty database. The account it creates is a regular, permanent administrator,
-and changing or removing the setting later has no effect on it:
-
-- Once any user exists, it creates nothing. Restarting with the same address is
-  a no-op. A different address is refused with a warning naming it, and no
-  account is created; an administrator adds further accounts with `POST /api/users`.
-- It never promotes, reactivates or edits an existing account. If the address
-  belongs to an account that is not an active administrator, Fanout warns and
-  leaves the account unchanged.
-
-The first administrator signs in like any other user: with an email code when
-SMTP is configured, or with `fanout login-link` as shown below. In OIDC mode
-they sign in through the provider, and Fanout links the first sign-in to the account
-by its email address, subject to the usual allowed group and domain checks.
-
-:::caution[Claim the administrator account promptly]
-Until the first administrator signs in, whoever first proves control of that address
-claims the administrator account: anyone who can read its mailbox in local mode,
-or any identity provider account that asserts that email in OIDC mode. Use an
-address you control, sign in promptly after first boot, and in OIDC mode confirm
-that the account's `identity.linked` audit event came from your own sign-in.
-:::
-
-No setup request runs, so no ingest token is issued at first boot and ingest
-rejects every exporter until the first administrator issues one. After signing in, open
-**Connect telemetry → Ingest token** in the account menu and choose
-**Issue token**, or call `POST /api/settings/ingest/token/rotate`. Save the token
-when it is shown.
 
 ## Signing in afterwards
 

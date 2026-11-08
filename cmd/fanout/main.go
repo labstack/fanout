@@ -205,12 +205,12 @@ func main() {
 	auditStore := auth.NewAuditStore(sqlite.DB)
 	setup := auth.NewSetup()
 
-	setupRequired, err := prepareFirstAdministrator(cfg.FirstAdminEmail, userStore)
+	userCount, err := userStore.CountUsers()
 	if err != nil {
 		slog.Error("auth status init failed", "err", err)
 		os.Exit(1)
 	}
-	if setupRequired {
+	if userCount == 0 {
 		token, _, err := setup.Rotate()
 		if err != nil {
 			slog.Error("setup token init failed", "err", err)
@@ -722,34 +722,6 @@ func browserLoginURL(cfg config.Config) *url.URL {
 	}
 	loginURL, _ := url.Parse(setupLoginURL(cfg.Addr))
 	return loginURL
-}
-
-// prepareFirstAdministrator applies FANOUT_FIRST_ADMIN_EMAIL and reports whether the
-// control database still has no users, in which case the caller opens the
-// one-time setup URL. The administrator is created only in an empty database; once
-// any user exists the setting never creates, promotes or reactivates anyone.
-func prepareFirstAdministrator(firstAdminEmail string, users *auth.UserStore) (bool, error) {
-	if firstAdminEmail != "" {
-		firstAdmin, outcome, err := users.DesignateFirstAdmin(firstAdminEmail)
-		if err != nil {
-			return false, fmt.Errorf("designate first administrator from FANOUT_FIRST_ADMIN_EMAIL: %w", err)
-		}
-		switch outcome {
-		case auth.FirstAdminCreated:
-			slog.Info("auth: first administrator created from FANOUT_FIRST_ADMIN_EMAIL; no setup URL is issued", "email", firstAdmin.Email)
-		case auth.FirstAdminPresent:
-			if firstAdmin.Role != auth.RoleAdmin || firstAdmin.Status != auth.UserStatusActive {
-				slog.Warn("auth: FANOUT_FIRST_ADMIN_EMAIL names an existing account that is not an active administrator; it was left unchanged", "email", firstAdmin.Email, "role", firstAdmin.Role, "status", firstAdmin.Status)
-			}
-		case auth.FirstAdminRefused:
-			slog.Warn("auth: FANOUT_FIRST_ADMIN_EMAIL ignored; the control database already has users and none has this email, so no account was created. Unset it, or have an administrator add the account", "email", firstAdmin.Email)
-		}
-	}
-	count, err := users.CountUsers()
-	if err != nil {
-		return false, err
-	}
-	return count == 0, nil
 }
 
 func printSetupBanner(httpAddr, token string) {

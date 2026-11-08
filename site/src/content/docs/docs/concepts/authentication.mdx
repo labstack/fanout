@@ -24,8 +24,7 @@ and recovery.
 
 `FANOUT_SELF_SIGNUP` allows verified email addresses to create viewer accounts.
 It defaults to `false` and requires complete SMTP configuration. Self-signup is
-available only once the first administrator exists; an administrator created
-from `FANOUT_FIRST_ADMIN_EMAIL` counts, even before signing in. Viewers can read
+available only after the first administrator completes setup. Viewers can read
 all telemetry, manage their own dashboards and run the built-in agent.
 The built-in agent sends requests to your configured model provider and can
 incur charges. Enabling self-signup grants that access to anyone who can verify
