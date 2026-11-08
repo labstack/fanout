@@ -47,9 +47,10 @@ The port mapping above exposes it only on the host's loopback interface.
 Use [TLS](/docs/guides/tls) and a restricted network route for remote clients.
 
 The ingest token is issued during administrator setup and stored in control
-state. There is no ingest-token environment setting or `_FILE` form. Give the
-issued token to your exporters through their secret delivery mechanism; see
-[send telemetry](/docs/get-started/send-telemetry).
+state as a hash. An automated install can set the first token instead with
+`FANOUT_INGEST_TOKEN` or `FANOUT_INGEST_TOKEN_FILE`; see
+[send telemetry](/docs/get-started/send-telemetry). Give the token to your
+exporters through their secret delivery mechanism.
 
 A named volume preserves data across container replacement. Do not remove it
 when upgrading. The healthcheck marks an unhealthy container; Docker does not

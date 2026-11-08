@@ -31,6 +31,7 @@ Every secret accepts either its value or its file path:
 | `FANOUT_AUTH_CODE_SECRET` | `FANOUT_AUTH_CODE_SECRET_FILE` |
 | `FANOUT_OIDC_CLIENT_SECRET` | `FANOUT_OIDC_CLIENT_SECRET_FILE` |
 | `FANOUT_SMTP_PASSWORD` | `FANOUT_SMTP_PASSWORD_FILE` |
+| `FANOUT_INGEST_TOKEN` | `FANOUT_INGEST_TOKEN_FILE` |
 | `FANOUT_METRICS_TOKEN` | `FANOUT_METRICS_TOKEN_FILE` |
 | `ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY_FILE` |
 | `OPENAI_API_KEY` | `OPENAI_API_KEY_FILE` |
@@ -135,7 +136,8 @@ includes `/v1`, while Anthropic's excludes it.
 Both native and container deployments use one listener. Native installs default
 to loopback; set `FANOUT_ADDR=:7520` for remote access. The image supplies
 `FANOUT_ADDR=:7520` and `FANOUT_DATA_DIR=/var/lib/fanout/data`. Every OTLP request
-requires the ingest token created during first-admin setup; browser sessions
+requires the ingest token created during first-admin setup or set by
+`FANOUT_INGEST_TOKEN` on an empty install; browser sessions
 and MCP tokens do not authorize ingest. Do not embed the ingest token in a
 browser or shipped mobile application.
 

@@ -43,7 +43,8 @@ docker logs fanout 2>&1 | grep -A8 "FANOUT SETUP"
 
 Open the URL, create the administrator, and **save the ingest token shown after
 setup**. The raw token is displayed once; Fanout stores only its hash and cannot
-show it again.
+show it again. If `FANOUT_INGEST_TOKEN` already set the token, setup shows no
+token and leaves that one in place.
 
 An administrator can issue a replacement in **Connect telemetry → Ingest token** in the account menu, or
 with `POST /api/settings/ingest/token/rotate`. Save the new token when it is
