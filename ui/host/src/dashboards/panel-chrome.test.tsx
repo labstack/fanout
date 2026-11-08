@@ -114,7 +114,7 @@ it("scatter has muted 11px alias titles outside the plot",()=>{
   const frame={...r.frame!,columns:[{name:"operation",type:"string" as const,role:"dimension" as const},{name:"calls",type:"number" as const,role:"measure" as const},{name:"p95",type:"number" as const,role:"measure" as const,unit:"ms"}],values:[["GET"],[100],[50]],rows:1};
   const theme=chartThemeFor(false),o=analysisOption({...p,viz:"scatter"},{...r,frame},theme) as any;
   expect(o.xAxis).toMatchObject({name:"Requests",nameLocation:"middle",nameGap:28,nameTextStyle:{fontSize:11,color:theme.muted,align:"right",verticalAlign:"top"}});
-  expect(o.yAxis).toMatchObject({name:"p95 (ms)",nameLocation:"end",nameGap:8,nameRotate:0,nameTextStyle:{fontSize:11,color:theme.muted,align:"left",verticalAlign:"bottom"}});
+  expect(o.yAxis).toMatchObject({name:"p95",nameLocation:"end",nameGap:8,nameRotate:0,nameTextStyle:{fontSize:11,color:theme.muted,align:"left",verticalAlign:"bottom"}});
 });
 it.each(["logs","traces","table","log_patterns"] as const)("%s notes follow the bounded scroll body",async viz=>{
   const h=await render({...p,viz},{...r,frame:{...r.frame!,truncated:true}});
@@ -384,4 +384,31 @@ it("shows invalid problem paths and hints without claiming execution", async () 
  expect(host.textContent?.match(/Unknown field/g)).toHaveLength(1); expect(host.textContent).toContain("query.measures[0]"); expect(host.textContent).toContain("Use count()");
  await act(async()=>host.querySelector<HTMLButtonElement>('[data-panel-view="Data"]')!.click());
  expect(host.textContent).not.toContain("Ran in 0 ms");
+});
+
+it("offers the empty state's range action only where it can change the panel", async () => {
+  const empty: PanelResult = { id: "p", status: "empty", elapsed_ms: 0 };
+  const mount = async (panel: Panel, props: { onWiden?: () => void; zoomed?: boolean; onZoomReset?: () => void }) => {
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host); cleanup.push(() => { root.unmount(); host.remove(); });
+    await act(async () => root.render(<MantineProvider env="test"><PanelCard panel={panel} title={panel.title} result={empty} loading={false} height={300} group="g" editing={false} agentAvailable={false} {...props} /></MantineProvider>));
+    return within(host);
+  };
+  const onWiden = vi.fn(), onZoomReset = vi.fn();
+  let view = await mount(p, { onWiden });
+  await act(async () => view.getByRole("button", { name: "Widen time range" }).click());
+  expect(onWiden).toHaveBeenCalledOnce();
+
+  // A brush zoom is undone first; widening would freeze an absolute range.
+  view = await mount(p, { onWiden, zoomed: true, onZoomReset });
+  expect(view.queryByRole("button", { name: "Widen time range" })).toBeNull();
+  await act(async () => view.getByRole("button", { name: "Reset zoom" }).click());
+  expect(onZoomReset).toHaveBeenCalledOnce();
+
+  // Without a handler, or for a panel pinned to its own range, there is nothing to widen.
+  view = await mount(p, {});
+  expect(view.queryByRole("button", { name: "Widen time range" })).toBeNull();
+  view = await mount({ ...p, time: { range: "1h" } }, { onWiden });
+  expect(view.queryByRole("button", { name: "Widen time range" })).toBeNull();
+  expect(view.getByText("This panel keeps its own time range; edit the panel to change it.")).toBeTruthy();
 });
