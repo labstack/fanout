@@ -122,9 +122,9 @@ issue a new one.
 proxy, set `FANOUT_TRUSTED_PROXY_CIDRS`; otherwise every request shares the
 proxy's address and one limit, and other traffic can block recovery.
 
-Fanout contacts the identity provider's discovery endpoint when the server
-starts, and exits if that fails. Break-glass access therefore needs a server
-that is already running; do not restart Fanout during the outage.
+Fanout starts while the identity provider is unavailable, so break-glass access
+also works after a restart during the outage. See
+[Provider availability](#provider-availability).
 
 ### User account API
 
