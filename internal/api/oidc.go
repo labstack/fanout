@@ -78,7 +78,7 @@ func registerOIDCRoutes(ctx context.Context, e *echo.Echo, cfg config.Config, us
 	e.GET("/api/auth/oidc/start", h.Start)
 	e.GET("/api/auth/oidc/callback", h.Callback)
 	if err != nil {
-		slog.Warn("OIDC discovery failed at startup; retrying in the background", "issuer", cfg.OIDCIssuerURL, "err", err)
+		slog.Warn("OIDC discovery failed at startup; retrying in the background", "issuer", cfg.OIDCIssuerURL, "err", truncatedOIDCDiscoveryError(err))
 		go discovery.run(ctx)
 	} else {
 		close(discovery.done)

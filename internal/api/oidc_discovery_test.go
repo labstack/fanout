@@ -1,16 +1,21 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/echo/v5"
@@ -397,5 +402,120 @@ func TestOIDCDiscoveryBackoffIsBounded(t *testing.T) {
 		if delay != seconds*time.Second {
 			t.Fatalf("backoff %d = %v, want %v", i, delay, seconds*time.Second)
 		}
+	}
+}
+
+type lockedLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestOIDCDiscoveryLogsTruncateProviderBody(t *testing.T) {
+	logs := &lockedLogBuffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	body := strings.Repeat("x", 1<<20)
+	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, body, http.StatusServiceUnavailable)
+	}))
+	defer idp.Close()
+	fixture := newOIDCDiscoveryFixture(t, idp.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	discovery, err := fixture.register(ctx, fastOIDCDiscovery)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(logs.String(), "sign-in stays unavailable"); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("retry failure was never logged")
+		}
+	}
+	cancel()
+	waitForOIDCDiscoveryExit(t, discovery)
+
+	var failures int
+	for line := range strings.SplitSeq(logs.String(), "\n") {
+		if !strings.Contains(line, "OIDC discovery failed") {
+			continue
+		}
+		failures++
+		if !strings.Contains(line, "503 Service Unavailable") {
+			t.Fatalf("log lost the failure status: %.400s", line)
+		}
+		if len(line) > 1024 {
+			t.Fatalf("log line is %d bytes, want the provider body truncated", len(line))
+		}
+	}
+	if failures < 2 {
+		t.Fatalf("logged failures = %d, want the startup and retry sites", failures)
+	}
+}
+
+func TestOIDCTruncatedDiscoveryErrorKeepsValidUTF8(t *testing.T) {
+	got := truncatedOIDCDiscoveryError(errors.New(strings.Repeat("é", 400)))
+	if !utf8.ValidString(got) || len(got) > oidcDiscoveryLogErrorLimit+len("...") {
+		t.Fatalf("truncated error is %d bytes, valid %v", len(got), utf8.ValidString(got))
+	}
+	if short := truncatedOIDCDiscoveryError(errors.New("short")); short != "short" {
+		t.Fatalf("short error = %q", short)
+	}
+}
+
+func TestOIDCDiscoveryWrongIssuerOnRetryStaysUnavailable(t *testing.T) {
+	var wrongIssuer atomic.Bool
+	var wrongAnswers atomic.Int64
+	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !wrongIssuer.Load() {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		wrongAnswers.Add(1)
+		writeOIDCDiscoveryDocument(w, "https://other.example.com")
+	}))
+	defer idp.Close()
+	fixture := newOIDCDiscoveryFixture(t, idp.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	discovery, err := fixture.register(ctx, fastOIDCDiscovery)
+	if err != nil {
+		t.Fatalf("startup failed while the provider was down: %v", err)
+	}
+	wrongIssuer.Store(true)
+	for deadline := time.Now().Add(5 * time.Second); wrongAnswers.Load() < 3; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("wrong-issuer answers = %d, want retries to continue", wrongAnswers.Load())
+		}
+	}
+
+	assertOIDCUnavailable(t, fixture.get("/api/auth/oidc/start"))
+	assertOIDCUnavailable(t, fixture.get("/api/auth/oidc/callback?code=c&state=s"))
+	recorder, resp := readinessWithHealthyEngine(t, discovery, fixture.cfg)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("/readyz status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	if check := resp.Checks["oidc"]; check.Status != "degraded" {
+		t.Fatalf("oidc check = %+v, want degraded", check)
+	}
+	select {
+	case <-discovery.done:
+		t.Fatal("retry loop stopped on a wrong issuer")
+	default:
 	}
 }

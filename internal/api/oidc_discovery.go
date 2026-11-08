@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +18,7 @@ const (
 	oidcDiscoveryAttemptTimeout = 5 * time.Second
 	oidcDiscoveryInitialBackoff = time.Second
 	oidcDiscoveryMaxBackoff     = time.Minute
+	oidcDiscoveryLogErrorLimit  = 256
 )
 
 // oidcDiscoveryRetryAfter tells a client when a login is next worth trying:
@@ -92,9 +94,19 @@ func (d *OIDCDiscovery) run(ctx context.Context) {
 			return
 		}
 		delay = nextOIDCDiscoveryBackoff(delay, d.timing.max)
-		slog.Warn("OIDC discovery failed; sign-in stays unavailable", "issuer", d.issuer, "retry_in", delay, "err", err)
+		slog.Warn("OIDC discovery failed; sign-in stays unavailable", "issuer", d.issuer, "retry_in", delay, "err", truncatedOIDCDiscoveryError(err))
 		timer.Reset(delay)
 	}
+}
+
+// truncatedOIDCDiscoveryError bounds what a failure adds to the log: go-oidc
+// includes the provider's whole response body in its error.
+func truncatedOIDCDiscoveryError(err error) string {
+	message := err.Error()
+	if len(message) <= oidcDiscoveryLogErrorLimit {
+		return message
+	}
+	return strings.ToValidUTF8(message[:oidcDiscoveryLogErrorLimit], "") + "..."
 }
 
 func nextOIDCDiscoveryBackoff(delay, limit time.Duration) time.Duration {
