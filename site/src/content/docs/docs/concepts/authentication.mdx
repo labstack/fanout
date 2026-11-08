@@ -161,9 +161,8 @@ docker exec fanout fanout login-link --break-glass admin@example.com
 
 Set `FANOUT_AUTH_CODE_SECRET` with at least 32 characters before you need this.
 OIDC mode does not require it at startup, but without it the command fails and
-the server keeps login links disabled. The server must also be running already:
-Fanout contacts the provider's discovery endpoint at startup and exits if that
-fails.
+the server keeps login links disabled. Fanout starts while the provider is
+unavailable, so this also works after a restart during the outage.
 
 The command refuses other roles, suspended users and local mode. The URL expires
 in 15 minutes and works once. In OIDC mode, the server accepts only these links
