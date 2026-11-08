@@ -5,9 +5,14 @@ export type Rule = {
   id: string; name: string; description?: string; enabled: boolean; service?: string; namespace?: string; expression: string;
   for_seconds: number; cooldown_s: number; repeat_interval_s: number;
   webhook_url?: string; webhook_headers?: string; webhook_template?: string; notify_on_resolve: boolean;
+  email_recipients?: string[];
+  /** Server-owned result of the rule's latest email notification. */
+  email_status?: "sent" | "retrying" | "failed" | "suppressed" | "unavailable" | string; email_status_detail?: string; email_status_at?: string;
   created_at: string; updated_at: string;
 };
-export type RuleDraft = Omit<Rule, "id" | "created_at" | "updated_at">;
+export type RuleDraft = Omit<Rule, "id" | "created_at" | "updated_at" | "email_status" | "email_status_detail" | "email_status_at">;
+/** internal/alert/email.go EmailOptions. */
+export type EmailOptions = { available: boolean; message?: string; default_destination: boolean; max_recipients: number; hourly_limit?: number };
 export type Alert = {
   id: string; rule_id: string; service: string; state: "pending" | "firing" | "resolved" | string; value?: number;
   fired_at?: string; resolved_at?: string; last_evaluated_at?: string; last_delivery_status?: string; last_delivery_at?: string; created_at: string;
@@ -17,10 +22,12 @@ export type RuleTest = { results: { service: string; triggered: boolean; error?:
 
 export const rulesKey = ["alerting", "rules"] as const;
 export const alertsKey = ["alerting", "alerts"] as const;
+export const emailOptionsKey = ["alerting", "email"] as const;
 const rulePath = (id: string) => `/api/alerting/rules/${encodeURIComponent(id)}`;
 
 export const listRules = (signal?: AbortSignal) => request<{ rules: Rule[] }>("/api/alerting/rules", { signal }).then(r => r.rules);
 export const listAlerts = (signal?: AbortSignal) => request<{ alerts: Alert[] }>("/api/alerting/alerts", { signal }).then(r => r.alerts);
+export const getEmailOptions = (signal?: AbortSignal) => request<EmailOptions>("/api/alerting/email", { signal });
 export const createRule = (rule: RuleDraft) => request<Rule>("/api/alerting/rules", { method: "POST", json: rule });
 export const replaceRule = (id: string, rule: RuleDraft) => request<Rule>(rulePath(id), { method: "PUT", json: rule });
 export const deleteRule = (id: string) => request<unknown>(rulePath(id), { method: "DELETE" });

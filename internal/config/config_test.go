@@ -638,6 +638,36 @@ func TestLoadIngestToken(t *testing.T) {
 	})
 }
 
+func TestAlertEmailSettings(t *testing.T) {
+	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_ALERTS_EMAIL_DEFAULT_TO=Oncall@example.com, b@example.com")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults, err := cfg.AlertEmailDefaults()
+	if err != nil || !reflect.DeepEqual(defaults, []string{"oncall@example.com", "b@example.com"}) {
+		t.Fatalf("defaults = %v, %v", defaults, err)
+	}
+	if cfg.AlertEmailHourlyLimit != 30 {
+		t.Fatalf("hourly limit = %d, want 30", cfg.AlertEmailHourlyLimit)
+	}
+
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"invalid address", append(validEnvironment(), "FANOUT_ALERTS_EMAIL_DEFAULT_TO=nope"), "FANOUT_ALERTS_EMAIL_DEFAULT_TO"},
+		{"negative limit", append(validEnvironment(), "FANOUT_ALERTS_EMAIL_HOURLY_LIMIT=-1"), "FANOUT_ALERTS_EMAIL_HOURLY_LIMIT"},
+		{"no SMTP", []string{"FANOUT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef", "ANTHROPIC_API_KEY=sk-test", "FANOUT_ALERTS_EMAIL_DEFAULT_TO=a@example.com"}, "requires SMTP"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Load(LoadOptions{Environ: tc.env}); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadSCIMToken(t *testing.T) {
 	const name = "FANOUT_SCIM_TOKEN"
 	valid := strings.Repeat("s", 32)
