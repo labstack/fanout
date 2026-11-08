@@ -31,7 +31,7 @@
     "@dagrejs/dagre": "3.1.1",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
-    "@labstack/ui": "2026.11.10",
+    "@labstack/ui": "2026.11.11",
     "@lezer/highlight": "1.2.5",
     "@mantine/core": "9.7.2",
     "@mantine/hooks": "9.7.2",

@@ -95,7 +95,7 @@ COMPONENT INVENTORY
 - npm: @floating-ui/utils 0.2.12 (declared license: MIT)
 - npm: @fontsource-variable/geist 5.3.0 (declared license: OFL-1.1)
 - npm: @fontsource-variable/geist-mono 5.3.0 (declared license: OFL-1.1)
-- npm: @labstack/ui 2026.11.10 (declared license: MIT)
+- npm: @labstack/ui 2026.11.11 (declared license: MIT)
 - npm: @lezer/common 1.5.3 (declared license: MIT)
 - npm: @lezer/highlight 1.2.5 (declared license: MIT)
 - npm: @lezer/lr 1.4.11 (declared license: MIT)
@@ -7602,7 +7602,7 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: @labstack/ui 2026.11.10 / LICENSE
+- npm: @labstack/ui 2026.11.11 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License

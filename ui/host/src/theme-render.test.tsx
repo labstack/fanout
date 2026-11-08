@@ -37,7 +37,7 @@ describe("what actually lands on the element", () => {
   it("puts token stripe and hover variables on the table", async () => {
     const { root, container } = await render(<Table striped highlightOnHover><Table.Tbody><Table.Tr><Table.Td>Value</Table.Td></Table.Tr></Table.Tbody></Table>);
     const table = container.querySelector("table")!;
-    expect(table.style.getPropertyValue("--table-striped-color")).toBe("var(--labstack-inset)");
+    expect(table.style.getPropertyValue("--table-striped-color")).toBe("color-mix(in srgb, var(--labstack-text) 4%, transparent)");
     expect(table.style.getPropertyValue("--table-highlight-on-hover-color")).toBe("var(--labstack-hover)");
     await act(async () => root.unmount());
   });
