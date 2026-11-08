@@ -155,6 +155,10 @@ review than one large one.
 If a change affects runtime behavior, public contracts, data, or security, say
 so explicitly in the description.
 
+Approved pull requests merge through GitHub's merge queue, which reruns the
+required checks on the pull request merged onto `main` and anything queued
+ahead of it, so a branch need not be kept up to date by hand.
+
 Keep credentials, private telemetry, local workstation paths, and private AI
 session links out of source files, documentation, commit messages, and pull
 request descriptions. Local agent caches and evaluation records belong in

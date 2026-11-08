@@ -8,6 +8,8 @@ on:
   pull_request:
     branches: [main]
     types: [opened, edited, synchronize, reopened]
+  # The queue rescans the merged files and the commit text that lands on main.
+  merge_group:
 
 permissions:
   contents: read
@@ -46,4 +48,15 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           { printf '%s\n%s\n' "$TITLE" "$BODY"; git log --format=%B "$BASE..$HEAD"; } |
+            "$RUNNER_TEMP/gitleaks" stdin --redact --no-banner
+
+      # The queue's commits carry the squash title and message, so this is the
+      # text main receives, even if the description changed after queueing.
+      - name: Scan the queued commit messages
+        if: github.event_name == 'merge_group'
+        env:
+          BASE: ${{ github.event.merge_group.base_sha }}
+          HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          git log --format=%B "$BASE..$HEAD" |
             "$RUNNER_TEMP/gitleaks" stdin --redact --no-banner
