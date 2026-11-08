@@ -23,7 +23,8 @@ export function RangeMenu({ time, onRange, onAbsolute, inHeader = false }: { tim
   const [opened, setOpened] = useState(false);
   const [host, setHost] = useState<HTMLElement | null>(null);
   // A phone header has no room for it, so there it stays in the page.
-  const phone = useMediaQuery("(max-width: 48em)");
+  // Read synchronously so a phone never portals into the hidden header slot for a frame.
+  const phone = useMediaQuery("(max-width: 48em)", undefined, { getInitialValueInEffect: false });
   const portal = inHeader && !phone;
   useEffect(() => { setHost(portal ? document.getElementById("shell-time-range") : null); }, [portal]);
   const menu = <Menu position="bottom-end" withinPortal opened={opened} onChange={setOpened}>

@@ -2,7 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Toolbar } from "./toolbar";
+import { RangeMenu, Toolbar } from "./toolbar";
 
 let root: Root;
 beforeEach(() => {
@@ -64,5 +64,30 @@ describe("dashboard range menu", () => {
     await act(async () => apply.click());
     expect(onAbsolute).toHaveBeenCalledWith(new Date(from.value).toISOString(), new Date(to.value).toISOString());
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+});
+
+
+describe("range picker placement", () => {
+  const phone = (matches: boolean) => vi.stubGlobal("matchMedia", (query: string) => ({ matches: matches && query.includes("max-width"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false }));
+  async function place(inHeader: boolean) {
+    const slot = document.createElement("div"); slot.id = "shell-time-range"; document.body.append(slot);
+    const host = document.createElement("div"); document.body.append(host);
+    root = createRoot(host);
+    await act(async () => root.render(<MantineProvider><RangeMenu inHeader={inHeader} time={{ range: "1h" }} onRange={vi.fn()} onAbsolute={vi.fn()} /></MantineProvider>));
+    return { inSlot: slot.querySelector("button") !== null, inPage: host.querySelector("button") !== null };
+  }
+
+  it("moves a page's picker into the header", async () => {
+    phone(false);
+    expect(await place(true)).toEqual({ inSlot: true, inPage: false });
+  });
+  it("keeps a dialog's picker inline", async () => {
+    phone(false);
+    expect(await place(false)).toEqual({ inSlot: false, inPage: true });
+  });
+  it("keeps a page's picker in the page on a phone", async () => {
+    phone(true);
+    expect(await place(true)).toEqual({ inSlot: false, inPage: true });
   });
 });
