@@ -16,6 +16,7 @@ status: preview
 | `fanout --version`, `fanout -v` | Print the build version to stdout and exit. |
 | `fanout -h`, `fanout --help` | Print usage to stderr and exit successfully. |
 | `fanout login-link <email>` | Mint a login URL for an existing active local user. |
+| `fanout login-link --break-glass <email>` | Mint a one-time login URL for an active administrator in OIDC mode. |
 | `fanout healthcheck [url]` | Probe an explicit URL, or derive `/healthz` from listener settings. |
 | `fanout repair verify` | Validate every authoritative telemetry batch without changing it. |
 | `fanout repair quarantine --batch <id>` | Move one confirmed corrupt batch aside. `--batch` is required. |
@@ -39,6 +40,20 @@ The command requires local auth mode, an existing control database and an
 active user. It prints one URL to stderr. The URL expires in 15 minutes and
 works once. It can run while the server is online. See
 [account recovery](/docs/concepts/authentication#recover-local-sign-in).
+
+### Break-glass links
+
+Use `--break-glass` when an OIDC installation's identity provider is unavailable:
+
+```sh
+fanout login-link --break-glass admin@example.com
+```
+
+The flag requires OIDC auth mode, `FANOUT_AUTH_CODE_SECRET` with at least 32
+characters, and an active administrator. Other roles are refused. The URL
+expires in 15 minutes and works once. Without the flag the command refuses OIDC
+mode. See
+[OIDC break-glass recovery](/docs/concepts/authentication#oidc-break-glass-recovery).
 
 ## Health probes
 

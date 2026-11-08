@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/labstack/fanout/internal/db/generated"
@@ -23,7 +24,16 @@ const (
 	maxAttempts      = 3
 	purposeEmailCode = "email_code"
 	purposeLoginLink = "login_link"
+	// purposeBreakGlassLink marks a link minted by `fanout login-link
+	// --break-glass`. It is the only credential the OIDC-mode link route accepts,
+	// and ordinary link verification never matches it.
+	purposeBreakGlassLink = "break_glass_login_link"
 )
+
+// ErrCodeSecretRequired reports a sign-in credential operation attempted
+// without FANOUT_AUTH_CODE_SECRET. An empty HMAC key would make stored hashes
+// computable from the credential alone.
+var ErrCodeSecretRequired = errors.New("auth: FANOUT_AUTH_CODE_SECRET is required for sign-in credentials")
 
 // GenerateCode returns a random 6-digit code.
 func GenerateCode() (string, error) {
@@ -90,17 +100,34 @@ func (s *CodeStore) Create(email string) (string, error) {
 
 // CreateLoginLink stores a short-lived, single-use login link credential.
 func (s *CodeStore) CreateLoginLink(email string) (string, error) {
+	return s.createLink(email, purposeLoginLink)
+}
+
+// CreateBreakGlassLoginLink stores a short-lived, single-use credential that
+// only the OIDC-mode link route redeems.
+func (s *CodeStore) CreateBreakGlassLoginLink(email string) (string, error) {
+	return s.createLink(email, purposeBreakGlassLink)
+}
+
+func (s *CodeStore) createLink(email, purpose string) (string, error) {
 	token, err := GenerateLoginLinkToken()
 	if err != nil {
 		return "", err
 	}
-	if err := s.create(email, token, purposeLoginLink, loginLinkTTL); err != nil {
+	if err := s.create(email, token, purpose, loginLinkTTL); err != nil {
 		return "", err
 	}
 	return token, nil
 }
 
+func (s *CodeStore) secretMissing() bool {
+	return strings.TrimSpace(s.secret) == ""
+}
+
 func (s *CodeStore) create(email, credential, purpose string, ttl time.Duration) error {
+	if s.secretMissing() {
+		return ErrCodeSecretRequired
+	}
 	hash := HashCode(credential, s.secret)
 	id, err := appid.New()
 	if err != nil {
@@ -184,11 +211,21 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 // email it was issued for. Login links are purpose-bound and cannot be used as
 // ordinary email verification codes.
 func (s *CodeStore) VerifyLoginLink(token string) (string, bool, error) {
-	if !secret.ValidSecret(token, "") {
+	return s.consumeLink(token, purposeLoginLink)
+}
+
+// VerifyBreakGlassLoginLink atomically consumes a valid break-glass link and
+// returns the email it was issued for. Ordinary login links never match.
+func (s *CodeStore) VerifyBreakGlassLoginLink(token string) (string, bool, error) {
+	return s.consumeLink(token, purposeBreakGlassLink)
+}
+
+func (s *CodeStore) consumeLink(token, purpose string) (string, bool, error) {
+	if s.secretMissing() || !secret.ValidSecret(token, "") {
 		return "", false, nil
 	}
 	ctx := context.Background()
-	row, err := s.q.GetUnusedLoginLink(ctx, HashCode(token, s.secret))
+	row, err := s.q.GetUnusedLoginLink(ctx, generated.GetUnusedLoginLinkParams{CodeHash: HashCode(token, s.secret), Purpose: purpose})
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
@@ -202,7 +239,7 @@ func (s *CodeStore) VerifyLoginLink(token string) (string, bool, error) {
 	if time.Now().After(expiresAt) {
 		return "", false, nil
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE verifications SET used = 1 WHERE id = ? AND purpose = ? AND used = 0`, row.ID, purposeLoginLink)
+	result, err := s.db.ExecContext(ctx, `UPDATE verifications SET used = 1 WHERE id = ? AND purpose = ? AND used = 0`, row.ID, purpose)
 	if err != nil {
 		return "", false, fmt.Errorf("auth: mark login link used: %w", err)
 	}

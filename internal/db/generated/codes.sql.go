@@ -79,10 +79,15 @@ func (q *Queries) GetLatestUnusedCode(ctx context.Context, arg GetLatestUnusedCo
 const getUnusedLoginLink = `-- name: GetUnusedLoginLink :one
 SELECT id, email, expires_at
 FROM verifications
-WHERE code_hash = ? AND purpose = 'login_link' AND used = 0
+WHERE code_hash = ? AND purpose = ? AND used = 0
 ORDER BY created_at DESC
 LIMIT 1
 `
+
+type GetUnusedLoginLinkParams struct {
+	CodeHash string `json:"code_hash"`
+	Purpose  string `json:"purpose"`
+}
 
 type GetUnusedLoginLinkRow struct {
 	ID        string `json:"id"`
@@ -90,8 +95,8 @@ type GetUnusedLoginLinkRow struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-func (q *Queries) GetUnusedLoginLink(ctx context.Context, codeHash string) (GetUnusedLoginLinkRow, error) {
-	row := q.db.QueryRowContext(ctx, getUnusedLoginLink, codeHash)
+func (q *Queries) GetUnusedLoginLink(ctx context.Context, arg GetUnusedLoginLinkParams) (GetUnusedLoginLinkRow, error) {
+	row := q.db.QueryRowContext(ctx, getUnusedLoginLink, arg.CodeHash, arg.Purpose)
 	var i GetUnusedLoginLinkRow
 	err := row.Scan(&i.ID, &i.Email, &i.ExpiresAt)
 	return i, err

@@ -353,6 +353,32 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("OIDC startup tolerates an unusable login-link secret", func(t *testing.T) {
+		c := valid
+		c.AuthMode = "oidc"
+		c.OIDCIssuerURL = "https://id.example.com"
+		c.OIDCClientID = "fanout"
+		c.OIDCClientSecret = "secret"
+		c.OIDCEmailClaim = "email"
+		c.OIDCEmailVerification = "required"
+		c.OIDCDefaultRole = "viewer"
+		c.PublicURL = "https://fanout.example.com"
+		for _, secret := range []string{"", "short"} {
+			c.AuthCodeSecret = secret
+			if err := c.Validate(); err != nil {
+				t.Fatalf("secret %q should not fail OIDC startup: %v", secret, err)
+			}
+			err := c.ValidateLoginLinkSecret()
+			if err == nil || !strings.Contains(err.Error(), "FANOUT_AUTH_CODE_SECRET") {
+				t.Fatalf("secret %q: ValidateLoginLinkSecret = %v, want an error naming the variable", secret, err)
+			}
+		}
+		c.AuthCodeSecret = strings.Repeat("x", 32)
+		if err := c.ValidateLoginLinkSecret(); err != nil {
+			t.Fatalf("32-character secret should be usable: %v", err)
+		}
+	})
+
 	t.Run("OIDC verified email wildcard is explicit and valid", func(t *testing.T) {
 		c := valid
 		c.AuthMode = "oidc"
