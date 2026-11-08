@@ -225,6 +225,9 @@ func (c Config) LogStartup() {
 	if c.MetricsPublic {
 		slog.Warn("Prometheus metrics are publicly accessible", "path", "/metrics")
 	}
+	if strings.ToLower(strings.TrimSpace(c.AuthMode)) == "oidc" && c.AuthCodeSecret != "" && c.ValidateLoginLinkSecret() != nil {
+		slog.Warn("FANOUT_AUTH_CODE_SECRET is shorter than 32 characters; OIDC break-glass login links will be unavailable")
+	}
 	if c.SelfSignup {
 		slog.Info("self-signup is enabled", "role", appauth.RoleViewer)
 	}

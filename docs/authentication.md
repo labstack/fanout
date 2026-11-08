@@ -114,7 +114,13 @@ expires after 15 minutes and works once. In OIDC mode `/api/auth/link/verify`
 accepts only these links, refuses an ordinary login link without consuming it,
 and re-checks that the account is still an active administrator. Issuing writes
 a `login_link.break_glass_issued` audit event and redeeming writes a
-`login_link.break_glass_redeemed` audit event.
+`login_link.break_glass_redeemed` audit event. If the redemption event cannot be
+written, Fanout discards the session and the request fails; the link is spent,
+so issue a new one.
+
+`/api/auth/link/verify` is rate limited per client address. Behind a reverse
+proxy, set `FANOUT_TRUSTED_PROXY_CIDRS`; otherwise every request shares the
+proxy's address and one limit, and other traffic can block recovery.
 
 Fanout contacts the identity provider's discovery endpoint when the server
 starts, and exits if that fails. Break-glass access therefore needs a server
