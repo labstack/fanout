@@ -191,8 +191,8 @@ test *ARGS='./...':
 # that alignment check — the -race data-race detector stays on.
 
 # Run the Go tests under the race detector.
-test-race:
-    bash scripts/with-duckdb.sh go test -race -gcflags=all=-d=checkptr=0 ./...
+test-race *ARGS='./...':
+    bash scripts/with-duckdb.sh go test -race -gcflags=all=-d=checkptr=0 {{ARGS}}
 
 # Opt-in wall-clock acceptance; deterministic work bounds remain in test.
 fanql-perf:
@@ -359,14 +359,18 @@ social-card:
 
 # ── Gate ─────────────────────────────────────────────────────────────────────
 
-# lefthook's pre-push hook and CI both run this.
+# lefthook's pre-push hook runs this; CI runs the same three parts in parallel
+# jobs and adds the race suite.
+check: check-static test ui-test
+    @echo "All checks passed"
+
+# Everything in `check` except the Go and UI unit suites.
 #
 # docs-generate-check comes before the site build for the same reason it exists:
 # a settings page that no longer matches the type the loader binds is a
 # documented setting the binary would reject, and it should fail here rather
 # than be published.
-check: script-tests dashboard-eval-generate-check test-names-check go-deadcode ui-deadcode fmt-check ui-boundaries-check lint release-test duckdb-wrapper-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
-    @echo "All checks passed"
+check-static: script-tests dashboard-eval-generate-check test-names-check go-deadcode ui-deadcode fmt-check ui-boundaries-check lint release-test duckdb-wrapper-test ui-audit ui-check notices-check docs-generate-check site-build
 
 clean:
     rm -rf bin
