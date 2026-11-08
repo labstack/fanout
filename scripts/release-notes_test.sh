@@ -100,6 +100,14 @@ test_main() (
 
   out=$(main v2026.1.0-alpha <<< "$published")
   contains "$out" "First release" main-first
+  out=$(main v2026.1.0-alpha < /dev/null)
+  contains "$out" "First release" main-first-empty-list
+
+  # An empty release list with older tags in git is an API failure, not a
+  # first release.
+  if (main v2026.2.1-alpha < /dev/null >/dev/null 2>&1); then
+    fail "an empty release list was reported as a first release"
+  fi
 
   # v2026.2.0-alpha was tagged but its release failed, so it was never
   # published: v2026.2.1-alpha must carry its format change and migration.

@@ -137,6 +137,12 @@ main() {
   if [ -n "$previous" ]; then
     git rev-parse --verify --quiet "refs/tags/${previous}" >/dev/null ||
       die "previous release tag is not fetched: $previous"
+  else
+    # "First release" is only true when no older release tag exists at all. An
+    # empty or truncated release list must not hide every earlier change.
+    local older
+    older=$(git tag --list 'v*.*.*' | previous_release_tag "$tag") || exit 1
+    [ -z "$older" ] || die "no published release precedes $tag, but tag $older does; check the release list"
   fi
   new_format=$(batch_format_at "$tag") || exit 1
   if [ -n "$previous" ]; then
