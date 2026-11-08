@@ -54,6 +54,7 @@ const (
 	routePolicyCapability
 	routePolicyServiceCredential
 	routePolicyProtocol
+	routePolicySCIM
 )
 
 type routePolicy struct {
@@ -87,12 +88,21 @@ func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, sessions *auth.
 }
 
 func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg config.Config) echo.MiddlewareFunc {
+	// Without a token, SCIM paths are classified exactly as if SCIM did not
+	// exist: unknown to the API and left to the browser application.
+	classify := classifyNonSCIMRoute
+	if cfg.SCIMToken != "" {
+		classify = classifyRoute
+	}
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			path := c.Request().URL.Path
-			policy, classified := classifyRoute(c.Request().Method, path)
+			policy, classified := classify(c.Request().Method, path)
+			if cfg.SCIMToken != "" && isSCIMPath(path) {
+				return authorizeSCIM(c, cfg.SCIMToken, classified, next)
+			}
 			if !classified {
-				if routePathKnown(path) {
+				if routePathKnown(classify, path) {
 					return echo.NewHTTPError(http.StatusMethodNotAllowed, "method not allowed")
 				}
 				// Echo may match the trace parameter to an empty or multi-segment ID.
@@ -261,7 +271,30 @@ func constantTimeToken(presented, expected string) bool {
 	return subtle.ConstantTimeCompare([]byte(presented), []byte(expected)) == 1
 }
 
+// classifyRoute is the full route table, used when SCIM is enabled and to
+// document the routes.
 func classifyRoute(method, path string) (routePolicy, bool) {
+	if isSCIMPath(path) {
+		return classifySCIMRoute(method, path)
+	}
+	return classifyNonSCIMRoute(method, path)
+}
+
+func classifySCIMRoute(method, path string) (routePolicy, bool) {
+	policy := routePolicy{kind: routePolicySCIM}
+	rest, ok := strings.CutPrefix(path, scimUsersPath)
+	switch {
+	case !ok:
+		return policy, false
+	case rest == "":
+		return policy, method == http.MethodGet || method == http.MethodPost
+	case strings.HasPrefix(rest, "/") && len(rest) > 1 && !strings.Contains(rest[1:], "/"):
+		return policy, method == http.MethodGet || method == http.MethodPatch
+	}
+	return policy, false
+}
+
+func classifyNonSCIMRoute(method, path string) (routePolicy, bool) {
 	read := method == http.MethodGet || method == http.MethodHead
 	unsafe := method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch || method == http.MethodDelete
 
@@ -346,9 +379,9 @@ func isProtectedPath(path string) bool {
 	return strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/debug/") || path == "/metrics"
 }
 
-func routePathKnown(path string) bool {
+func routePathKnown(classify func(method, path string) (routePolicy, bool), path string) bool {
 	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
-		if _, ok := classifyRoute(method, path); ok {
+		if _, ok := classify(method, path); ok {
 			return true
 		}
 	}

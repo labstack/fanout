@@ -219,6 +219,8 @@ func requirement(doc api.RouteDoc) string {
 		return "any signed-in user"
 	case api.RoutePolicyProtocol:
 		return "protocol handshake"
+	case api.RoutePolicySCIM:
+		return "SCIM bearer token, when `FANOUT_SCIM_TOKEN` is set"
 	case api.RoutePolicyServiceCredential:
 		return fmt.Sprintf("`%s`, or a service credential", doc.Capability)
 	case api.RoutePolicyCapability:

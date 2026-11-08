@@ -221,7 +221,7 @@ func main() {
 		slog.Error("auth status init failed", "err", err)
 		os.Exit(1)
 	}
-	if userCount == 0 {
+	if setupBannerRequired(userCount, cfg) {
 		token, _, err := setup.Rotate()
 		if err != nil {
 			slog.Error("setup token init failed", "err", err)
@@ -345,6 +345,7 @@ func main() {
 	api.RegisterHealthRoutes(e, q, cfg, oidcDiscovery)
 
 	api.RegisterUserRoutes(e, userStore, smtpCfg, cfg)
+	api.RegisterSCIMRoutes(e, cfg, userStore, identityStore)
 	api.RegisterSettingsRoutes(e, cfg, settingsStore, auditStore)
 	slog.Info("auth enabled")
 
@@ -788,6 +789,13 @@ func browserLoginURL(cfg config.Config) *url.URL {
 	}
 	loginURL, _ := url.Parse(setupLoginURL(cfg.Addr))
 	return loginURL
+}
+
+// setupBannerRequired reports whether to mint the one-time setup credential.
+// A SCIM token means accounts come from the provisioner, so the credential is
+// never created and cannot reach the log.
+func setupBannerRequired(userCount int64, cfg config.Config) bool {
+	return userCount == 0 && cfg.SCIMToken == ""
 }
 
 func printSetupBanner(httpAddr, token string) {

@@ -57,7 +57,7 @@ func recordAudit(ctx context.Context, executor auditExecutor, event AuditEvent) 
 		"login_link.issued": {}, "login_link.redeemed": {},
 		"login_link.break_glass_issued": {}, "login_link.break_glass_redeemed": {}, "oauth_connection.revoked": {},
 		"oidc.denied": {}, "role.changed": {}, "session.revoked": {}, "setup.completed": {},
-		"user.created": {}, "user.suspended": {}, "user.deleted": {}, "user.provisioned": {}, "user.updated": {},
+		"user.created": {}, "user.suspended": {}, "user.deleted": {}, "user.provisioned": {}, "user.reactivated": {}, "user.updated": {},
 	}) {
 		appmetrics.AuthAuditWriteFailures.Inc()
 		return fmt.Errorf("auth: invalid audit event type %q", event.EventType)
