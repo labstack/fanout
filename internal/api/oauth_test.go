@@ -33,6 +33,12 @@ func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Browse
 
 func newOAuthTestServerWithConfig(t *testing.T, cfg config.Config) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
 	t.Helper()
+	e, users, sessions, _ := newOAuthTestServerAndDB(t, cfg)
+	return e, users, sessions
+}
+
+func newOAuthTestServerAndDB(t *testing.T, cfg config.Config) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions, *appstore.SQLite) {
+	t.Helper()
 	if cfg.PublicURL == "" {
 		cfg.PublicURL = "https://fanout.example.com"
 	}
@@ -86,7 +92,7 @@ func newOAuthTestServerWithConfig(t *testing.T, cfg config.Config) (*echo.Echo, 
 		w.WriteHeader(http.StatusNoContent)
 	})))
 	e.GET("/api/auth/me", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	return e, users, sessions
+	return e, users, sessions, sqlite
 }
 
 func TestMCPRejectsUnexpectedHostBeforeAuthentication(t *testing.T) {

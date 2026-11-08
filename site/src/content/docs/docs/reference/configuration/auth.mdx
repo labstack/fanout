@@ -31,6 +31,7 @@ Vendor credentials and endpoints keep the vendor's documented names.
 | `FANOUT_OIDC_EMAIL_VERIFICATION` | string | `required` |
 | `FANOUT_OIDC_ISSUER_URL` | string | — |
 | `FANOUT_OIDC_OPERATOR_GROUPS` | string | — |
+| `FANOUT_SCIM_TOKEN` or `FANOUT_SCIM_TOKEN_FILE` | string · secret | — |
 | `FANOUT_SELF_SIGNUP` | boolean | `false` |
 | `FANOUT_SESSION_ABSOLUTE_TTL` | duration | `168h` |
 | `FANOUT_SESSION_IDLE_TTL` | duration | `12h` |
@@ -88,6 +89,10 @@ Selects the identity provider issuer; required in OIDC mode. Fanout starts while
 ### `FANOUT_OIDC_OPERATOR_GROUPS`
 
 Lists identity-provider groups mapped to operator, separated by commas.
+
+### `FANOUT_SCIM_TOKEN`
+
+Enables SCIM 2.0 user provisioning under /scim/v2 and turns off browser setup; requires OIDC mode and at least 32 characters.
 
 ### `FANOUT_SELF_SIGNUP`
 

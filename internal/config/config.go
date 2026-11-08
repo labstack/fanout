@@ -181,6 +181,8 @@ type Config struct {
 	SessionIdleTTL time.Duration `group:"auth" env:"FANOUT_SESSION_IDLE_TTL" default:"12h"`
 	// SessionAbsoluteTTL limits total session lifetime; it must be at least FANOUT_SESSION_IDLE_TTL.
 	SessionAbsoluteTTL time.Duration `group:"auth" env:"FANOUT_SESSION_ABSOLUTE_TTL" default:"168h"`
+	// SCIMToken enables SCIM 2.0 user provisioning under /scim/v2 and turns off browser setup; requires OIDC mode and at least 32 characters.
+	SCIMToken string `group:"auth" env:"FANOUT_SCIM_TOKEN" secret:"true"`
 	// OIDCIssuerURL selects the identity provider issuer; required in OIDC mode. Fanout starts while it is unreachable and retries discovery; a mismatched issuer fails startup.
 	OIDCIssuerURL string `group:"auth" env:"FANOUT_OIDC_ISSUER_URL"`
 	// OIDCClientID identifies Fanout's client registration; required in OIDC mode.
@@ -373,6 +375,15 @@ func (c Config) Validate() error {
 		}
 		if !c.SMTPConfigured() {
 			return fmt.Errorf("FANOUT_SELF_SIGNUP requires SMTP")
+		}
+	}
+	if c.SCIMToken != "" {
+		// SCIM links each account to (issuer, subject), which needs an issuer.
+		if authMode != "oidc" {
+			return fmt.Errorf("FANOUT_SCIM_TOKEN requires FANOUT_AUTH_MODE=oidc")
+		}
+		if len(c.SCIMToken) < 32 || strings.ContainsAny(c.SCIMToken, " \t\r\n") {
+			return fmt.Errorf("FANOUT_SCIM_TOKEN must be at least 32 characters with no whitespace")
 		}
 	}
 	if authMode == "oidc" {

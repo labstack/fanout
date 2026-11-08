@@ -23,6 +23,7 @@ const (
 	RoutePolicyCapability        = "capability"
 	RoutePolicyServiceCredential = "service-credential"
 	RoutePolicyProtocol          = "protocol"
+	RoutePolicySCIM              = "scim"
 )
 
 // RouteDoc is what a reader needs to know before calling a route: whether it
@@ -58,6 +59,8 @@ func DescribeRoute(method, path string) (RouteDoc, bool) {
 		doc.Policy = RoutePolicyServiceCredential
 	case routePolicyProtocol:
 		doc.Policy = RoutePolicyProtocol
+	case routePolicySCIM:
+		doc.Policy = RoutePolicySCIM
 	default:
 		// A new kind added to the switch without a name here would otherwise be
 		// published as an empty cell, which reads as "no requirement".

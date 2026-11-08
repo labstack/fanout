@@ -122,9 +122,9 @@ issue a new one.
 proxy, set `FANOUT_TRUSTED_PROXY_CIDRS`; otherwise every request shares the
 proxy's address and one limit, and other traffic can block recovery.
 
-Fanout contacts the identity provider's discovery endpoint when the server
-starts, and exits if that fails. Break-glass access therefore needs a server
-that is already running; do not restart Fanout during the outage.
+Fanout starts while the identity provider is unavailable, so break-glass access
+also works after a restart during the outage. See
+[Provider availability](#provider-availability).
 
 ### User account API
 
@@ -144,7 +144,8 @@ when there are no users.
   `{"status":"active"}`.
 
 Unknown fields return `400`. Email, role, and status changes revoke browser
-sessions. Suspension also blocks sign-in and OAuth token use. Demotion,
+sessions. Suspension also blocks sign-in and revokes the user's OAuth tokens
+and pending authorization codes; reactivation does not restore them. Demotion,
 suspension, and deletion cannot remove the last active administrator.
 The first-run `POST /api/auth/setup` request uses `display_name` alongside
 `email` and `setup_token`.
@@ -303,16 +304,108 @@ require a browser session. Administrators can still revoke all of a user's
 access, including browser sessions and OAuth tokens, through
 `POST /api/users/{id}/access/revoke`.
 
+## SCIM provisioning
+
+Set `FANOUT_SCIM_TOKEN` (or `FANOUT_SCIM_TOKEN_FILE`) to let an identity provider
+or automation create, update and deactivate accounts. The setting requires
+`FANOUT_AUTH_MODE=oidc` and a value of at least 32 characters with no whitespace.
+Without it the routes do not exist and nothing below applies.
+
+With a token configured, Fanout prints no setup banner, `/api/auth/setup` returns
+`410`, and `/api/auth/status` reports `setup_required: false`. The first
+administrator comes from SCIM.
+
+Fanout implements a small subset of SCIM 2.0 (RFC 7644) under `/scim/v2`.
+Requests send `Authorization: Bearer <token>`, and bodies use
+`application/scim+json` or `application/json`. Responses use
+`application/scim+json`, and failures use the RFC 7644 error format.
+
+| Route | Purpose |
+|---|---|
+| `POST /scim/v2/Users` | Create an account and link its identity |
+| `GET /scim/v2/Users?filter=...` | Find an account |
+| `GET /scim/v2/Users/{id}` | Read an account |
+| `PATCH /scim/v2/Users/{id}` | Change `active`, the role, the email or `displayName` |
+
+Other methods return `405` and other paths under `/scim/v2` return `404`. Delete
+is not supported; deactivate with `active: false`. The `ServiceProviderConfig`,
+`Schemas` and `ResourceTypes` discovery endpoints are not implemented.
+
+### Creating accounts
+
+`POST` requires the core User schema, `externalId`, `userName` and one value in
+`roles`. `externalId` is the subject (`sub`) at the configured issuer, and is
+treated as an exact opaque string. `userName` is the email address. If `emails`
+is sent, its primary value must be the same address. The role is `admin`,
+`operator` or `viewer`. `active` defaults to `true`.
+
+The account and the identity `(FANOUT_OIDC_ISSUER_URL, externalId)` are written
+in one transaction with their audit events. The user's first OIDC login finds
+that identity, so no match by email takes place.
+
+A `POST` for an identity that already exists returns `200` with the current
+account and changes nothing, so a delayed retry cannot undo a later change. Send
+a `PATCH` to change an existing account. A new account returns `201`. An email
+held by a different account returns `409` with `scimType` `uniqueness`; Fanout
+never links an existing account by email.
+
+While there are no users, only an active administrator can be created, using the
+same transactional check as setup. Any other request returns `409`, so it can be
+retried once an administrator exists. Concurrent administrators are all created.
+
+### Finding accounts
+
+`filter` accepts exactly `externalId eq "value"` and `userName eq "value"`.
+Attribute names and `eq` are case-insensitive, and the value is a JSON string,
+so `"` and `\` must be escaped. `externalId` matches exactly; `userName` is
+normalized like any email address. Anything else, including a missing filter,
+returns `400` with `scimType` `invalidFilter`. `startIndex` and `count` are
+accepted.
+
+### Updating accounts
+
+`PATCH` takes the `PatchOp` schema with `add` or `replace` operations on `active`,
+`roles`, `userName`, `emails` and `displayName`, with or without a `path`. A path
+filter such as `emails[type eq "work"].value` is not supported. `remove` returns
+`400`. All operations in a request apply as one update, so the checks below see
+the final state.
+
+A request that changes nothing returns `200` and writes nothing: no session
+revocation, no token revocation and no audit event. Resending the same state is
+safe. Changing the email or reactivating an account keeps its identity link.
+
+Deactivating or demoting the last active administrator returns `409`. The check
+runs in the same write transaction as the update.
+
+Deactivation suspends the account. In one transaction it revokes the user's
+browser sessions, revokes their MCP OAuth access and refresh tokens, and deletes
+their pending OAuth authorization codes. Reactivation restores none of these, so
+the user signs in and connects MCP clients again. Deactivating an account that
+is already suspended removes anything still live and writes a `session.revoked`
+event; if nothing is live it writes nothing.
+
+Requests to `/scim/v2` are logged without their query string, because a filter
+holds an email address or subject.
+
+Every change writes an audit event: `user.provisioned` and `identity.linked` on
+creation, then `user.suspended`, `user.reactivated`, `role.changed` or
+`user.updated`. Metadata records `mode: scim`, which fields changed and any role
+or status transition. Addresses and the token are never recorded.
+
+The token is compared in constant time and is never logged. Rotate it by
+changing the setting and restarting Fanout.
+
 ## Credentials at a glance
 
 | Credential | Purpose | Rotation |
 |---|---|---|
-| Setup URL | Creates the first administrator | One-time, expires in 1 hour |
+| Setup URL | Creates the first administrator | One-time, expires in 1 hour; not issued when `FANOUT_SCIM_TOKEN` is set |
 | Login URL | Authenticates one existing active local user | One-time, expires in 15 minutes; mint with `fanout login-link` |
 | Break-glass URL | Authenticates one active administrator in OIDC mode | One-time, expires in 15 minutes; mint with `fanout login-link --break-glass` |
 | Browser session | Interactive access | Idle and absolute TTL; revoked on role, email, or status change |
 | Ingest token | OTLP ingest | Settings page; `FANOUT_INGEST_TOKEN` sets only the first token |
 | Metrics token | `/metrics` scrape | `FANOUT_METRICS_TOKEN` |
+| SCIM token | User provisioning at `/scim/v2` | `FANOUT_SCIM_TOKEN`; change the setting and restart |
 | MCP OAuth tokens | MCP clients | 30-day access tokens, checked on every request; 90-day refresh tokens renewed on each use. Refresh rotation with replay-family revocation, admitting the same client's rotated token for one access-token lifetime so processes sharing a credential can refresh from stale copies. Users disconnect individual agents in Settings; admins can still revoke all of a user's access |
 
 Local email codes allow three attempts per code and expire after five minutes.

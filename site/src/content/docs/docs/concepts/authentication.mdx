@@ -86,8 +86,8 @@ roles with `PATCH /api/users/{id}/role` and `{"role":"viewer"}`. Suspend with
 `PATCH /api/users/{id}/status` and `{"status":"suspended"}`; restore with
 `{"status":"active"}`. Unknown fields and invalid statuses return `400`.
 Email, role and status changes revoke browser sessions. Suspension blocks local
-and OIDC sign-in and OAuth token use. Reactivation does not restore revoked
-sessions. The last active administrator cannot be demoted, suspended or deleted.
+and OIDC sign-in and revokes the user's OAuth tokens. Reactivation restores
+neither sessions nor tokens. The last active administrator cannot be demoted, suspended or deleted.
 
 `GET /api/users` returns a `users` array. `DELETE /api/users/{id}` removes an
 account and cascades to its sessions, OAuth grants and owned dashboards. Use
@@ -122,6 +122,39 @@ Replace the origin and set `COOKIE_JAR` to that private jar. Mutating requests
 need `Fanout-Request: 1` or a matching Origin/Referer; cross-site browser requests
 are rejected. Session expiry or revocation requires signing in again. Delete
 the temporary jar when finished and sign out to revoke that session.
+
+## SCIM provisioning
+
+Set `FANOUT_SCIM_TOKEN` (or `FANOUT_SCIM_TOKEN_FILE`) so an identity provider or
+automation can create, update and deactivate accounts. It requires
+`FANOUT_AUTH_MODE=oidc` and at least 32 characters. Without a token the routes
+do not exist.
+
+With a token, Fanout prints no setup banner and `/api/auth/setup` returns `410`;
+the first administrator comes from SCIM.
+
+Fanout implements a small subset of SCIM 2.0 under `/scim/v2`. Send
+`Authorization: Bearer <token>`. Responses and errors use
+`application/scim+json` and the RFC 7644 formats.
+
+- `POST /scim/v2/Users` creates an account from `externalId`, `userName` (the
+  email address) and one `roles` value of `admin`, `operator` or `viewer`. The
+  account and its identity at the configured issuer are written together, so the
+  first OIDC login needs no match by email. Repeating the request returns the
+  existing account with `200` and changes nothing.
+- `GET /scim/v2/Users?filter=externalId eq "<subject>"` finds an account.
+  `userName eq "<email>"` also works. Other filters return `invalidFilter`.
+- `PATCH /scim/v2/Users/{id}` changes `active`, the role, the email and
+  `displayName`. Resending the current values writes nothing.
+
+An email held by a different account returns `409`. While there are no users,
+only an active administrator can be created. Deactivating or demoting the last
+active administrator returns `409`.
+
+Deactivation revokes the user's browser sessions and MCP tokens. Reactivation
+restores neither, and keeps the identity link. See
+[docs/authentication.md](https://github.com/labstack/fanout/blob/main/docs/authentication.md#scim-provisioning)
+for the full contract.
 
 ## Recover local sign-in
 
@@ -161,9 +194,8 @@ docker exec fanout fanout login-link --break-glass admin@example.com
 
 Set `FANOUT_AUTH_CODE_SECRET` with at least 32 characters before you need this.
 OIDC mode does not require it at startup, but without it the command fails and
-the server keeps login links disabled. The server must also be running already:
-Fanout contacts the provider's discovery endpoint at startup and exits if that
-fails.
+the server keeps login links disabled. Fanout starts while the provider is
+unavailable, so this also works after a restart during the outage.
 
 The command refuses other roles, suspended users and local mode. The URL expires
 in 15 minutes and works once. In OIDC mode, the server accepts only these links

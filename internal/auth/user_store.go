@@ -192,16 +192,36 @@ func (s *UserStore) UpdateWithAudit(id string, email, displayName *string, role 
 }
 
 func (s *UserStore) update(id string, email, displayName *string, role *Role, status *UserStatus, event *AuditEvent) (User, error) {
+	user, _, err := s.applyUpdate(id, email, displayName, role, status, event, userUpdateOptions{})
+	return user, err
+}
+
+// userUpdateOptions adds the behaviour a directory-driven update needs on top
+// of an administrator's update.
+type userUpdateOptions struct {
+	// skipUnchanged leaves a request that changes nothing unwritten: no
+	// session or token revocation and no audit event, so a provisioner can
+	// resend the same state.
+	skipUnchanged bool
+	// convergeSuspended makes a repeated suspension of an already-suspended
+	// account remove any browser session or OAuth credential still live.
+	convergeSuspended bool
+	// describe fills in the audit event type and metadata, which depend on the
+	// row read inside the transaction.
+	describe func(before, after User, event *AuditEvent)
+}
+
+func (s *UserStore) applyUpdate(id string, email, displayName *string, role *Role, status *UserStatus, event *AuditEvent, opts userUpdateOptions) (User, bool, error) {
 	ctx, cancel := DetachedWriteContext(context.Background())
 	defer cancel()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return User{}, fmt.Errorf("auth: open user conn: %w", err)
+		return User{}, false, fmt.Errorf("auth: open user conn: %w", err)
 	}
 	defer conn.Close()
 
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return User{}, fmt.Errorf("auth: begin user update: %w", err)
+		return User{}, false, fmt.Errorf("auth: begin user update: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -213,10 +233,10 @@ func (s *UserStore) update(id string, email, displayName *string, role *Role, st
 	q := generated.New(conn)
 	row, err := q.GetUserByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return User{}, ErrUserNotFound
+		return User{}, false, ErrUserNotFound
 	}
 	if err != nil {
-		return User{}, fmt.Errorf("auth: get user by id: %w", err)
+		return User{}, false, fmt.Errorf("auth: get user by id: %w", err)
 	}
 
 	before := toUser(row)
@@ -229,24 +249,38 @@ func (s *UserStore) update(id string, email, displayName *string, role *Role, st
 	}
 	if role != nil {
 		if !ValidRole(string(*role)) {
-			return User{}, fmt.Errorf("auth: invalid role %q", *role)
+			return User{}, false, fmt.Errorf("auth: invalid role %q", *role)
 		}
 		existing.Role = *role
 	}
 	if status != nil {
 		if !ValidUserStatus(string(*status)) {
-			return User{}, fmt.Errorf("auth: invalid status %q", *status)
+			return User{}, false, fmt.Errorf("auth: invalid status %q", *status)
 		}
 		existing.Status = *status
 	}
 	if row.Role == "admin" && row.Status == string(UserStatusActive) && (existing.Status != UserStatusActive || existing.Role != "admin") {
 		admins, err := q.CountActiveAdmins(ctx)
 		if err != nil {
-			return User{}, fmt.Errorf("auth: count active admins: %w", err)
+			return User{}, false, fmt.Errorf("auth: count active admins: %w", err)
 		}
 		if admins <= 1 {
-			return User{}, ErrLastActiveAdmin
+			return User{}, false, ErrLastActiveAdmin
 		}
+	}
+
+	// Access ends on every transition out of active, so a later reactivation
+	// cannot bring old credentials back.
+	removedAccess := int64(0)
+	repeatedSuspension := opts.convergeSuspended && status != nil && before.Status != UserStatusActive
+	if existing.Status != UserStatusActive && (before.Status == UserStatusActive || repeatedSuspension) {
+		if removedAccess, err = revokeUserAccess(ctx, conn, id); err != nil {
+			return User{}, false, err
+		}
+	}
+	unchanged := existing.Email == before.Email && existing.DisplayName == before.DisplayName && existing.Role == before.Role && existing.Status == before.Status
+	if opts.skipUnchanged && unchanged && removedAccess == 0 {
+		return before, false, nil
 	}
 
 	now := userTimestamp(time.Now())
@@ -260,35 +294,38 @@ func (s *UserStore) update(id string, email, displayName *string, role *Role, st
 	})
 	if err != nil {
 		if appstore.IsUniqueConstraint(err) {
-			return User{}, fmt.Errorf("%w: %v", ErrUserConflict, err)
+			return User{}, false, fmt.Errorf("%w: %v", ErrUserConflict, err)
 		}
-		return User{}, fmt.Errorf("auth: update user: %w", err)
+		return User{}, false, fmt.Errorf("auth: update user: %w", err)
 	}
 	securityChanged := before.Email != existing.Email || before.Role != existing.Role || before.Status != existing.Status
-	if securityChanged {
+	if securityChanged || removedAccess > 0 {
 		if err := q.IncrementUserAuthVersion(ctx, generated.IncrementUserAuthVersionParams{UpdatedAt: now, ID: id}); err != nil {
-			return User{}, fmt.Errorf("auth: increment auth version: %w", err)
+			return User{}, false, fmt.Errorf("auth: increment auth version: %w", err)
 		}
 		if _, err := conn.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
-			return User{}, fmt.Errorf("auth: revoke user sessions: %w", err)
+			return User{}, false, fmt.Errorf("auth: revoke user sessions: %w", err)
 		}
 		u, err = q.GetUserByID(ctx, id)
 		if err != nil {
-			return User{}, fmt.Errorf("auth: reload user after revocation: %w", err)
+			return User{}, false, fmt.Errorf("auth: reload user after revocation: %w", err)
 		}
 	}
 	if event != nil {
+		if opts.describe != nil {
+			opts.describe(before, existing, event)
+		}
 		event.TargetType = "user"
 		event.TargetID = id
 		if err := recordAudit(ctx, conn, *event); err != nil {
-			return User{}, err
+			return User{}, false, err
 		}
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return User{}, fmt.Errorf("auth: commit user update: %w", err)
+		return User{}, false, fmt.Errorf("auth: commit user update: %w", err)
 	}
 	committed = true
-	return toUser(u), nil
+	return toUser(u), true, nil
 }
 
 // DeleteWithAudit removes a user and all of its browser sessions by ID.
@@ -419,11 +456,8 @@ func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
 	if _, err := conn.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
 		return fmt.Errorf("auth: delete user sessions: %w", err)
 	}
-	if _, err := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id = ?`, time.Now().UTC().Unix(), id); err != nil {
-		return fmt.Errorf("auth: revoke user OAuth tokens: %w", err)
-	}
-	if _, err := conn.ExecContext(ctx, `DELETE FROM oauth_authorization_codes WHERE user_id = ?`, id); err != nil {
-		return fmt.Errorf("auth: delete user OAuth authorization codes: %w", err)
+	if _, err := revokeUserOAuth(ctx, conn, id); err != nil {
+		return err
 	}
 	if event != nil {
 		event.TargetType = "user"
@@ -437,6 +471,44 @@ func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
 	}
 	committed = true
 	return nil
+}
+
+// revokeUserAccess ends every browser session and OAuth credential of a user
+// and reports how many were still live.
+func revokeUserAccess(ctx context.Context, conn *sql.Conn, id string) (int64, error) {
+	result, err := conn.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id)
+	if err != nil {
+		return 0, fmt.Errorf("auth: revoke user sessions: %w", err)
+	}
+	sessions, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("auth: count revoked sessions: %w", err)
+	}
+	credentials, err := revokeUserOAuth(ctx, conn, id)
+	if err != nil {
+		return 0, err
+	}
+	return sessions + credentials, nil
+}
+
+func revokeUserOAuth(ctx context.Context, conn *sql.Conn, id string) (int64, error) {
+	tokens, err := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, time.Now().UTC().Unix(), id)
+	if err != nil {
+		return 0, fmt.Errorf("auth: revoke user OAuth tokens: %w", err)
+	}
+	revoked, err := tokens.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("auth: count revoked OAuth tokens: %w", err)
+	}
+	codes, err := conn.ExecContext(ctx, `DELETE FROM oauth_authorization_codes WHERE user_id = ?`, id)
+	if err != nil {
+		return 0, fmt.Errorf("auth: delete user OAuth authorization codes: %w", err)
+	}
+	deleted, err := codes.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("auth: count deleted OAuth authorization codes: %w", err)
+	}
+	return revoked + deleted, nil
 }
 
 // CreateFirstAdminWithAudit atomically creates the first admin user.
@@ -464,11 +536,11 @@ func (s *UserStore) createFirstAdmin(email, displayName string, event *AuditEven
 	}()
 
 	q := generated.New(conn)
-	count, err := q.CountUsers(ctx)
+	empty, err := noUsersExist(ctx, q)
 	if err != nil {
-		return User{}, fmt.Errorf("auth: check user count: %w", err)
+		return User{}, err
 	}
-	if count > 0 {
+	if !empty {
 		return User{}, ErrSetupComplete
 	}
 
@@ -496,6 +568,17 @@ func (s *UserStore) createFirstAdmin(email, displayName string, event *AuditEven
 
 // ErrSetupComplete is returned when setup is attempted but users already exist.
 var ErrSetupComplete = errors.New("setup already complete")
+
+// noUsersExist is the empty-database check. Callers must hold a BEGIN IMMEDIATE
+// transaction, so nothing else can create a user between the check and the
+// insert that depends on it.
+func noUsersExist(ctx context.Context, q *generated.Queries) (bool, error) {
+	count, err := q.CountUsers(ctx)
+	if err != nil {
+		return false, fmt.Errorf("auth: check user count: %w", err)
+	}
+	return count == 0, nil
+}
 
 func newCreateUserParams(email, displayName string, role Role) (generated.CreateUserParams, error) {
 	id, err := appid.New()

@@ -162,6 +162,10 @@ Operational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.
 | `POST` | `/oauth/register` | protocol handshake |
 | `POST` | `/oauth/token` | protocol handshake |
 | `GET` | `/readyz` | none |
+| `GET` | `/scim/v2/Users` | SCIM bearer token, when `FANOUT_SCIM_TOKEN` is set |
+| `POST` | `/scim/v2/Users` | SCIM bearer token, when `FANOUT_SCIM_TOKEN` is set |
+| `GET` | `/scim/v2/Users/:id` | SCIM bearer token, when `FANOUT_SCIM_TOKEN` is set |
+| `PATCH` | `/scim/v2/Users/:id` | SCIM bearer token, when `FANOUT_SCIM_TOKEN` is set |
 
 ## What the requirements mean
 
