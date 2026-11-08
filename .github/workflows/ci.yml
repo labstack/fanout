@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The merge queue tests each pull request merged onto the queue ahead of it.
+  merge_group:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -39,9 +41,10 @@ jobs:
 
   # Every step below runs a justfile recipe, named after it. Reproduce any
   # failure locally with the command in the step name — nothing about the gate
-  # lives only in this file.
-  gate:
-    name: Gate
+  # lives only in this file. `just check` is check-static plus the Go and UI
+  # unit suites; CI runs those three in parallel and adds the race suite.
+  static:
+    name: Static checks
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,8 +75,8 @@ jobs:
           cache: npm
           cache-dependency-path: site/package-lock.json
 
-      # `--help` installs the pinned binary without linting; `just check` runs
-      # the real thing, so local and CI share one invocation.
+      # `--help` installs the pinned binary without linting; `just check-static`
+      # runs the real thing, so local and CI share one invocation.
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
@@ -82,22 +85,93 @@ jobs:
       - name: just ui-deps
         run: just ui-deps
 
-      # `just check` ends with site-build, which cannot run without these.
-      # Without it the gate fails as exit 127 — `astro: not found` — which reads
+      # check-static ends with site-build, which cannot run without these.
+      # Without it the job fails as exit 127 — `astro: not found` — which reads
       # like a broken runner rather than a missing install.
       - name: just site-deps
         run: just site-deps
 
-      # fmt-check, lint, dependency audit, UI asset freshness, and
-      # backend/frontend tests.
-      # lefthook runs on push.
-      - name: just check
-        run: just check
+      # fmt-check, lint, dependency audit, UI asset freshness, docs and site.
+      - name: just check-static
+        run: just check-static
 
-      # Re-runs the suite under the race detector. Kept out of `check` so the
-      # local pre-push hook stays fast.
-      - name: just test-race
-        run: just test-race
+      - name: just ui-test
+        run: just ui-test
+
+  # The plain suite keeps the allocation and memory ceilings that only build
+  # without the race detector (`//go:build !race`).
+  go-test:
+    name: Go tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: just test
+        run: just test
+
+  race-shards:
+    name: Race shards
+    runs-on: ubuntu-24.04
+    outputs:
+      shards: ${{ steps.shards.outputs.shards }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: shards
+        run: echo "shards=$(bash scripts/go-race-shards.sh json)" >> "$GITHUB_OUTPUT"
+
+  # The slowest packages each get a runner; scripts/go-race-shards.sh owns the
+  # split, and its "rest" shard takes every other package.
+  go-race:
+    name: Go race (${{ matrix.shard }})
+    needs: race-shards
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.race-shards.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: just test-race $(scripts/go-race-shards.sh ${{ matrix.shard }})
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          packages=$(bash scripts/go-race-shards.sh "$SHARD")
+          # shellcheck disable=SC2086 # one argument per package
+          just test-race $packages
+
+  # The required check. A required job that is skipped counts as passed, so
+  # this one always runs and fails unless every part succeeded.
+  gate:
+    name: Gate
+    needs: [static, go-test, race-shards, go-race]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: ${RESULTS}"
+          for result in ${RESULTS}; do
+            [ "${result}" = success ] || exit 1
+          done
 
   # The performance spec runs in its own job so neither group nears Playwright's
   # 12-minute global timeout; one worker keeps its timings uncontended.
@@ -109,10 +183,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - group: smoke and accessibility
-            slug: smoke
+          # The suite runs on one worker, and most of its time is the 1100
+          # viewport's accessibility and smoke specs, so each 1100 scheme gets a
+          # runner and the 1440 viewport shares one with the short MCP specs.
+          - group: smoke and accessibility (1100 light)
+            slug: smoke-1100-light
             skip_performance: "1"
-            args: --project=app-1100-light --project=app-1100-dark --project=app-1440-light --project=app-1440-dark --project=mcp
+            args: --project=app-1100-light
+          - group: smoke and accessibility (1100 dark)
+            slug: smoke-1100-dark
+            skip_performance: "1"
+            args: --project=app-1100-dark
+          - group: smoke and accessibility (1440, MCP)
+            slug: smoke-1440-mcp
+            skip_performance: "1"
+            args: --project=app-1440-light --project=app-1440-dark --project=mcp
           - group: performance
             slug: performance
             skip_performance: ""
@@ -140,7 +225,7 @@ jobs:
       - name: just ui-deps
         run: just ui-deps
       - name: just e2e-browsers
-        if: matrix.slug == 'smoke' || matrix.slug == 'catalog'
+        if: startsWith(matrix.slug, 'smoke') || matrix.slug == 'catalog'
         run: just e2e-browsers
       - name: just design-check
         if: matrix.slug == 'catalog'
@@ -191,12 +276,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Build the exact runtime image on pull requests and reject high/critical OS,
-  # Go-binary, or embedded-secret findings before merge.
+  # Build the exact runtime image on pull requests and in the merge queue, and
+  # reject high/critical OS, Go-binary, or embedded-secret findings before
+  # merge. It runs beside Gate rather than after it; both are required.
   container-scan:
     name: Container scan
-    if: github.event_name == 'pull_request'
-    needs: gate
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -208,7 +293,7 @@ jobs:
           load: true
           push: false
           tags: fanout:ci
-          build-args: VERSION=sha-${{ github.event.pull_request.head.sha }}
+          build-args: VERSION=sha-${{ github.event.pull_request.head.sha || github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Scan the runtime image

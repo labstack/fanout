@@ -63,7 +63,8 @@ suite. See [browser smoke testing](docs/testing.md) for coverage and failure art
 `just install` also installs [Lefthook](https://lefthook.dev)'s Git hooks, which run
 formatting and linting on commit and the full gate on push. The pre-push hook
 may be skipped when Lefthook detects no changed files;
-CI runs the same `just check` unconditionally and enforces the gate.
+CI runs the same checks unconditionally, split into parallel jobs plus the race
+suite, and enforces the gate.
 
 The browser workspace uses `package.json` overrides for transitive security
 fixes that their direct dependencies have not locked yet. Keep those overrides
@@ -153,6 +154,10 @@ review than one large one.
 
 If a change affects runtime behavior, public contracts, data, or security, say
 so explicitly in the description.
+
+Approved pull requests merge through GitHub's merge queue, which reruns the
+required checks on the pull request merged onto `main` and anything queued
+ahead of it, so a branch need not be kept up to date by hand.
 
 Keep credentials, private telemetry, local workstation paths, and private AI
 session links out of source files, documentation, commit messages, and pull

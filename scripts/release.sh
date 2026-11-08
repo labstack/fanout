@@ -81,8 +81,10 @@ main() {
     --json status --jq '[.[] | select(.status != "completed")] | length')
   [ "$active" = "0" ] || die "another release workflow is still active"
 
-  just check
-  just test-race
+  # CI's push run on main already ran every check and the race suite on this
+  # exact commit; wait for it rather than repeating them here.
+  bash "$(dirname "$0")/ci-passed.sh" --wait "$head_before" ||
+    die "CI has not passed on ${head_before}; rerun it or release a newer main"
 
   [ -z "$(git status --porcelain)" ] || die "verification changed the worktree"
   [ "$(git rev-parse HEAD)" = "$head_before" ] || die "HEAD changed during verification"
