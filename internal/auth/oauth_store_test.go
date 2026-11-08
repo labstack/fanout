@@ -327,8 +327,9 @@ func TestOAuthStoreRejectsWrongAudienceAndSuspendedRefresh(t *testing.T) {
 	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, "https://other.example/mcp"); !errors.Is(err, ErrInvalidOAuthToken) {
 		t.Fatalf("wrong audience = %v, want invalid token", err)
 	}
-	status := UserStatusSuspended
-	if _, err := users.UpdateWithAudit(user.ID, nil, nil, nil, &status, AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
+	// Suspend directly, leaving the token unrevoked, so this exercises the
+	// status check at refresh rather than the revocation done at suspension.
+	if _, err := sqlite.DB.Exec(`UPDATE users SET status = 'suspended' WHERE id = ?`, user.ID); err != nil {
 		t.Fatalf("suspend user: %v", err)
 	}
 	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, ""); !errors.Is(err, ErrInvalidOAuthGrant) {

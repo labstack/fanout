@@ -204,6 +204,10 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodPost, "/mcp", routePolicyProtocol, ""},
 		{http.MethodPost, "/api/mcp", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/assets/app.js", routePolicyPublic, ""},
+		{http.MethodGet, "/scim/v2/Users", routePolicySCIM, ""},
+		{http.MethodPost, "/scim/v2/Users", routePolicySCIM, ""},
+		{http.MethodGet, "/scim/v2/Users/user-1", routePolicySCIM, ""},
+		{http.MethodPatch, "/scim/v2/Users/user-1", routePolicySCIM, ""},
 	}
 	for _, tc := range tests {
 		policy, ok := classifyRoute(tc.method, tc.path)
@@ -213,6 +217,18 @@ func TestRoutePolicyClassification(t *testing.T) {
 		}
 		if policy.kind != tc.kind || policy.capability != tc.capability {
 			t.Errorf("%s %s policy = {%v %q}, want {%v %q}", tc.method, tc.path, policy.kind, policy.capability, tc.kind, tc.capability)
+		}
+	}
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodDelete, "/scim/v2/Users/user-1"},
+		{http.MethodPut, "/scim/v2/Users/user-1"},
+		{http.MethodPost, "/scim/v2/Users/user-1"},
+		{http.MethodGet, "/scim/v2/Users/"},
+		{http.MethodGet, scimUsersPath + "/user-1/extra"},
+		{http.MethodGet, "/scim/v2/Groups"},
+	} {
+		if _, ok := classifyRoute(tc.method, tc.path); ok {
+			t.Errorf("%s %s must be unclassified", tc.method, tc.path)
 		}
 	}
 	if _, ok := classifyRoute(http.MethodPost, "/api/new-unreviewed-route"); ok {

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -635,4 +636,66 @@ func TestLoadIngestToken(t *testing.T) {
 			t.Fatal("expected redacted conflict error naming the setting")
 		}
 	})
+}
+
+func TestLoadSCIMToken(t *testing.T) {
+	const name = "FANOUT_SCIM_TOKEN"
+	valid := strings.Repeat("s", 32)
+	oidc := append(validEnvironment(),
+		"FANOUT_AUTH_MODE=oidc",
+		"FANOUT_OIDC_ISSUER_URL=https://issuer.example.com",
+		"FANOUT_OIDC_CLIENT_ID=client",
+		"FANOUT_OIDC_CLIENT_SECRET=secret",
+		"FANOUT_PUBLIC_URL=https://fanout.example.com",
+	)
+
+	t.Run("absent by default", func(t *testing.T) {
+		cfg, err := Load(LoadOptions{Environ: oidc})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.SCIMToken != "" {
+			t.Fatal("SCIM token must default to empty")
+		}
+	})
+
+	t.Run("environment value", func(t *testing.T) {
+		cfg, err := Load(LoadOptions{Environ: append(slices.Clone(oidc), name+"="+valid)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.SCIMToken != valid {
+			t.Fatal("SCIM token was not loaded from the environment")
+		}
+	})
+
+	t.Run("file value", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "scim-token")
+		if err := os.WriteFile(path, []byte(valid+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(LoadOptions{Environ: append(slices.Clone(oidc), name+"_FILE="+path)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.SCIMToken != valid {
+			t.Fatal("SCIM token was not loaded from its file")
+		}
+	})
+
+	t.Run("requires OIDC mode", func(t *testing.T) {
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"="+valid)})
+		if err == nil || !strings.Contains(err.Error(), "FANOUT_AUTH_MODE=oidc") {
+			t.Fatalf("Load = %v", err)
+		}
+	})
+
+	for label, token := range map[string]string{"short": strings.Repeat("s", 31), "whitespace": strings.Repeat("s", 32) + " x"} {
+		t.Run(label, func(t *testing.T) {
+			_, err := Load(LoadOptions{Environ: append(slices.Clone(oidc), name+"="+token)})
+			if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), token) {
+				t.Fatalf("Load = %v", err)
+			}
+		})
+	}
 }

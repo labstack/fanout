@@ -28,11 +28,25 @@ type IdentityStore struct{ db *sql.DB }
 func NewIdentityStore(db *sql.DB) *IdentityStore { return &IdentityStore{db: db} }
 
 func (s *IdentityStore) Find(ctx context.Context, issuer, subject string) (UserIdentity, error) {
+	return findIdentity(ctx, s.db, `issuer = ? AND subject = ?`, issuer, subject)
+}
+
+// FindForUser returns the identity linked to a user, or ErrUserNotFound when
+// the user has none.
+func (s *IdentityStore) FindForUser(ctx context.Context, userID string) (UserIdentity, error) {
+	return findIdentity(ctx, s.db, `user_id = ?`, userID)
+}
+
+type identityQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func findIdentity(ctx context.Context, querier identityQuerier, where string, args ...any) (UserIdentity, error) {
 	var identity UserIdentity
 	var lastLogin sql.NullString
-	err := s.db.QueryRowContext(ctx, `
+	err := querier.QueryRowContext(ctx, `
 		SELECT id, user_id, issuer, subject, email_at_link, created_at, last_login_at
-		FROM user_identities WHERE issuer = ? AND subject = ?`, issuer, subject,
+		FROM user_identities WHERE `+where, args...,
 	).Scan(&identity.ID, &identity.UserID, &identity.Issuer, &identity.Subject, &identity.EmailAtLink, &identity.CreatedAt, &lastLogin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return UserIdentity{}, ErrUserNotFound

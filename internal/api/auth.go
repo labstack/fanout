@@ -77,7 +77,7 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check auth status")
 	}
 	return c.JSON(200, map[string]any{
-		"setup_required":  count == 0,
+		"setup_required":  count == 0 && h.cfg.SCIMToken == "",
 		"auth_enabled":    true,
 		"auth_mode":       strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)),
 		"agent_available": h.cfg.AgentConfigured(),
@@ -87,6 +87,9 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 }
 
 func (h *AuthHandler) Setup(c *echo.Context) error {
+	if h.cfg.SCIMToken != "" {
+		return echo.NewHTTPError(http.StatusGone, "browser setup is disabled because accounts are provisioned by SCIM")
+	}
 	if !h.setupLimiter.Allow(c.RealIP()) {
 		return rateLimited(c, 15*time.Minute)
 	}

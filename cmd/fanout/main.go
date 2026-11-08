@@ -17,7 +17,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -50,8 +49,6 @@ import (
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/labstack/fanout/internal/ui"
 )
-
-var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 
 // version is set at build time via -ldflags "-X main.version=...".
 var version = "dev"
@@ -221,7 +218,7 @@ func main() {
 		slog.Error("auth status init failed", "err", err)
 		os.Exit(1)
 	}
-	if userCount == 0 {
+	if setupBannerRequired(userCount, cfg) {
 		token, _, err := setup.Rotate()
 		if err != nil {
 			slog.Error("setup token init failed", "err", err)
@@ -245,31 +242,7 @@ func main() {
 		slog.Info("trusted proxy IP extraction enabled", "header", "X-Forwarded-For", "cidrs", cfg.TrustedProxyCIDRs)
 	}
 	e.Use(middleware.Recover())
-	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
-		LogURI:       true,
-		LogStatus:    true,
-		LogLatency:   true,
-		LogMethod:    true,
-		LogRemoteIP:  true,
-		LogUserAgent: true,
-		HandleError:  true,
-		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
-			uri := v.URI
-			if strings.Contains(uri, "token=") {
-				uri = tokenRedactRe.ReplaceAllString(uri, "token=REDACTED")
-			}
-			attrs := []any{"method", v.Method, "uri", uri, "status", v.Status, "latency", v.Latency}
-			if v.Error != nil {
-				attrs = []any{"method", v.Method, "route", c.Path(), "status", v.Status, "latency", v.Latency, "err", v.Error}
-			}
-			if v.Status >= 500 {
-				slog.Error("request", attrs...)
-			} else {
-				slog.Info("request", attrs...)
-			}
-			return nil
-		},
-	}))
+	e.Use(api.RequestLogger())
 
 	api.RegisterAuthMiddleware(e, userStore, browserSessions, auditStore, cfg)
 
@@ -345,6 +318,7 @@ func main() {
 	api.RegisterHealthRoutes(e, q, cfg, oidcDiscovery)
 
 	api.RegisterUserRoutes(e, userStore, smtpCfg, cfg)
+	api.RegisterSCIMRoutes(e, cfg, userStore, identityStore)
 	api.RegisterSettingsRoutes(e, cfg, settingsStore, auditStore)
 	slog.Info("auth enabled")
 
@@ -788,6 +762,13 @@ func browserLoginURL(cfg config.Config) *url.URL {
 	}
 	loginURL, _ := url.Parse(setupLoginURL(cfg.Addr))
 	return loginURL
+}
+
+// setupBannerRequired reports whether to mint the one-time setup credential.
+// A SCIM token means accounts come from the provisioner, so the credential is
+// never created and cannot reach the log.
+func setupBannerRequired(userCount int64, cfg config.Config) bool {
+	return userCount == 0 && cfg.SCIMToken == ""
 }
 
 func printSetupBanner(httpAddr, token string) {
