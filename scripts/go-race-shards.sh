@@ -24,7 +24,9 @@ if [ "$shard" = json ]; then
 fi
 
 module=$(go list -m)
-packages=$(go list ./...)
+# Through the wrapper, so the listing uses the same build tags as the tests
+# and never fetches the dynamic library modules they do not use.
+packages=$(bash scripts/with-duckdb.sh go list ./...)
 
 if [ "$shard" = rest ]; then
   exclude=$(printf "${module}/internal/%s\n" "${isolated[@]}")

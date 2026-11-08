@@ -24,6 +24,9 @@ sha=${1:?usage: ci-passed.sh [--wait] <sha>}
 }
 repo=${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}
 
+# Seconds to wait for CI to register the push run before giving up.
+registration=300
+
 while :; do
   runs=$(gh api "repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${sha}&event=push&branch=main&per_page=20" \
     --jq ".workflow_runs[] | select(.head_sha == \"${sha}\" and .head_branch == \"main\" and .event == \"push\") | \"\(.id) \(.status) \(.conclusion)\"")
@@ -43,7 +46,15 @@ while :; do
   pending=$(awk '$2 != "completed" { print $1; exit }' <<<"$runs")
   if [ "$wait" = 1 ] && [ -n "$pending" ]; then
     echo "ci-passed: waiting for CI run ${pending} on ${sha}" >&2
-    gh run watch "$pending" --repo "$repo" --interval 30 >/dev/null || true
+    # A watch that fails at once (an API error) must not turn into a busy loop.
+    gh run watch "$pending" --repo "$repo" --interval 30 >/dev/null || sleep 30
+    continue
+  fi
+  # Just after a push, CI may not have registered the run yet.
+  if [ "$wait" = 1 ] && [ -z "$runs" ] && ((registration > 0)); then
+    echo "ci-passed: waiting for CI to start on ${sha}" >&2
+    sleep 15
+    registration=$((registration - 15))
     continue
   fi
 
