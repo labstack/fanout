@@ -128,7 +128,8 @@ docker exec fanout fanout login-link admin@example.com
 
 The URL is printed to stderr, expires in 15 minutes and works once. Issuance
 and redemption are audited. The command supports an online server but refuses
-missing or suspended users, a missing control database and OIDC mode.
+missing or suspended users, a missing control database and OIDC mode without
+[`--break-glass`](#oidc-break-glass-recovery).
 
 Creating a local user without SMTP returns `201`,
 `invite_delivery: "not_configured"` and `login_link_required: true`. Mint a link
@@ -138,7 +139,36 @@ SMTP fails delivery, the API reports an error. Repair SMTP after regaining acces
 If the only administrator is suspended or has an unusable address, stop Fanout
 and back up the control database. Repair that existing account's email or status
 in SQLite, preserving its ID and owned data. Restart and mint a login link for
-the active account. OIDC recovery belongs at the provider or configuration layer.
+the active account.
+
+## OIDC break-glass recovery
+
+If the identity provider is unavailable, run this with the server's environment
+and data directory to issue a one-time link for an active administrator:
+
+```sh
+fanout login-link --break-glass admin@example.com
+# For Docker:
+docker exec fanout fanout login-link --break-glass admin@example.com
+```
+
+Set `FANOUT_AUTH_CODE_SECRET` with at least 32 characters before you need this.
+OIDC mode does not require it at startup, but without it the command fails and
+the server keeps login links disabled. The server must also be running already:
+Fanout contacts the provider's discovery endpoint at startup and exits if that
+fails.
+
+The command refuses other roles, suspended users and local mode. The URL expires
+in 15 minutes and works once. In OIDC mode, the server accepts only these links
+and re-checks that the account is still an active administrator. Issuing and
+redeeming write the distinct audit events `login_link.break_glass_issued` and
+`login_link.break_glass_redeemed`. If the redemption event cannot be written,
+Fanout creates no session and the request fails; the link is spent, so issue a
+new one.
+
+`/api/auth/link/verify` is rate limited per client address. Behind a reverse
+proxy, set `FANOUT_TRUSTED_PROXY_CIDRS`; otherwise every request shares the
+proxy's address and one limit, and other traffic can block recovery.
 
 ## Review MCP connections
 

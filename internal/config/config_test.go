@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -353,6 +355,32 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("OIDC startup tolerates an unusable login-link secret", func(t *testing.T) {
+		c := valid
+		c.AuthMode = "oidc"
+		c.OIDCIssuerURL = "https://id.example.com"
+		c.OIDCClientID = "fanout"
+		c.OIDCClientSecret = "secret"
+		c.OIDCEmailClaim = "email"
+		c.OIDCEmailVerification = "required"
+		c.OIDCDefaultRole = "viewer"
+		c.PublicURL = "https://fanout.example.com"
+		for _, secret := range []string{"", "short"} {
+			c.AuthCodeSecret = secret
+			if err := c.Validate(); err != nil {
+				t.Fatalf("secret %q should not fail OIDC startup: %v", secret, err)
+			}
+			err := c.ValidateLoginLinkSecret()
+			if err == nil || !strings.Contains(err.Error(), "FANOUT_AUTH_CODE_SECRET") {
+				t.Fatalf("secret %q: ValidateLoginLinkSecret = %v, want an error naming the variable", secret, err)
+			}
+		}
+		c.AuthCodeSecret = strings.Repeat("x", 32)
+		if err := c.ValidateLoginLinkSecret(); err != nil {
+			t.Fatalf("32-character secret should be usable: %v", err)
+		}
+	})
+
 	t.Run("OIDC verified email wildcard is explicit and valid", func(t *testing.T) {
 		c := valid
 		c.AuthMode = "oidc"
@@ -493,6 +521,40 @@ func TestSecureCookies(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.cfg.SecureCookies(); got != tc.want {
 				t.Fatalf("SecureCookies = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLogStartupWarnsAboutUnusableBreakGlassSecret(t *testing.T) {
+	const shortSecret = "not-long-enough-value"
+	for _, tc := range []struct {
+		name   string
+		mode   string
+		secret string
+		want   bool
+	}{
+		{"oidc short", "oidc", shortSecret, true},
+		{"oidc normalized mode short", " OIDC ", shortSecret, true},
+		{"oidc unset", "oidc", "", false},
+		{"oidc usable", "oidc", strings.Repeat("x", 32), false},
+		{"local short", "local", shortSecret, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
+			Config{AuthMode: tc.mode, AuthCodeSecret: tc.secret}.LogStartup()
+
+			output := logs.String()
+			got := strings.Contains(output, "FANOUT_AUTH_CODE_SECRET") && strings.Contains(output, "break-glass")
+			if got != tc.want {
+				t.Fatalf("warning present = %v, want %v; logs: %s", got, tc.want, output)
+			}
+			if strings.Contains(output, shortSecret) {
+				t.Fatalf("logs contain the secret value: %s", output)
 			}
 		})
 	}

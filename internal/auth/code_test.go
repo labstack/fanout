@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -260,5 +261,79 @@ func TestVerifyCapsConcurrentWrongAttempts(t *testing.T) {
 	}
 	if attempts > maxAttempts {
 		t.Fatalf("attempts = %d, want at most %d: each guess must reserve its attempt before the code is compared", attempts, maxAttempts)
+	}
+}
+
+func TestBreakGlassLoginLinkIsPurposeBound(t *testing.T) {
+	s := newTestCodeStore(t)
+	breakGlass, err := s.CreateBreakGlassLoginLink("admin@example.com")
+	if err != nil {
+		t.Fatalf("CreateBreakGlassLoginLink: %v", err)
+	}
+	var stored string
+	if err := s.db.QueryRow(`SELECT purpose FROM verifications WHERE email = ?`, "admin@example.com").Scan(&stored); err != nil {
+		t.Fatalf("read stored link: %v", err)
+	}
+	if stored != purposeBreakGlassLink {
+		t.Fatalf("stored purpose = %q, want %q", stored, purposeBreakGlassLink)
+	}
+	if _, ok, err := s.VerifyLoginLink(breakGlass); err != nil || ok {
+		t.Fatalf("VerifyLoginLink(break-glass) = (%v, %v), want (false, nil)", ok, err)
+	}
+	email, ok, err := s.VerifyBreakGlassLoginLink(breakGlass)
+	if err != nil || !ok || email != "admin@example.com" {
+		t.Fatalf("VerifyBreakGlassLoginLink = (%q, %v, %v)", email, ok, err)
+	}
+	if _, ok, err := s.VerifyBreakGlassLoginLink(breakGlass); err != nil || ok {
+		t.Fatalf("second VerifyBreakGlassLoginLink = (%v, %v), want (false, nil)", ok, err)
+	}
+
+	ordinary, err := s.CreateLoginLink("user@example.com")
+	if err != nil {
+		t.Fatalf("CreateLoginLink: %v", err)
+	}
+	if _, ok, err := s.VerifyBreakGlassLoginLink(ordinary); err != nil || ok {
+		t.Fatalf("VerifyBreakGlassLoginLink(ordinary) = (%v, %v), want (false, nil)", ok, err)
+	}
+	if _, ok, err := s.VerifyLoginLink(ordinary); err != nil || !ok {
+		t.Fatalf("ordinary link was consumed by the refused redemption: (%v, %v)", ok, err)
+	}
+}
+
+func TestCodeStoreRefusesEmptySecret(t *testing.T) {
+	for _, value := range []string{"", "   "} {
+		s := newTestCodeStore(t)
+		// A row hashed with the real secret proves verification stops at the
+		// missing secret rather than merely failing to find a match.
+		token, err := s.CreateBreakGlassLoginLink("seed@example.com")
+		if err != nil {
+			t.Fatalf("seed link: %v", err)
+		}
+		if _, err := s.db.Exec(`UPDATE verifications SET code_hash = ?`, HashCode(token, value)); err != nil {
+			t.Fatalf("rewrite hash: %v", err)
+		}
+		unkeyed := NewCodeStore(s.db, value)
+		if _, err := unkeyed.CreateLoginLink("a@example.com"); !errors.Is(err, ErrCodeSecretRequired) {
+			t.Fatalf("CreateLoginLink error = %v, want ErrCodeSecretRequired", err)
+		}
+		if _, err := unkeyed.CreateBreakGlassLoginLink("a@example.com"); !errors.Is(err, ErrCodeSecretRequired) {
+			t.Fatalf("CreateBreakGlassLoginLink error = %v, want ErrCodeSecretRequired", err)
+		}
+		if _, err := unkeyed.Create("a@example.com"); !errors.Is(err, ErrCodeSecretRequired) {
+			t.Fatalf("Create error = %v, want ErrCodeSecretRequired", err)
+		}
+		var written int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM verifications WHERE email = ?`, "a@example.com").Scan(&written); err != nil {
+			t.Fatalf("count verifications: %v", err)
+		}
+		if written != 0 {
+			t.Fatalf("verifications written with secret %q = %d, want 0", value, written)
+		}
+		if _, ok, err := unkeyed.VerifyBreakGlassLoginLink(token); err != nil || ok {
+			t.Fatalf("VerifyBreakGlassLoginLink = (%v, %v), want (false, nil)", ok, err)
+		}
+		if _, ok, err := s.VerifyBreakGlassLoginLink(token); err != nil || ok {
+			t.Fatalf("empty-secret hash matched the real secret: (%v, %v)", ok, err)
+		}
 	}
 }

@@ -324,7 +324,12 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 }
 
 func (h *AuthHandler) LoginLink(c *echo.Context) error {
-	if strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)) != "local" {
+	mode := strings.ToLower(strings.TrimSpace(h.cfg.AuthMode))
+	// OIDC mode redeems break-glass links only, and only once the operator has
+	// configured the secret that protects them. Without it the route stays
+	// disabled exactly as it is for an OIDC install that never opted in.
+	breakGlass := mode == "oidc" && h.cfg.ValidateLoginLinkSecret() == nil
+	if mode != "local" && !breakGlass {
 		return echo.NewHTTPError(http.StatusNotFound, "local login is disabled")
 	}
 	if !h.verifyIPLimiter.Allow(c.RealIP()) {
@@ -337,13 +342,17 @@ func (h *AuthHandler) LoginLink(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "login token is required")
 	}
 
-	email, ok, err := h.codes.VerifyLoginLink(strings.TrimSpace(req.Token))
+	verifyLink, redeemedEvent, invalidReason, unavailableReason := h.codes.VerifyLoginLink, auth.AuditEventType("login_link.redeemed"), "invalid_login_link", "suspended_or_missing_login_link_user"
+	if breakGlass {
+		verifyLink, redeemedEvent, invalidReason, unavailableReason = h.codes.VerifyBreakGlassLoginLink, auth.AuditEventType("login_link.break_glass_redeemed"), "invalid_break_glass_link", "suspended_or_missing_break_glass_user"
+	}
+	email, ok, err := verifyLink(strings.TrimSpace(req.Token))
 	if err != nil {
 		slog.Error("auth: verify login link", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to verify login link")
 	}
 	if !ok {
-		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": "invalid_login_link"}})
+		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": invalidReason}})
 		jitter()
 		return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired login link")
 	}
@@ -354,15 +363,34 @@ func (h *AuthHandler) LoginLink(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
 	}
 	if errors.Is(err, auth.ErrUserNotFound) || user.Status != auth.UserStatusActive {
-		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": "suspended_or_missing_login_link_user"}})
+		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": unavailableReason}})
 		jitter()
 		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or suspended")
+	}
+	// Re-check the role here: the account may have changed since the link was
+	// issued, and break-glass access exists for administrators alone.
+	if breakGlass && user.Role != auth.RoleAdmin {
+		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "user", TargetID: user.ID, Metadata: map[string]any{"reason": "break_glass_requires_admin"}})
+		jitter()
+		return echo.NewHTTPError(http.StatusForbidden, "break-glass login requires an administrator")
+	}
+	redeemed := auth.AuditEvent{ActorUserID: user.ID, EventType: redeemedEvent, Outcome: "success", TargetType: "user", TargetID: user.ID}
+	if breakGlass {
+		// Break-glass bypasses the identity provider, so it is audited before
+		// any session exists. A session failure after this point leaves an
+		// audited redemption with no login, which is the safe direction.
+		if err := h.writeAudit(c, redeemed); err != nil {
+			slog.Error("auth: break-glass redemption audit failed", "user_id", user.ID, "err", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
+		}
 	}
 	if err := h.establishSession(c, user); err != nil {
 		slog.Error("auth: login link session establishment failed", "user_id", user.ID, "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
 	}
-	h.recordAudit(c, auth.AuditEvent{ActorUserID: user.ID, EventType: "login_link.redeemed", Outcome: "success", TargetType: "user", TargetID: user.ID})
+	if !breakGlass {
+		h.recordAudit(c, redeemed)
+	}
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, map[string]string{"status": "authenticated"})
 }
@@ -397,13 +425,17 @@ func (h *AuthHandler) Logout(c *echo.Context) error {
 }
 
 func (h *AuthHandler) recordAudit(c *echo.Context, event auth.AuditEvent) {
+	if err := h.writeAudit(c, event); err != nil {
+		slog.Error("authentication audit write failed", "event", event.EventType, "err", err)
+	}
+}
+
+func (h *AuthHandler) writeAudit(c *echo.Context, event auth.AuditEvent) error {
 	event.RemoteIP = c.RealIP()
 	event.UserAgent = c.Request().UserAgent()
 	ctx, cancel := auth.DetachedWriteContext(c.Request().Context())
 	defer cancel()
-	if err := h.audit.Record(ctx, event); err != nil {
-		slog.Error("authentication audit write failed", "event", event.EventType, "err", err)
-	}
+	return h.audit.Record(ctx, event)
 }
 
 func (h *AuthHandler) establishSession(c *echo.Context, user auth.User) error {

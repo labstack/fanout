@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -752,6 +753,273 @@ func TestSetupConsumesTokenBeforeFalliblePostSetupWork(t *testing.T) {
 	}
 	if got := s.setup.Verify(s.setupToken); got != auth.SetupStatusUnset {
 		t.Fatalf("setup token state = %v, want unset: a committed administrator must not leave a live setup credential", got)
+	}
+}
+
+const breakGlassTestSecret = "0123456789abcdef0123456789abcdef"
+
+func newBreakGlassTestServer(t *testing.T, secret string) *testAuthServer {
+	t.Helper()
+	return newTestAuthServerWith(t, config.Config{AuthMode: "oidc", AuthCodeSecret: secret}, auth.SMTPConfig{})
+}
+
+func (s *testAuthServer) redeemLink(token string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/link/verify", strings.NewReader(`{"token":"`+token+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.e.ServeHTTP(rec, req)
+	return rec
+}
+
+func (s *testAuthServer) countAudit(t *testing.T, eventType string) int {
+	t.Helper()
+	var events int
+	if err := s.db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = ?`, eventType).Scan(&events); err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	return events
+}
+
+func (s *testAuthServer) countFailedReason(t *testing.T, reason string) int {
+	t.Helper()
+	var events int
+	if err := s.db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'login.failed' AND json_extract(metadata_json, '$.reason') = ?`, reason).Scan(&events); err != nil {
+		t.Fatalf("query audit reason: %v", err)
+	}
+	return events
+}
+
+func hasSessionCookie(rec *httptest.ResponseRecorder) bool {
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "fanout_session" && cookie.Value != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBreakGlassLinkAuthenticatesActiveAdministratorOnceInOIDCMode(t *testing.T) {
+	s := newBreakGlassTestServer(t, breakGlassTestSecret)
+	user, err := s.users.CreateWithAudit("admin@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token, err := s.codes.CreateBreakGlassLoginLink(user.Email)
+	if err != nil {
+		t.Fatalf("CreateBreakGlassLoginLink: %v", err)
+	}
+	first := s.redeemLink(token)
+	if first.Code != http.StatusOK || !hasSessionCookie(first) {
+		t.Fatalf("first redemption = %d %s", first.Code, first.Body.String())
+	}
+	if second := s.redeemLink(token); second.Code != http.StatusUnauthorized || hasSessionCookie(second) {
+		t.Fatalf("second redemption = %d %s, want 401", second.Code, second.Body.String())
+	}
+	if got := s.countAudit(t, "login_link.break_glass_redeemed"); got != 1 {
+		t.Fatalf("break-glass redeemed events = %d, want 1", got)
+	}
+	if got := s.countAudit(t, "login_link.redeemed"); got != 0 {
+		t.Fatalf("ordinary redeemed events = %d, want 0", got)
+	}
+}
+
+func TestOIDCModeRefusesOrdinaryLoginLinkWithoutConsumingIt(t *testing.T) {
+	s := newBreakGlassTestServer(t, breakGlassTestSecret)
+	user, err := s.users.CreateWithAudit("admin@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token, err := s.codes.CreateLoginLink(user.Email)
+	if err != nil {
+		t.Fatalf("CreateLoginLink: %v", err)
+	}
+	if rec := s.redeemLink(token); rec.Code != http.StatusUnauthorized || hasSessionCookie(rec) {
+		t.Fatalf("ordinary link in OIDC mode = %d %s, want 401 without a session", rec.Code, rec.Body.String())
+	}
+	if got := s.countAudit(t, "login.failed"); got != 1 {
+		t.Fatalf("login.failed events = %d, want 1", got)
+	}
+	if got := s.countAudit(t, "login_link.redeemed") + s.countAudit(t, "login_link.break_glass_redeemed"); got != 0 {
+		t.Fatalf("redeemed events = %d, want 0", got)
+	}
+	if _, ok, err := s.codes.VerifyLoginLink(token); err != nil || !ok {
+		t.Fatalf("ordinary link was consumed: (%v, %v)", ok, err)
+	}
+}
+
+func TestBreakGlassLinkRefusesIneligibleUsersAtRedemption(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		role   auth.Role
+		status auth.UserStatus
+		want   int
+		reason string
+	}{
+		{"viewer", auth.RoleViewer, auth.UserStatusActive, http.StatusForbidden, "break_glass_requires_admin"},
+		{"operator", auth.RoleOperator, auth.UserStatusActive, http.StatusForbidden, "break_glass_requires_admin"},
+		{"suspended administrator", auth.RoleAdmin, auth.UserStatusSuspended, http.StatusUnauthorized, "suspended_or_missing_break_glass_user"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newBreakGlassTestServer(t, breakGlassTestSecret)
+			// A second administrator keeps the last-admin guard out of the way.
+			if _, err := s.users.CreateWithAudit("keeper@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
+				t.Fatalf("Create keeper: %v", err)
+			}
+			user, err := s.users.CreateWithAudit("target@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			// Issue while eligible: redemption must re-check the account's
+			// current state rather than trust the state at issue time.
+			token, err := s.codes.CreateBreakGlassLoginLink(user.Email)
+			if err != nil {
+				t.Fatalf("CreateBreakGlassLoginLink: %v", err)
+			}
+			role, status := tc.role, tc.status
+			if _, err := s.users.UpdateWithAudit(user.ID, nil, nil, &role, &status, auth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			rec := s.redeemLink(token)
+			if rec.Code != tc.want || hasSessionCookie(rec) {
+				t.Fatalf("redemption = %d %s, want %d without a session", rec.Code, rec.Body.String(), tc.want)
+			}
+			if got := s.countAudit(t, "login_link.break_glass_redeemed"); got != 0 {
+				t.Fatalf("redeemed events = %d, want 0", got)
+			}
+			if got := s.countFailedReason(t, tc.reason); got != 1 {
+				t.Fatalf("login.failed events with reason %q = %d, want 1", tc.reason, got)
+			}
+		})
+	}
+}
+
+func TestBreakGlassLinkForMissingUserHasDistinctAuditReason(t *testing.T) {
+	s := newBreakGlassTestServer(t, breakGlassTestSecret)
+	token, err := s.codes.CreateBreakGlassLoginLink("gone@example.com")
+	if err != nil {
+		t.Fatalf("CreateBreakGlassLoginLink: %v", err)
+	}
+	if rec := s.redeemLink(token); rec.Code != http.StatusUnauthorized || hasSessionCookie(rec) {
+		t.Fatalf("redemption = %d %s, want 401 without a session", rec.Code, rec.Body.String())
+	}
+	if got := s.countFailedReason(t, "suspended_or_missing_break_glass_user"); got != 1 {
+		t.Fatalf("break-glass reason events = %d, want 1", got)
+	}
+	if got := s.countFailedReason(t, "suspended_or_missing_login_link_user"); got != 0 {
+		t.Fatalf("ordinary reason events = %d, want 0", got)
+	}
+}
+
+func TestOrdinaryLoginLinkKeepsItsSuspendedAuditReason(t *testing.T) {
+	s := newTestAuthServer(t)
+	token, err := s.codes.CreateLoginLink("gone@example.com")
+	if err != nil {
+		t.Fatalf("CreateLoginLink: %v", err)
+	}
+	if rec := s.redeemLink(token); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("redemption = %d %s, want 401", rec.Code, rec.Body.String())
+	}
+	if got := s.countFailedReason(t, "suspended_or_missing_login_link_user"); got != 1 {
+		t.Fatalf("ordinary reason events = %d, want 1", got)
+	}
+}
+
+func (s *testAuthServer) failAuditWrites(t *testing.T, eventType string) {
+	t.Helper()
+	if _, err := s.db.DB.Exec(`CREATE TRIGGER fail_audit BEFORE INSERT ON auth_audit_events WHEN NEW.event_type = '` + eventType + `' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`); err != nil {
+		t.Fatalf("create audit failure trigger: %v", err)
+	}
+}
+
+func (s *testAuthServer) countSessions(t *testing.T) int {
+	t.Helper()
+	var sessions int
+	if err := s.db.DB.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&sessions); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	return sessions
+}
+
+func TestBreakGlassRedemptionFailsClosedWhenAuditWriteFails(t *testing.T) {
+	s := newBreakGlassTestServer(t, breakGlassTestSecret)
+	user, err := s.users.CreateWithAudit("admin@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token, err := s.codes.CreateBreakGlassLoginLink(user.Email)
+	if err != nil {
+		t.Fatalf("CreateBreakGlassLoginLink: %v", err)
+	}
+	s.failAuditWrites(t, "login_link.break_glass_redeemed")
+	rec := s.redeemLink(token)
+	if rec.Code != http.StatusInternalServerError || hasSessionCookie(rec) {
+		t.Fatalf("redemption = %d %s, want 500 without a session", rec.Code, rec.Body.String())
+	}
+	if got := s.countSessions(t); got != 0 {
+		t.Fatalf("stored sessions = %d, want 0", got)
+	}
+	// establishSession records the login first, so an untouched timestamp shows
+	// the audit failure stopped the request before any session was started.
+	var lastLogin sql.NullString
+	if err := s.db.DB.QueryRow(`SELECT logged_in_at FROM users WHERE id = ?`, user.ID).Scan(&lastLogin); err != nil {
+		t.Fatalf("query last login: %v", err)
+	}
+	if lastLogin.String != "" {
+		t.Fatalf("logged_in_at = %q, want no session establishment", lastLogin.String)
+	}
+}
+
+func TestOrdinaryLoginLinkStillSucceedsWhenAuditWriteFails(t *testing.T) {
+	s := newTestAuthServer(t)
+	user, err := s.users.CreateWithAudit("user@example.com", "", auth.RoleViewer, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token, err := s.codes.CreateLoginLink(user.Email)
+	if err != nil {
+		t.Fatalf("CreateLoginLink: %v", err)
+	}
+	s.failAuditWrites(t, "login_link.redeemed")
+	if rec := s.redeemLink(token); rec.Code != http.StatusOK || !hasSessionCookie(rec) {
+		t.Fatalf("redemption = %d %s, want 200 with a session", rec.Code, rec.Body.String())
+	}
+}
+
+func TestOIDCModeWithoutUsableSecretKeepsLinkRouteDisabled(t *testing.T) {
+	for _, secret := range []string{"", "too-short"} {
+		s := newBreakGlassTestServer(t, secret)
+		user, err := s.users.CreateWithAudit("admin@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		token, err := s.codes.CreateBreakGlassLoginLink(user.Email)
+		if err != nil {
+			t.Fatalf("CreateBreakGlassLoginLink: %v", err)
+		}
+		if rec := s.redeemLink(token); rec.Code != http.StatusNotFound || hasSessionCookie(rec) {
+			t.Fatalf("secret %q: redemption = %d %s, want 404", secret, rec.Code, rec.Body.String())
+		}
+		if got := s.countAudit(t, "login.failed"); got != 0 {
+			t.Fatalf("secret %q: login.failed events = %d, want 0", secret, got)
+		}
+		if _, ok, err := s.codes.VerifyBreakGlassLoginLink(token); err != nil || !ok {
+			t.Fatalf("secret %q: link was consumed: (%v, %v)", secret, ok, err)
+		}
+	}
+}
+
+func TestLocalModeRefusesBreakGlassLink(t *testing.T) {
+	s := newTestAuthServer(t)
+	user, err := s.users.CreateWithAudit("admin@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token, err := s.codes.CreateBreakGlassLoginLink(user.Email)
+	if err != nil {
+		t.Fatalf("CreateBreakGlassLoginLink: %v", err)
+	}
+	if rec := s.redeemLink(token); rec.Code != http.StatusUnauthorized || hasSessionCookie(rec) {
+		t.Fatalf("break-glass link in local mode = %d %s, want 401", rec.Code, rec.Body.String())
 	}
 }
 
