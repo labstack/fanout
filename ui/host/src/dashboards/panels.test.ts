@@ -278,6 +278,7 @@ it("prints percent ticks with the decimals their step needs and knows when ticks
   expect([0, 25, 50].map(formatAxis("percent", { min: 0, max: 50, interval: 25 }))).toEqual(["0%", "25%", "50%"]);
   // Steps finer than four decimals keep the per-value format instead of repeating one label.
   expect([0.00002, 0.00004].map(formatAxis("percent", { min: 0, max: 0.00006, interval: 0.00002 }))).toEqual(["2e-5%", "4e-5%"]);
+  expect([2e-7, 4e-7].map(formatAxis("percent", { min: 0, max: 4e-7, interval: 2e-7 }))).toEqual(["2e-7%", "4e-7%"]);
   expect([1000, 1500].map(formatAxis("percent", { min: 0, max: 1500, interval: 500 }))).toEqual(["1,000%", "1,500%"]);
   expect(ticksShowUnit("ms")).toBe(true);
   expect(ticksShowUnit("percent")).toBe(true);

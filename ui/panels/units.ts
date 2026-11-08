@@ -64,7 +64,11 @@ export function formatAxis(unit?: string, axis?: { min: number; max: number; int
   if (unit === "percent" && axis && axis.interval > 0) {
     // Every tick uses the decimals the step needs: 0.0%, 0.5%, 1.0%, not 0.00%, 0.5%, 1.00%.
     // A step finer than four decimals keeps the per-value format, which reads 2e-5%.
-    const places = [0, 1, 2, 3, 4].find(p => Math.abs(axis.interval * 10 ** p - Math.round(axis.interval * 10 ** p)) < 1e-6);
+    // The tolerance is relative, so a tiny step never rounds to a whole zero.
+    const places = [0, 1, 2, 3, 4].find(p => {
+      const steps = axis.interval * 10 ** p;
+      return Math.round(steps) !== 0 && Math.abs(steps - Math.round(steps)) < 1e-6 * Math.abs(steps);
+    });
     if (places !== undefined) {
       const fixed = new Intl.NumberFormat("en", { minimumFractionDigits: places, maximumFractionDigits: places });
       return (value: number) => Number.isFinite(value) ? `${fixed.format(value)}%` : "—";
