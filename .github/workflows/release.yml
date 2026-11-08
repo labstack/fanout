@@ -22,6 +22,10 @@ jobs:
   verify:
     name: verify release source
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Reads the CI run for the tagged commit.
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -79,6 +83,20 @@ jobs:
           name: upgrade-notes
           path: ${{ runner.temp }}/upgrade-notes.md
           if-no-files-found: error
+      # The tag is on main (checked above), and CI's push run on main already
+      # ran every check and the race suite on this exact commit. Reuse that
+      # result; run the suites here only when no such run passed, for example
+      # when a newer push cancelled it.
+      - name: Find CI's result for this commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if bash scripts/ci-passed.sh "${GITHUB_SHA}"; then
+            echo "passed=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "passed=false" >> "${GITHUB_OUTPUT}"
+          fi
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -89,12 +107,18 @@ jobs:
         with:
           bun-version: 1.4.2
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        if: steps.ci.outputs.passed != 'true'
         with:
           version: v2.14.0
           args: --help
       - run: just ui-deps
-      - run: just check
-      - run: just test-race
+      # The advisory database changes over time, so the audit runs at release
+      # even when CI's result is reused.
+      - run: just ui-audit
+      - if: steps.ci.outputs.passed != 'true'
+        run: just check
+      - if: steps.ci.outputs.passed != 'true'
+        run: just test-race
 
   # DuckDB needs CGO and this repository carries no cross toolchain, so every
   # binary is built on a runner of its own architecture.

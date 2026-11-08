@@ -63,7 +63,8 @@ suite. See [browser smoke testing](docs/testing.md) for coverage and failure art
 `just install` also installs [Lefthook](https://lefthook.dev)'s Git hooks, which run
 formatting and linting on commit and the full gate on push. The pre-push hook
 may be skipped when Lefthook detects no changed files;
-CI runs the same `just check` unconditionally and enforces the gate.
+CI runs the same checks unconditionally, split into parallel jobs plus the race
+suite, and enforces the gate.
 
 The browser workspace uses `package.json` overrides for transitive security
 fixes that their direct dependencies have not locked yet. Keep those overrides

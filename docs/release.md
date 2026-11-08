@@ -64,11 +64,14 @@ steps in its description, so they can be copied into the notes.
 Run `just release` from a clean, current `main`. The script:
 
 1. verifies that no other release is running;
-2. runs `just check` and the race-enabled Go suite;
-3. confirms that neither local `HEAD` nor `origin/main` moved during testing;
+2. waits for CI's push run on `main` for that commit, which runs every check and
+   the race-enabled Go suite, and stops unless it passed;
+3. confirms that neither local `HEAD` nor `origin/main` moved meanwhile;
 4. calculates and pushes the next CalVer tag.
 
-The tag workflow then independently validates tag syntax, ancestry, and ordering;
+The tag workflow then independently validates tag syntax, ancestry, and ordering.
+It reuses that CI result for the tagged commit, re-running only the dependency
+audit, and runs the full suites itself when no successful run exists. It then
 builds every target on its native runner; publishes the multi-architecture image;
 copies that accepted manifest to Docker Hub; requires the registry digests to
 match; and creates the GitHub release only after anonymous pulls from both GHCR
