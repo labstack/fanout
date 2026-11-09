@@ -159,7 +159,16 @@ scripts and clients using the release notes and [HTTP routes](/docs/reference/ap
 ## When a release changes credential formats
 
 Ingest tokens use the `foi_` prefix. Fanout rejects tokens issued with the
-earlier `fo_` prefix. After upgrading, an administrator rotates the token in
-**Connect telemetry → Ingest token** and updates every collector. Unused login
+earlier `fo_` prefix. After upgrading, an administrator creates a token in
+**Connect telemetry → Ingest tokens** and updates every collector. Unused login
 links issued before the upgrade stop working; request a new one. Connected MCP
 agents keep their OAuth tokens.
+
+## Moving to named ingest tokens
+
+The single stored ingest token becomes a token named `default` with its digest
+unchanged, so running Collectors keep working. `POST /api/settings/ingest/token/rotate`
+is removed; rotate by creating a token with `POST /api/settings/ingest/tokens` and
+revoking the old one with `POST /api/settings/ingest/tokens/{id}/revoke`.
+`FANOUT_INGEST_TOKEN` applies only when no token has ever existed, so leaving it set
+is harmless and it cannot restore a revoked token.

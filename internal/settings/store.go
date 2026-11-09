@@ -8,16 +8,28 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/db/generated"
 )
 
 type Store struct {
-	db *sql.DB
-	q  *generated.Queries
+	db    *sql.DB
+	q     *generated.Queries
+	audit *auth.AuditStore
+	now   func() time.Time
+
+	lastUsed              lastUsedBuffer
+	lastUsedFlushInterval time.Duration
 }
 
 func NewStore(db *sql.DB) *Store {
-	return &Store{db: db, q: generated.New(db)}
+	return &Store{
+		db:                    db,
+		q:                     generated.New(db),
+		audit:                 auth.NewAuditStore(db),
+		now:                   time.Now,
+		lastUsedFlushInterval: ingestTokenLastUsedFlushInterval,
+	}
 }
 
 // Get leaves out unchanged when the row is missing so callers keep their defaults.

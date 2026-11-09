@@ -39,7 +39,7 @@ Caps decoded telemetry held across concurrent requests until durable publication
 
 ### `FANOUT_INGEST_TOKEN`
 
-Sets the first ingest token when none is stored, so an automated install accepts telemetry as soon as it starts. Use foi_ plus 43 base64url characters. Only its hash is stored. It is ignored once a token exists, so a token rotated in the UI survives restarts.
+Sets the first ingest token, named configuration, when none has ever existed, so an automated install accepts telemetry as soon as it starts. Use foi_ plus 43 base64url characters. Only its digest is stored. It is ignored once any token has existed, including a revoked one, so a restart cannot bring back a revoked token.
 
 :::caution[Secrets]
 Settings marked `secret` are redacted from Fanout's startup configuration

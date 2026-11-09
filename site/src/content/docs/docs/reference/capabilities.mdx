@@ -24,7 +24,7 @@ capabilities uses `preview` if any of its contracts remain unsettled.
 
 | Capability | Status | Notes |
 |---|---|---|
-| OTLP ingest over gRPC and HTTP | shipped | Both transports, one port and one ingest token. |
+| OTLP ingest over gRPC and HTTP | shipped | Both transports, one port and named ingest tokens. |
 | Parquet storage, trace indexes, and DuckDB analytics | preview | Authoritative local Parquet; rebuildable DuckDB query state. |
 | Batch format 5 storage | preview | [Typed Parquet attributes and dedicated columns](/docs/concepts/storage); unsupported batch formats prevent startup. |
 | Browser client | preview | Ships in the binary; preview contracts. |
@@ -36,7 +36,7 @@ capabilities uses `preview` if any of its contracts remain unsettled.
 | MCP tools | preview | Served at `/mcp`; the tool set is not frozen. |
 | Alerts page | preview | [Create, edit, test, enable and delete rules](/docs/guides/alerts) without chat; rules evaluate on an interval against rollups. |
 | Connected agents | preview | List and disconnect your authorized MCP agents on **Connect telemetry**. |
-| Ingest token rotation | preview | Administrators rotate the token on **Connect telemetry** or through HTTP; the old token stops working. |
+| Named ingest tokens | preview | Administrators create, list and revoke up to 50 named tokens on **Connect telemetry** at `/settings/ingest` or through HTTP. Revocation applies on the next request. |
 | Insights and anomaly detection | preview | Detect error, latency and volume changes against rollup baselines; report insights, log patterns and a health score. |
 | Local email sign-in | shipped | Codes by email; no passwords. |
 | Local self-signup | preview | `FANOUT_SELF_SIGNUP`, off by default. Provisions viewers after code verification only. |

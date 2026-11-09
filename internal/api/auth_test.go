@@ -140,6 +140,7 @@ func TestRetiredRoutesDoNotReachSPA(t *testing.T) {
 		{http.MethodPost, "/api/agent"},
 		{http.MethodPost, "/api/users/" + admin.ID + "/logout-all"},
 		{http.MethodPost, "/api/settings/ingest/rotate-token"},
+		{http.MethodPost, "/api/settings/ingest/token/rotate"},
 	} {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -193,7 +194,10 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodPost, "/api/fanql/complete", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/fanql/reference", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/settings/ingest", routePolicyCapability, ReadIngestMetadata},
-		{http.MethodPost, "/api/settings/ingest/token/rotate", routePolicyCapability, ManageIngest},
+		{http.MethodGet, "/api/settings/ingest/tokens", routePolicyCapability, ManageIngest},
+		{http.MethodPost, "/api/settings/ingest/tokens", routePolicyCapability, ManageIngest},
+		{http.MethodPost, "/api/settings/ingest/tokens/abc/revoke", routePolicyCapability, ManageIngest},
+		{http.MethodGet, "/settings/ingest", routePolicyPublic, ""},
 		{http.MethodPost, "/api/users/user-1/access/revoke", routePolicyCapability, ManageUsers},
 		{http.MethodPatch, "/api/users/user-1", routePolicyCapability, ManageUsers},
 		{http.MethodPatch, "/api/users/user-1/role", routePolicyCapability, ManageUsers},
@@ -400,9 +404,9 @@ func TestCapabilityIsEnforcedCentrally(t *testing.T) {
 	viewer, _ := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	cookie := s.login(t, viewer)
 	// Deliberately omit route-level RequireCapability. The global policy remains authoritative.
-	s.e.POST("/api/settings/ingest/token/rotate", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	s.e.POST("/api/settings/ingest/tokens", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	rec := httptest.NewRecorder()
-	s.e.ServeHTTP(rec, sessionRequest(http.MethodPost, "/api/settings/ingest/token/rotate", nil, cookie))
+	s.e.ServeHTTP(rec, sessionRequest(http.MethodPost, "/api/settings/ingest/tokens", nil, cookie))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer mutation = %d, want 403", rec.Code)
 	}
@@ -754,8 +758,8 @@ func TestSetupConsumesTokenBeforeFalliblePostSetupWork(t *testing.T) {
 	s := newTestAuthServer(t)
 	// Break the post-admin settings work so the request fails after the first
 	// administrator is committed.
-	if _, err := s.db.DB.Exec(`DROP TABLE settings`); err != nil {
-		t.Fatalf("drop settings: %v", err)
+	if _, err := s.db.DB.Exec(`DROP TABLE ingest_tokens`); err != nil {
+		t.Fatalf("drop ingest tokens: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -1043,7 +1047,7 @@ func TestSetupKeepsTokenAppliedFromConfiguration(t *testing.T) {
 	s := newTestAuthServer(t)
 	store := settings.NewStore(s.db.DB)
 	token := "foi_" + strings.Repeat("A", 43)
-	if applied, err := store.ApplyConfiguredIngestToken(context.Background(), token, s.audit); err != nil || !applied {
+	if applied, err := store.ApplyConfiguredIngestToken(context.Background(), token); err != nil || !applied {
 		t.Fatalf("applied = %v err = %v", applied, err)
 	}
 
@@ -1067,11 +1071,7 @@ func TestSetupKeepsTokenAppliedFromConfiguration(t *testing.T) {
 	if strings.Contains(rec.Body.String(), token) {
 		t.Fatal("setup response exposed the configured token")
 	}
-	got, err := store.GetIngest(context.Background())
-	if err != nil {
-		t.Fatalf("GetIngest: %v", err)
-	}
-	if !settings.CheckIngestToken(token, got.TokenHash) {
-		t.Fatal("setup replaced the configured token")
+	if ok, err := store.AuthenticateIngestToken(context.Background(), token); err != nil || !ok {
+		t.Fatalf("configured token after setup: ok = %v err = %v", ok, err)
 	}
 }

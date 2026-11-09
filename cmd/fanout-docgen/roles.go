@@ -21,7 +21,7 @@ var capabilityNotes = map[string]string{
 	"ingest:read-metadata":  "See ingest settings, but not the token itself.",
 	"alerts:manage":         "Create, change and delete alert rules.",
 	"agent:run":             "Run the built-in agent, which calls a model provider and acts on the instance's behalf.",
-	"ingest:manage":         "Rotate the ingest token.",
+	"ingest:manage":         "Create, list and revoke ingest tokens.",
 	"users:manage":          "Create, change and remove user accounts and their roles.",
 	"operations:read":       "Read the instance's own internals: Prometheus metrics and, when enabled, the profiling endpoints.",
 }

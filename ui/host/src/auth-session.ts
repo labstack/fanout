@@ -2,12 +2,21 @@ import { ApiError } from "./api-error";
 
 export const unauthorizedEvent = "fanout:unauthorized";
 
+const ingestTokensPath = "/settings/ingest";
+
 export function oauthReturnTo(): string {
   const value = new URLSearchParams(window.location.search).get("return_to");
   if (!value) return "";
   const target = new URL(value, window.location.origin);
-  if (target.origin !== window.location.origin || target.pathname !== "/api/auth/oauth/authorize") return "";
+  if (target.origin !== window.location.origin) return "";
+  if (target.pathname !== "/api/auth/oauth/authorize" && target.pathname !== ingestTokensPath) return "";
   return `${target.pathname}${target.search}`;
+}
+
+/** The path an OIDC sign-in should return to: an explicit return_to, or the
+ *  ingest token page when that is where the visitor arrived signed out. */
+export function oidcReturnTo(): string {
+  return oauthReturnTo() || (window.location.pathname === ingestTokensPath ? ingestTokensPath : "");
 }
 
 export type BrowserViewer = "none" | "user";

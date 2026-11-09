@@ -358,8 +358,11 @@ func classifyNonSCIMRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyCapability, capability: RunAgent}, read || unsafe
 	case path == "/api/settings/ingest":
 		return routePolicy{kind: routePolicyCapability, capability: ReadIngestMetadata}, read
-	case path == "/api/settings/ingest/token/rotate":
-		return routePolicy{kind: routePolicyCapability, capability: ManageIngest}, method == http.MethodPost
+	case path == "/api/settings/ingest/tokens":
+		return routePolicy{kind: routePolicyCapability, capability: ManageIngest}, read || method == http.MethodPost
+	case strings.HasPrefix(path, "/api/settings/ingest/tokens/"):
+		id, action, _ := strings.Cut(strings.TrimPrefix(path, "/api/settings/ingest/tokens/"), "/")
+		return routePolicy{kind: routePolicyCapability, capability: ManageIngest}, id != "" && action == "revoke" && method == http.MethodPost
 	case path == "/api/users":
 		return routePolicy{kind: routePolicyCapability, capability: ManageUsers}, read || method == http.MethodPost
 	case strings.HasPrefix(path, "/api/users/"):

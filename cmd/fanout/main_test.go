@@ -789,7 +789,6 @@ func TestApplyConfiguredIngestTokenLogsWithoutToken(t *testing.T) {
 	}
 	defer sqlite.Close()
 	settingsStore := settings.NewStore(sqlite.DB)
-	audit := auth.NewAuditStore(sqlite.DB)
 
 	var logs bytes.Buffer
 	previous := slog.Default()
@@ -798,21 +797,21 @@ func TestApplyConfiguredIngestTokenLogsWithoutToken(t *testing.T) {
 
 	first := "foi_" + strings.Repeat("A", 43)
 	second := "foi_" + strings.Repeat("B", 43)
-	if err := applyConfiguredIngestToken(context.Background(), settingsStore, audit, ""); err != nil {
+	if err := applyConfiguredIngestToken(context.Background(), settingsStore, ""); err != nil {
 		t.Fatalf("apply without setting: %v", err)
 	}
 	if logs.Len() != 0 {
 		t.Fatalf("logs without the setting = %q, want none", logs.String())
 	}
-	got, err := settingsStore.GetIngest(context.Background())
-	if err != nil || got.TokenHash != "" {
-		t.Fatalf("hash without the setting = %q err = %v", got.TokenHash, err)
+	active, err := settingsStore.HasActiveIngestToken(context.Background())
+	if err != nil || active {
+		t.Fatalf("active without the setting = %v err = %v", active, err)
 	}
 
-	if err := applyConfiguredIngestToken(context.Background(), settingsStore, audit, first); err != nil {
+	if err := applyConfiguredIngestToken(context.Background(), settingsStore, first); err != nil {
 		t.Fatalf("first apply: %v", err)
 	}
-	if err := applyConfiguredIngestToken(context.Background(), settingsStore, audit, second); err != nil {
+	if err := applyConfiguredIngestToken(context.Background(), settingsStore, second); err != nil {
 		t.Fatalf("second apply: %v", err)
 	}
 

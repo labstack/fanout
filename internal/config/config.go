@@ -62,10 +62,11 @@ type Config struct {
 	// until durable publication. Zero is unbounded. A single request is admitted
 	// when no other request holds budget, even if it exceeds the limit.
 	IngestMaxInFlightBytes int `group:"ingest" env:"FANOUT_INGEST_MAX_IN_FLIGHT_BYTES" default:"268435456"`
-	// IngestToken sets the first ingest token when none is stored, so an automated
-	// install accepts telemetry as soon as it starts. Use foi_ plus 43 base64url
-	// characters. Only its hash is stored. It is ignored once a token exists, so a
-	// token rotated in the UI survives restarts.
+	// IngestToken sets the first ingest token, named configuration, when none has
+	// ever existed, so an automated install accepts telemetry as soon as it starts.
+	// Use foi_ plus 43 base64url characters. Only its digest is stored. It is
+	// ignored once any token has existed, including a revoked one, so a restart
+	// cannot bring back a revoked token.
 	IngestToken string `group:"ingest" env:"FANOUT_INGEST_TOKEN" secret:"true"`
 	// RollupInterval schedules analytical rollups; use a Go duration of at least 1s.
 	RollupInterval time.Duration `group:"storage" env:"FANOUT_ROLLUP_INTERVAL" default:"1m"`

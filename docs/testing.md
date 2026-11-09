@@ -309,7 +309,7 @@ with memory history. Explore, Logs, Traces, and Alerts have full-page stories
 in the same light/dark matrix. Explore includes FanQL fix-its and per-panel
 validation diagnostics in both editors. Dashboard and receipt states show invalid
 panels alongside successful siblings and a corrected save. Settings includes
-chat-disabled and token-rotation states with a fictional `foi_` token.
+chat-disabled and token-creation states with a fictional `foi_` token.
 The dashboard index opens the default dashboard when one
 exists; an empty workspace shows its creation prompt. `Flows/Ask a question`
 and `Flows/Ask chat for a dashboard` contain independently reproducible stages

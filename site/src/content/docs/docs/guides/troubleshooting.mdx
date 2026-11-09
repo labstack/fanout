@@ -105,13 +105,17 @@ Work down this list in order:
 1. **Has setup finished?** Before the first administrator exists there is no
    ingest token to check against, and ingest rejects everything. A collector
    started ahead of setup fails until you complete it.
-2. **Is it the right credential, in the right header?** The ingest token is
+2. **Were all tokens revoked?** When no token is active, every exporter gets
+   `invalid ingest token` over gRPC or 401 over HTTP, the same answer as a wrong
+   token, and the server logs nothing for it. Open `/settings/ingest` on your
+   Fanout instance. If the list is empty, create a token and update the Collector.
+3. **Is it the right credential, in the right header?** An active ingest token is
    `foi_`-prefixed and goes in `Authorization: Bearer`. Browser sessions and MCP
    tokens are not ingest credentials.
-3. **Is the listener reachable?** Both OTLP transports use `FANOUT_ADDR`
+4. **Is the listener reachable?** Both OTLP transports use `FANOUT_ADDR`
    (`127.0.0.1:7520` by default; the image sets `:7520`).
    Check container port mappings, bind address and firewall rules.
-4. **Right protocol?** Both use port `7520`. gRPC requires HTTP/2 through
+5. **Right protocol?** Both use port `7520`. gRPC requires HTTP/2 through
    any proxy. Use `grpc` or `http/protobuf` consistently with the exporter
    configuration; HTTP/1.1 proxy forwarding cannot carry gRPC.
 
@@ -119,11 +123,10 @@ For OTLP/HTTP, set the exporter protocol to `http/protobuf` and give it the base
 endpoint, `http://fanout:7520`. Exporters derive `/v1/traces`, `/v1/metrics`
 and `/v1/logs` from it themselves.
 
-The raw token is shown once after setup or rotation. If it is lost, an
-administrator can issue a replacement in **Connect telemetry → Ingest token** in the account menu, or
-with `POST /api/settings/ingest/token/rotate`. Save the new token when it is
-shown. Rotation invalidates the old token immediately and cuts off existing
-exporters until you update their credentials.
+The raw token is shown once when it is created. If it is lost, an administrator
+creates a new one at `/settings/ingest` on your Fanout instance, or under
+**Connect telemetry** in the account menu, and updates the Collector. A token
+that was revoked is rejected on the next request.
 
 ### HTTP 415: unsupported media type
 

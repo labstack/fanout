@@ -18,12 +18,14 @@ same port as the application: `7520` by default. Both require the ingest token.
 The raw ingest token is shown once, immediately after you create the first
 administrator. It is `foi_` followed by 43 unpadded base64url characters (32 random bytes).
 Fanout stores only its SHA-256 digest. Existing `fo_` tokens are rejected;
-rotate the ingest token in **Connect telemetry → Ingest token** and update every collector.
+create a token in **Connect telemetry → Ingest tokens** and update every collector.
 
-An administrator can issue a replacement in **Connect telemetry → Ingest token** in the account menu, or
-with `POST /api/settings/ingest/token/rotate`. Save the new token when it is
-shown. Rotation invalidates the old token immediately and cuts off existing
-exporters until you update their credentials.
+An administrator can hold up to 50 active tokens, each named, at
+`/settings/ingest` (also linked from **Connect telemetry** in the account menu),
+or with `POST /api/settings/ingest/tokens`. Each value is shown once. To rotate
+without downtime, create a replacement, move the Collector to it, then revoke
+the old token. Revocation takes effect on the next request. Revoking the last
+active token stops ingest until you create another.
 
 An automated install can accept telemetry as soon as it starts, before any
 administrator exists. Generate a token in the same format and pass it as
@@ -33,9 +35,10 @@ administrator exists. Generate a token in the same format and pass it as
 printf 'foi_%s\n' "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
 ```
 
-Fanout stores the token's hash at startup only when no token exists, and setup
-then shows no token. Once a token exists the setting is ignored, so a token
-rotated in the UI survives restarts and changing the setting replaces nothing.
+Fanout stores the token's hash at startup under the name `configuration` only
+when no token has ever existed, and setup then shows no token. Any token that has
+existed, including a revoked one, makes the setting ignored, so a restart cannot
+bring back a token you revoked and changing the setting replaces nothing.
 A value in any other format fails startup with an error naming the setting.
 
 Send it as a bearer token; this is the only accepted ingest credential form:
@@ -45,7 +48,7 @@ Authorization: Bearer foi_<token>
 ```
 
 Ingest is available after administrator setup, or as soon as Fanout starts when
-`FANOUT_INGEST_TOKEN` set the token. Exporters require the ingest token; browser
+`FANOUT_INGEST_TOKEN` set the token. Exporters require an active ingest token; browser
 sessions and MCP OAuth tokens cannot authorize exports.
 
 ## Configure an SDK

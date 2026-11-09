@@ -68,7 +68,7 @@ The sidecar is an index, not another telemetry representation.
 
 Dashboard rollups are rebuildable DuckDB caches. SQLite stores only
 transactional product state and never holds telemetry rows. Ingest
-authentication still reads the ingest token hash from it on every export, so an
+authentication still looks up the token digest there on every export, so an
 unreadable control database rejects OTLP requests.
 
 ## Attributes retain their types

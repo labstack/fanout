@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/settings"
 	appstore "github.com/labstack/fanout/internal/store"
 )
@@ -35,12 +34,12 @@ func TestAuthorize_RejectsWhenPreSetup(t *testing.T) {
 
 func TestAuthorize_AcceptsBearerAuthorization(t *testing.T) {
 	store := newRuntimeStore(t)
-	token, hash, err := settings.GenerateIngestToken()
+	token, _, err := settings.GenerateIngestToken()
 	if err != nil {
 		t.Fatalf("GenerateIngestToken: %v", err)
 	}
-	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
-		t.Fatalf("SetIngest: %v", err)
+	if _, err := store.ApplyConfiguredIngestToken(context.Background(), token); err != nil {
+		t.Fatalf("ApplyConfiguredIngestToken: %v", err)
 	}
 
 	authorizer := newIngestAuthorizer(store)
@@ -53,12 +52,12 @@ func TestAuthorize_AcceptsBearerAuthorization(t *testing.T) {
 
 func TestAuthorize_RejectsWrongToken(t *testing.T) {
 	store := newRuntimeStore(t)
-	_, hash, err := settings.GenerateIngestToken()
+	token, _, err := settings.GenerateIngestToken()
 	if err != nil {
 		t.Fatalf("GenerateIngestToken: %v", err)
 	}
-	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
-		t.Fatalf("SetIngest: %v", err)
+	if _, err := store.ApplyConfiguredIngestToken(context.Background(), token); err != nil {
+		t.Fatalf("ApplyConfiguredIngestToken: %v", err)
 	}
 
 	authorizer := newIngestAuthorizer(store)
@@ -72,12 +71,12 @@ func TestAuthorize_RejectsWrongToken(t *testing.T) {
 
 func TestAuthorize_AcceptsCaseInsensitiveBearerScheme(t *testing.T) {
 	store := newRuntimeStore(t)
-	token, hash, err := settings.GenerateIngestToken()
+	token, _, err := settings.GenerateIngestToken()
 	if err != nil {
 		t.Fatalf("GenerateIngestToken: %v", err)
 	}
-	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
-		t.Fatalf("SetIngest: %v", err)
+	if _, err := store.ApplyConfiguredIngestToken(context.Background(), token); err != nil {
+		t.Fatalf("ApplyConfiguredIngestToken: %v", err)
 	}
 
 	authorizer := newIngestAuthorizer(store)
@@ -90,12 +89,12 @@ func TestAuthorize_AcceptsCaseInsensitiveBearerScheme(t *testing.T) {
 
 func TestAuthorize_RejectsLegacyFanoutHeader(t *testing.T) {
 	store := newRuntimeStore(t)
-	token, hash, err := settings.GenerateIngestToken()
+	token, _, err := settings.GenerateIngestToken()
 	if err != nil {
 		t.Fatalf("GenerateIngestToken: %v", err)
 	}
-	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
-		t.Fatalf("SetIngest: %v", err)
+	if _, err := store.ApplyConfiguredIngestToken(context.Background(), token); err != nil {
+		t.Fatalf("ApplyConfiguredIngestToken: %v", err)
 	}
 
 	authorizer := newIngestAuthorizer(store)
@@ -109,12 +108,12 @@ func TestAuthorize_RejectsLegacyFanoutHeader(t *testing.T) {
 
 func TestAuthorize_RejectsMissingToken(t *testing.T) {
 	store := newRuntimeStore(t)
-	_, hash, err := settings.GenerateIngestToken()
+	token, _, err := settings.GenerateIngestToken()
 	if err != nil {
 		t.Fatalf("GenerateIngestToken: %v", err)
 	}
-	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
-		t.Fatalf("SetIngest: %v", err)
+	if _, err := store.ApplyConfiguredIngestToken(context.Background(), token); err != nil {
+		t.Fatalf("ApplyConfiguredIngestToken: %v", err)
 	}
 
 	authorizer := newIngestAuthorizer(store)
@@ -153,7 +152,7 @@ func TestAuthorize_AcceptsTokenAppliedFromConfiguration(t *testing.T) {
 	t.Cleanup(func() { _ = sqlite.Close() })
 	store := settings.NewStore(sqlite.DB)
 	token := "foi_" + strings.Repeat("A", 43)
-	if applied, err := store.ApplyConfiguredIngestToken(context.Background(), token, auth.NewAuditStore(sqlite.DB)); err != nil || !applied {
+	if applied, err := store.ApplyConfiguredIngestToken(context.Background(), token); err != nil || !applied {
 		t.Fatalf("applied = %v err = %v", applied, err)
 	}
 

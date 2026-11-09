@@ -19,6 +19,7 @@ import { Route as ChatIndexRouteImport } from './routes/chat.index'
 import { Route as ChatThreadIdRouteImport } from './routes/chat.$threadId'
 import { Route as DashboardsIndexRouteImport } from './routes/dashboards.index'
 import { Route as DashboardsDashboardIdRouteImport } from './routes/dashboards.$dashboardId'
+import { Route as SettingsIngestRouteImport } from './routes/settings_.ingest'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -70,6 +71,11 @@ const DashboardsDashboardIdRoute = DashboardsDashboardIdRouteImport.update({
   path: '/dashboards/$dashboardId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsIngestRoute = SettingsIngestRouteImport.update({
+  id: '/settings_/ingest',
+  path: '/settings/ingest',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -80,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/traces': typeof TracesRoute
   '/chat/$threadId': typeof ChatThreadIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/settings/ingest': typeof SettingsIngestRoute
   '/chat/': typeof ChatIndexRoute
   '/dashboards/': typeof DashboardsIndexRoute
 }
@@ -92,6 +99,7 @@ export interface FileRoutesByTo {
   '/traces': typeof TracesRoute
   '/chat/$threadId': typeof ChatThreadIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/settings/ingest': typeof SettingsIngestRoute
   '/chat': typeof ChatIndexRoute
   '/dashboards': typeof DashboardsIndexRoute
 }
@@ -105,6 +113,7 @@ export interface FileRoutesById {
   '/traces': typeof TracesRoute
   '/chat/$threadId': typeof ChatThreadIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/settings_/ingest': typeof SettingsIngestRoute
   '/chat/': typeof ChatIndexRoute
   '/dashboards/': typeof DashboardsIndexRoute
 }
@@ -119,6 +128,7 @@ export interface FileRouteTypes {
     | '/traces'
     | '/chat/$threadId'
     | '/dashboards/$dashboardId'
+    | '/settings/ingest'
     | '/chat/'
     | '/dashboards/'
   fileRoutesByTo: FileRoutesByTo
@@ -131,6 +141,7 @@ export interface FileRouteTypes {
     | '/traces'
     | '/chat/$threadId'
     | '/dashboards/$dashboardId'
+    | '/settings/ingest'
     | '/chat'
     | '/dashboards'
   id:
@@ -143,6 +154,7 @@ export interface FileRouteTypes {
     | '/traces'
     | '/chat/$threadId'
     | '/dashboards/$dashboardId'
+    | '/settings_/ingest'
     | '/chat/'
     | '/dashboards/'
   fileRoutesById: FileRoutesById
@@ -156,6 +168,7 @@ export interface RootRouteChildren {
   TracesRoute: typeof TracesRoute
   ChatThreadIdRoute: typeof ChatThreadIdRoute
   DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
+  SettingsIngestRoute: typeof SettingsIngestRoute
   ChatIndexRoute: typeof ChatIndexRoute
   DashboardsIndexRoute: typeof DashboardsIndexRoute
 }
@@ -232,6 +245,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardsDashboardIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings_/ingest': {
+      id: '/settings_/ingest'
+      path: '/settings/ingest'
+      fullPath: '/settings/ingest'
+      preLoaderRoute: typeof SettingsIngestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -244,6 +264,7 @@ const rootRouteChildren: RootRouteChildren = {
   TracesRoute: TracesRoute,
   ChatThreadIdRoute: ChatThreadIdRoute,
   DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,
+  SettingsIngestRoute: SettingsIngestRoute,
   ChatIndexRoute: ChatIndexRoute,
   DashboardsIndexRoute: DashboardsIndexRoute,
 }

@@ -137,8 +137,8 @@ includes `/v1`, while Anthropic's excludes it.
 Both native and container deployments use one listener. Native installs default
 to loopback; set `FANOUT_ADDR=:7520` for remote access. The image supplies
 `FANOUT_ADDR=:7520` and `FANOUT_DATA_DIR=/var/lib/fanout/data`. Every OTLP request
-requires the ingest token created during first-admin setup or set by
-`FANOUT_INGEST_TOKEN` on an empty install; browser sessions
+requires an active ingest token, created during first-admin setup, by an
+administrator, or from `FANOUT_INGEST_TOKEN` on an empty install; browser sessions
 and MCP tokens do not authorize ingest. Do not embed the ingest token in a
 browser or shipped mobile application.
 

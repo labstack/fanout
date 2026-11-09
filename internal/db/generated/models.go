@@ -131,6 +131,19 @@ type DashboardVersion struct {
 	CreatedAt   string `json:"created_at"`
 }
 
+type IngestToken struct {
+	ID         string         `json:"id"`
+	Name       string         `json:"name"`
+	TokenHash  string         `json:"token_hash"`
+	Hint       string         `json:"hint"`
+	Source     string         `json:"source"`
+	CreatedAt  string         `json:"created_at"`
+	CreatedBy  sql.NullString `json:"created_by"`
+	LastUsedAt sql.NullString `json:"last_used_at"`
+	RevokedAt  sql.NullString `json:"revoked_at"`
+	RevokedBy  sql.NullString `json:"revoked_by"`
+}
+
 type OauthAuthorizationCode struct {
 	CodeHash      string `json:"code_hash"`
 	ClientID      string `json:"client_id"`

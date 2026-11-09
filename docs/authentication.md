@@ -440,6 +440,45 @@ or status transition. Addresses and the token are never recorded.
 The token is compared in constant time and is never logged. Rotate it by
 changing the setting and restarting Fanout.
 
+## Ingest tokens
+
+OTLP exporters authenticate with a bearer token, `foi_` followed by 43 base64url
+characters. An instance can hold up to 50 active tokens, each with its own name,
+so one Collector can be revoked without touching the rest. Names are 1 to 64
+printable characters and unique among active tokens, ignoring ASCII case.
+
+Fanout stores only each token's SHA-256 digest, plus its last four characters
+as a hint. The value appears once, in the response that creates it, and that
+response is sent with `Cache-Control: no-store`. It is never written to logs,
+audit events, or any later response.
+
+Authenticating an export costs one digest and one lookup on an indexed column.
+Fanout keeps no credential cache, so a revoked token is refused on the very next
+request, with no delay or restart. Last-used times are coalesced in memory and
+written about once a minute and at shutdown, so a listing can lag real use by up
+to a minute.
+
+Administrators manage tokens on the Settings page or at `/settings/ingest`, a
+stable URL that also works as an OIDC `return_to` target. Every other role can
+read connection details but cannot list token names or hints; those routes
+require `ingest:manage`. A token is only ever created by an explicit POST.
+
+To rotate, create a replacement, move the Collector across, then revoke the old
+token. Revoking the last active token is allowed and stops ingest until another
+is created; the UI warns first.
+
+First-admin setup issues a token named `default`, and `FANOUT_INGEST_TOKEN` seeds
+one named `configuration`, but only when no token row has ever existed. A revoked
+row counts, so a restart that still carries the setting cannot bring back a token
+an administrator revoked. An instance upgraded from a single-token release keeps
+its existing digest as a token named `default`, and Collectors using it are not
+affected. A hint is not available for that migrated token.
+
+Revoked rows are retained indefinitely: they record who used which name when, and
+the seed rule depends on them. The name of a revoked token can be reused. Creates
+and revokes write `ingest_token.created` and `ingest_token.revoked` audit events
+with the token id and name.
+
 ## Credentials at a glance
 
 | Credential | Purpose | Rotation |
@@ -448,7 +487,7 @@ changing the setting and restarting Fanout.
 | Login URL | Authenticates one existing active local user | One-time, expires in 15 minutes; mint with `fanout login-link` |
 | Break-glass URL | Authenticates one active administrator in OIDC mode | One-time, expires in 15 minutes; mint with `fanout login-link --break-glass` |
 | Browser session | Interactive access | Idle and absolute TTL; revoked on role, email, or status change |
-| Ingest token | OTLP ingest | Settings page; `FANOUT_INGEST_TOKEN` sets only the first token |
+| Ingest tokens | OTLP ingest | Up to 50 named tokens at `/settings/ingest`; rotate by creating then revoking. `FANOUT_INGEST_TOKEN` seeds only the first token |
 | Metrics token | `/metrics` scrape | `FANOUT_METRICS_TOKEN` |
 | SCIM token | User provisioning at `/scim/v2` | `FANOUT_SCIM_TOKEN`; change the setting and restart |
 | MCP OAuth tokens | MCP clients | 30-day access tokens, checked on every request; 90-day refresh tokens renewed on each use. Refresh rotation with replay-family revocation, admitting the same client's rotated token for one access-token lifetime so processes sharing a credential can refresh from stale copies. Users disconnect individual agents in Settings; admins can still revoke all of a user's access |

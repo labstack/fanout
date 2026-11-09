@@ -29,11 +29,11 @@ func TestSharedListenerCredentialBoundaries(t *testing.T) {
 	}
 	cookie := s.login(t, user)
 	store := settings.NewStore(s.db.DB)
-	token, hash, err := settings.GenerateIngestToken()
+	token, _, err := settings.GenerateIngestToken()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
+	if _, err := store.ApplyConfiguredIngestToken(context.Background(), token); err != nil {
 		t.Fatal(err)
 	}
 	ing := ingest.NewServer(config.Config{}, discardExport{})
