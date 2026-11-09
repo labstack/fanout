@@ -522,8 +522,12 @@ func (e *Engine) settleEmail(ctx context.Context, row generated.AlertEmailDelive
 		return
 	}
 	if len(rows) == 0 {
-		// Every recipient was dropped, or the rule went with them.
-		e.setRuleEmailStatus(ctx, row.RuleID, "", "")
+		// Every recipient was dropped, or the rule went with them. Only this
+		// notification's own retry state is cleared; any other status belongs
+		// to a newer notification.
+		if err := e.store.q.ClearRetryingRuleEmailStatus(ctx, row.RuleID); err != nil {
+			slog.Error("alert: clear rule email status", "rule", row.RuleID, "err", err)
+		}
 		return
 	}
 	var failed, suppressed int
