@@ -22,6 +22,15 @@ func (q *Queries) ClaimAlertEmailDelivery(ctx context.Context, id string) (int64
 	return result.RowsAffected()
 }
 
+const clearRetryingRuleEmailStatus = `-- name: ClearRetryingRuleEmailStatus :exec
+UPDATE alert_rules SET email_status = '', email_status_detail = '', email_status_at = '' WHERE id = ? AND email_status = 'retrying'
+`
+
+func (q *Queries) ClearRetryingRuleEmailStatus(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, clearRetryingRuleEmailStatus, id)
+	return err
+}
+
 const countAlertEmailSendsSince = `-- name: CountAlertEmailSendsSince :one
 SELECT COUNT(*) FROM alert_email_sends WHERE recipient = ? AND sent_at >= ?
 `

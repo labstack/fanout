@@ -112,7 +112,7 @@ func (h *UserHandler) ListUsers(c *echo.Context) error {
 // CreateUser adds a new user (admin only).
 func (h *UserHandler) CreateUser(c *echo.Context) error {
 	if h.ownership != accountOwnershipLocal {
-		return ownedByIdentityProvider("Accounts are created by the identity provider, not in Fanout.")
+		return ownedByIdentityProvider("Accounts cannot be created in Fanout when roles come from the identity provider.")
 	}
 	var req struct {
 		Email       string `json:"email"`

@@ -41,3 +41,6 @@ DELETE FROM alert_email_deliveries WHERE status IN ('sent', 'failed', 'suppresse
 
 -- name: UpdateRuleEmailStatus :exec
 UPDATE alert_rules SET email_status = ?, email_status_detail = ?, email_status_at = ? WHERE id = ?;
+
+-- name: ClearRetryingRuleEmailStatus :exec
+UPDATE alert_rules SET email_status = '', email_status_detail = '', email_status_at = '' WHERE id = ? AND email_status = 'retrying';

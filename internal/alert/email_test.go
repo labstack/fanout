@@ -520,6 +520,45 @@ func TestRetryDropsARecipientNoLongerOnTheRule(t *testing.T) {
 	}
 }
 
+func TestDroppingEveryRecipientClearsOnlyItsOwnRetryStatus(t *testing.T) {
+	setup := func(t *testing.T) (*mailHarness, Rule) {
+		h := newMailHarness(t, 30)
+		rule := h.rule(t, "errors", "gone@example.com", "keep@example.com")
+		h.box.fail = func(auth.AlertMail) error { return errors.New("451 later") }
+		h.fire(rule)
+		h.drain()
+		h.box.fail = nil
+		if status := h.ruleStatus(t, rule.ID).EmailStatus; status != "retrying" {
+			t.Fatalf("rule status = %q", status)
+		}
+		rule.EmailRecipients = []string{"new@example.com"}
+		if _, err := h.store.ReplaceRule(rule); err != nil {
+			t.Fatal(err)
+		}
+		return h, rule
+	}
+
+	t.Run("retrying status is cleared", func(t *testing.T) {
+		h, rule := setup(t)
+		h.now = h.now.Add(2 * time.Minute)
+		h.drain()
+		if status := h.ruleStatus(t, rule.ID).EmailStatus; status != "" {
+			t.Fatalf("rule status = %q", status)
+		}
+	})
+
+	t.Run("a newer failure stays visible", func(t *testing.T) {
+		h, rule := setup(t)
+		h.engine.setRuleEmailStatus(context.Background(), rule.ID, "failed", "newer notification")
+		h.now = h.now.Add(2 * time.Minute)
+		h.drain()
+		stored := h.ruleStatus(t, rule.ID)
+		if stored.EmailStatus != "failed" || stored.EmailStatusDetail != "newer notification" {
+			t.Fatalf("rule = %+v", stored)
+		}
+	})
+}
+
 func TestEmailWorkerKeepsRunningAfterAPanic(t *testing.T) {
 	h := newMailHarness(t, 30)
 	h.engine.now = nil
