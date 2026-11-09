@@ -19,7 +19,6 @@ INSERT INTO ingest_tokens (id, name, token_hash, hint, source, created_at)
 SELECT lower(hex(randomblob(16))), 'default', json_extract(value, '$.token_hash'), '', 'migrated', updated_at
 FROM settings
 WHERE key = 'ingest'
-  AND json_valid(value)
-  AND length(json_extract(value, '$.token_hash')) = 64;
+  AND length(CASE WHEN json_valid(value) THEN json_extract(value, '$.token_hash') END) = 64;
 
 DELETE FROM settings WHERE key = 'ingest';
