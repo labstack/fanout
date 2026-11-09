@@ -15,8 +15,8 @@ Fanout's built-in agent or connect your own over MCP.
 </a>
 
 Fanout keeps OpenTelemetry traces, logs, and metrics in one binary and one data directory, with no
-external storage services to operate. Fanout is pre-release and changes without migration paths; the browser
-client, built-in agent, MCP tools, dashboards, and alerts are preview capabilities
+external storage services to operate. The browser client, built-in agent, MCP tools, dashboards, and alerts are
+preview capabilities and can change without a migration path
 ([status](https://fanout.run/docs/reference/capabilities)). Start with the
 [documentation](https://fanout.run) or run it below.
 
@@ -212,7 +212,7 @@ generated assets, hooks, and project layout.
 ## Releases
 
 Versions are CalVer — `vYYYY.M.N[-alpha|-beta|-rc]`, numbered from 0 within each month across all
-maturity suffixes. Fanout is alpha (for example, `v2026.11.0-alpha`); GA has no suffix.
+maturity suffixes (for example, `v2026.11.0-alpha`). A stable release has no suffix.
 Container tags omit the leading `v`, and every release moves `latest`. Tagged releases publish
 identical manifests to Docker Hub (`labstack/fanout`) and GHCR (`ghcr.io/labstack/fanout`); GHCR is
 canonical and also carries development images.

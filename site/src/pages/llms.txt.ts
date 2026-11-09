@@ -54,7 +54,7 @@ export const GET: APIRoute = async ({ site }) => {
     "rules, serves a chat investigator and MCP tools, and hosts the browser client.",
     "",
     "> Use this file as a map of the Fanout documentation. Fetch any page as",
-    "> Markdown by appending `.md` to its URL. Fanout is pre-release: entries",
+    "> Markdown by appending `.md` to its URL. Entries",
     "> marked PREVIEW run today but may change shape without a migration path,",
     "> and entries marked PLANNED do not execute yet. Trust the marker over the",
     "> confidence of the prose.",

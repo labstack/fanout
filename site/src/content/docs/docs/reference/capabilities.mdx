@@ -8,8 +8,9 @@ read_when:
 status: preview
 ---
 
-Fanout is alpha. User-facing contracts and storage formats can change without
-migration paths. Every documentation page states one of these statuses:
+Stable releases follow the [upgrade policy](/docs/guides/upgrade). A `preview`
+capability can still change in any release. Every documentation page states one
+of these statuses:
 
 | Marker | Meaning |
 |---|---|
@@ -40,6 +41,8 @@ capabilities uses `preview` if any of its contracts remain unsettled.
 | Insights and anomaly detection | preview | Detect error, latency and volume changes against rollup baselines; report insights, log patterns and a health score. |
 | Local email sign-in | shipped | Codes by email; no passwords. |
 | Local self-signup | preview | `FANOUT_SELF_SIGNUP`, off by default. Provisions viewers after code verification only. |
+| SCIM user provisioning | preview | `FANOUT_SCIM_TOKEN` enables [create, update and deactivate over SCIM 2.0](/docs/concepts/authentication) in OIDC mode. |
+| Alert email | preview | [Rules deliver to email addresses](/docs/guides/alerts) through the configured SMTP settings. |
 | OIDC account auto-provisioning | preview | Eligible identities receive the configured mapped or default role; the default is viewer. |
 | OIDC sign-in | shipped | Provider flow, with group and domain mapping. |
 | Generated settings reference | shipped | `cmd/fanout-docgen` writes it; `just check` fails when it drifts from the type. |
@@ -53,6 +56,6 @@ capabilities uses `preview` if any of its contracts remain unsettled.
 - Namespaces filter queries. Anyone who can query an instance can query every namespace in it. Each instance is one trust domain; use separate instances for mutually untrusted teams. A namespace does not represent a user, organisation or tenant.
 - **No horizontal scale.** Ingest, query and maintenance share one process and one machine.
 - **Capacity depends on your workload.** Payload cardinality, query mix and disk determine capacity. The published benchmark measures one release, host and workload. [Measure your own hardware](/docs/concepts/performance).
-- **No migration paths.** Fanout is pre-release. Storage-format changes may require a fresh data directory. Preserve backups before upgrading.
+- **Preview storage has no migration path.** A batch format change may require a fresh data directory. Preserve backups before upgrading.
 
 Keep a separate copy of data you need to retain.
