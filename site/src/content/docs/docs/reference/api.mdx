@@ -36,10 +36,8 @@ pattern Echo matches on, not a literal URL.
 
 ## Interface stability
 
-The `/api/*` routes serve the browser client. The
-[upgrade policy](/docs/guides/upgrade) sets the notice for changes to `shipped`
-capabilities; routes of `preview` capabilities can change without a migration
-path. [MCP](/docs/guides/mcp) is the agent interface. OTLP ingest and
+The `/api/*` routes serve the browser client and can change without migration
+paths. [MCP](/docs/guides/mcp) is the agent interface. OTLP ingest and
 [operational endpoints](/docs/reference/endpoints) have their own contracts.
 
 Manage alert rules on the [Alerts page](/docs/guides/alerts) or through the HTTP API.

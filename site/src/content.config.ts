@@ -18,8 +18,8 @@ import { docsSchema } from "@astrojs/starlight/schema";
 //
 //   shipped      the binary on the current tag does this.
 //   preview      it runs, and its shape may still change without a migration.
-//                The upgrade policy exempts it from breaking-change notice, so
-//                this is a real state here rather than a hedge.
+//                Fanout is pre-release and breaks things deliberately, so this
+//                is a real state here rather than a hedge.
 //   planned      designed and written down, but nothing executes it yet.
 //
 // A page that claims more than the binary delivers is the failure these exist
