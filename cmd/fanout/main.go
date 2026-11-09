@@ -188,8 +188,7 @@ func main() {
 
 	settingsStore := settings.NewStore(sqlite.DB)
 	auditStore := auth.NewAuditStore(sqlite.DB)
-	// Runs before the alert engine, the control database's first other writer.
-	if err := applyConfiguredIngestToken(ctx, settingsStore, auditStore, cfg.IngestToken); err != nil {
+	if err := applyConfiguredIngestToken(ctx, settingsStore, cfg.IngestToken); err != nil {
 		slog.Error("configured ingest token init failed", "err", err)
 		os.Exit(1)
 	}
@@ -247,6 +246,7 @@ func main() {
 		printSetupBanner(cfg.Addr, token)
 	}
 
+	stopIngestTokenFlusher := settingsStore.StartIngestTokenLastUsedFlusher()
 	grpcSrv := grpc.NewServer(ingest.GRPCServerOptions(settingsStore)...)
 	ing := ingest.NewServer(cfg, writer)
 	ingest.RegisterOTLP(grpcSrv, ing)
@@ -332,7 +332,7 @@ func main() {
 
 	api.RegisterUserRoutes(e, userStore, smtpCfg, cfg)
 	api.RegisterSCIMRoutes(e, cfg, userStore, identityStore)
-	api.RegisterSettingsRoutes(e, cfg, settingsStore, auditStore)
+	api.RegisterSettingsRoutes(e, cfg, settingsStore)
 	slog.Info("auth enabled")
 
 	// Hourly auth-state sweep: expired verification codes, expired/revoked OAuth
@@ -470,6 +470,7 @@ func main() {
 	// Schema discoveries outlive their requests; stop them before the engine.
 	panels.Close()
 	grpcSrv.Stop()
+	stopIngestTokenFlusher()
 	cancel()
 	writer.Wait()
 	if err := <-writerResult; err != nil {
@@ -749,19 +750,20 @@ func createLoginLink(cfg config.Config, rawEmail string, breakGlass bool, output
 }
 
 // applyConfiguredIngestToken seeds the first ingest token from configuration.
+// A token that has ever existed, including a revoked one, blocks the seed.
 // It logs the outcome by setting name and never the token or its hash.
-func applyConfiguredIngestToken(ctx context.Context, store *settings.Store, audit *auth.AuditStore, token string) error {
+func applyConfiguredIngestToken(ctx context.Context, store *settings.Store, token string) error {
 	if token == "" {
 		return nil
 	}
-	applied, err := store.ApplyConfiguredIngestToken(ctx, token, audit)
+	applied, err := store.ApplyConfiguredIngestToken(ctx, token)
 	if err != nil {
 		return err
 	}
 	if applied {
 		slog.Info("ingest token set from FANOUT_INGEST_TOKEN")
 	} else {
-		slog.Info("FANOUT_INGEST_TOKEN ignored because an ingest token already exists")
+		slog.Info("FANOUT_INGEST_TOKEN ignored because an ingest token has already existed")
 	}
 	return nil
 }

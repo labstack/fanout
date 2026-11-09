@@ -3,7 +3,7 @@ import { Anchor, Button, Code, Group, Stack, Text, TextInput } from "@mantine/co
 import { ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { createContext, FormEvent, ReactNode, useContext, useEffect, useRef, useState } from "react";
-import { browserViewerFromMe, BrowserViewer, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { browserViewerFromMe, BrowserViewer, oauthReturnTo, oidcReturnTo, unauthorizedEvent } from "./auth-session";
 import { BrandMark } from "./brand";
 import { docs } from "../../links";
 
@@ -198,7 +198,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   </RuntimeStatusContext.Provider>;
 
   if (status && !status.setup_required && status.auth_mode === "oidc") {
-    const target = returnTo ? `/api/auth/oidc/start?return_to=${encodeURIComponent(returnTo)}` : "/api/auth/oidc/start";
+    const oidcReturn = oidcReturnTo();
+    const target = oidcReturn ? `/api/auth/oidc/start?return_to=${encodeURIComponent(oidcReturn)}` : "/api/auth/oidc/start";
     return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>}><Stack gap={28}>
       <PageHeader title="Sign in to Fanout" description="Use your organization’s identity provider to continue." />
       {error && <Notice tone="danger">{error}</Notice>}

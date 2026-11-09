@@ -85,7 +85,7 @@ func (h *httpIngestHandler) handleExport(
 	}
 	if err := h.authorizer.authorizeToken(r.Context(), ingestTokenFromHTTP(r.Header)); err != nil {
 		switch {
-		case errors.Is(err, errInvalidIngestToken), errors.Is(err, errIngestNotInitialized):
+		case errors.Is(err, errInvalidIngestToken):
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeOTLPStatus(w, r, http.StatusUnauthorized, codes.Unauthenticated, "unauthorized")
 		default:

@@ -73,11 +73,11 @@ func (s *transportCountSubmitter) Submit(ctx context.Context, b telemetrystore.B
 
 func runTransportComparison(t *testing.T, mode string, durable bool, concurrency int) {
 	store := newRuntimeStore(t)
-	token, hash, err := settings.GenerateIngestToken()
+	token, _, err := settings.GenerateIngestToken()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
+	if _, err := store.ApplyConfiguredIngestToken(context.Background(), token); err != nil {
 		t.Fatal(err)
 	}
 	sink := &transportCountSubmitter{}

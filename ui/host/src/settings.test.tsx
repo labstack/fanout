@@ -32,6 +32,38 @@ function setValue(input: HTMLInputElement, value: string) {
 }
 
 const connection = { token_required: true, suggested_endpoint: "ingest.example.com:7520", tls_configured: false, header_name: "Authorization" };
+const collectorToken = { id: "token-1", name: "prod-collector", hint: "x7Qa", created_at: "2026-10-01T12:00:00Z", last_used_at: "2026-10-02T12:00:00Z" };
+const unusedToken = { id: "token-2", name: "staging", hint: "", created_at: "2026-10-03T12:00:00Z", last_used_at: null };
+const tokenList = (...tokens: unknown[]) => ({ tokens, max_active: 50 });
+const created = { ...connection, token: { id: "token-3", name: "edge", hint: "AAAA", created_at: "2026-11-01T12:00:00Z", last_used_at: null }, ingest_token: `foi_${"A".repeat(43)}` };
+const tokensURL = "/api/settings/ingest/tokens";
+
+function telemetryResponder(tokens: unknown[], post: () => Response) {
+  return async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") return post();
+    return json(String(url) === tokensURL ? tokenList(...tokens) : connection);
+  };
+}
+
+function button(label: string) {
+  return [...document.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent?.trim() === label);
+}
+
+function postCalls() {
+  return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+}
+
+async function typeTokenName(value: string) {
+  await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>('input[placeholder="production-collector"]')).not.toBeNull());
+  const input = document.querySelector<HTMLInputElement>('input[placeholder="production-collector"]');
+  if (!input) throw new Error("token name input not found");
+  await act(async () => setValue(input, value));
+}
+
+async function submitTokenForm() {
+  const submit = button("Create token");
+  await act(async () => submit?.closest("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+}
 
 let client: QueryClient;
 
@@ -54,7 +86,7 @@ describe("connect telemetry", () => {
     fetchMock.mockReset();
     agentsFetchMock.mockReset();
     agentsFetchMock.mockImplementation(async () => json({ connections: [] }));
-    fetchMock.mockImplementation(async () => json(connection));
+    fetchMock.mockImplementation(telemetryResponder([collectorToken], () => json(created, 201)));
   });
   afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 
@@ -133,29 +165,106 @@ describe("connect telemetry", () => {
     await act(async () => root.unmount());
   });
 
-  it("asks before rotating, because the current token stops working at once", async () => {
+  it("lists tokens with name, hint, created time, and last used", async () => {
+    fetchMock.mockImplementation(telemetryResponder([collectorToken, unusedToken], () => json(created, 201)));
     const root = await mount();
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Rotate token"));
-    const rotate = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Rotate token");
-    await act(async () => rotate?.click());
-    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("rejected until you update it");
-    // Opening the dialog must not have rotated anything.
-    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("prod-collector"));
+    expect(document.body.textContent).toContain("foi_…x7Qa");
+    expect(document.body.textContent).toContain(formatTimestamp(Date.parse(collectorToken.created_at)));
+    expect(document.body.textContent).toContain(formatTimestamp(Date.parse(collectorToken.last_used_at)));
+    // A migrated token has no recorded hint, and an unused one has no last use.
+    expect(document.body.textContent).toContain("Not recorded");
+    expect(document.body.textContent).toContain("Never");
     await act(async () => root.unmount());
   });
 
-  it("shows the new token once after rotating", async () => {
-    fetchMock.mockImplementation(async (_url, init) => json((init as RequestInit | undefined)?.method === "POST" ? { ...connection, ingest_token: `foi_${"A".repeat(43)}` } : connection));
+  it("creates a token only on an explicit submit, never on page load", async () => {
     const root = await mount();
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Rotate token"));
-    const open = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Rotate token");
-    await act(async () => open?.click());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("prod-collector"));
+    expect(postCalls()).toHaveLength(0);
+    await typeTokenName("edge");
+    expect(postCalls()).toHaveLength(0);
+    await submitTokenForm();
+    await vi.waitFor(() => expect(postCalls()).toHaveLength(1));
+    const [url, init] = postCalls()[0];
+    expect(url).toBe(tokensURL);
+    expect(init?.body).toBe(JSON.stringify({ name: "edge" }));
+    await act(async () => root.unmount());
+  });
+
+  it("shows the value once with a warning and the Collector configuration", async () => {
+    const root = await mount();
+    await typeTokenName("edge");
+    await submitTokenForm();
+    const value = `foi_${"A".repeat(43)}`;
+    await vi.waitFor(() => expect(document.body.textContent).toContain(`INGEST_TOKEN=${value}`));
+    expect(document.body.textContent).toContain("Save this token now");
+    expect(document.body.textContent).toContain("${env:INGEST_TOKEN}");
+    await act(async () => button("Done")?.click());
+    expect(document.body.textContent).not.toContain(value);
+    // "Shown once" has to be true of the cache as well as the screen.
+    expect(JSON.stringify(client.getMutationCache().getAll().map((mutation) => mutation.state.data))).not.toContain(value);
+    expect(JSON.stringify(client.getQueryCache().getAll().map((query) => query.state.data))).not.toContain(value);
+    await act(async () => root.unmount());
+  });
+
+  it("reports a refused create with the server's reason", async () => {
+    fetchMock.mockImplementation(telemetryResponder([collectorToken], () => json({ code: "ingest_token_name_taken", message: "An active token already uses that name. Choose another name." }, 409)));
+    const root = await mount();
+    await typeTokenName("prod-collector");
+    await submitTokenForm();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("already uses that name"));
+    await act(async () => root.unmount());
+  });
+
+  it("stops offering create at the active token limit", async () => {
+    const full = Array.from({ length: 50 }, (_, index) => ({ ...collectorToken, id: `token-${index}`, name: `collector-${index}` }));
+    fetchMock.mockImplementation(telemetryResponder(full, () => json(created, 201)));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("collector-0"));
+    await typeTokenName("one-more");
+    expect(button("Create token")?.disabled).toBe(true);
+    expect(document.body.textContent).toContain("50 active tokens, the maximum");
+    await act(async () => root.unmount());
+  });
+
+  it("warns that revoking the last active token stops ingest", async () => {
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("prod-collector"));
+    await act(async () => button("Revoke")?.click());
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
-    const confirm = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent?.trim() === "Rotate token");
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain("last active token");
+    expect(dialog?.textContent).toContain("stops all ingest");
+    // Opening the dialog must not have revoked anything.
+    expect(postCalls()).toHaveLength(0);
+    await act(async () => root.unmount());
+  });
+
+  it("omits the last-token warning while other tokens remain", async () => {
+    fetchMock.mockImplementation(telemetryResponder([collectorToken, unusedToken], () => json(created, 201)));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("prod-collector"));
+    await act(async () => button("Revoke")?.click());
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain("last active token");
+    await act(async () => root.unmount());
+  });
+
+  it("revokes through the token route and refreshes the list", async () => {
+    let tokens: unknown[] = [collectorToken, unusedToken];
+    fetchMock.mockImplementation(async (url, init) => {
+      if (init?.method === "POST") { tokens = [unusedToken]; return new Response(null, { status: 204 }); }
+      return json(String(url) === tokensURL ? tokenList(...tokens) : connection);
+    });
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("prod-collector"));
+    await act(async () => button("Revoke")?.click());
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((candidate) => candidate.textContent?.trim() === "Revoke token");
     await act(async () => confirm?.click());
-    await vi.waitFor(() => expect(document.body.textContent).toContain(`foi_${"A".repeat(43)}`));
-    expect(document.body.textContent).toContain("Fanout shows this once");
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain("prod-collector"));
+    expect(postCalls()[0][0]).toBe(`${tokensURL}/token-1/revoke`);
     await act(async () => root.unmount());
   });
 
@@ -198,46 +307,6 @@ describe("connect telemetry", () => {
     await act(async () => root.unmount());
   });
 
-  it("stops offering to issue a token once one has been issued", async () => {
-    fetchMock.mockImplementation(async (_url, init) => json((init as RequestInit | undefined)?.method === "POST"
-      ? { ...connection, token_required: true, ingest_token: `foi_${"B".repeat(43)}` }
-      : { ...connection, token_required: false }));
-    const root = await mount();
-    await vi.waitFor(() => expect(document.body.textContent).toContain("rejecting telemetry"));
-    const open = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Issue token");
-    await act(async () => open?.click());
-    const confirm = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent?.trim() === "Issue token");
-    await act(async () => confirm?.click());
-    await vi.waitFor(() => expect(document.body.textContent).toContain(`foi_${"B".repeat(43)}`));
-    // The page has changed the fact it describes: leaving the old copy up
-    // invites the admin to rotate away the token they were just handed.
-    expect(document.body.textContent).not.toContain("rejecting telemetry");
-    const done = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Done");
-    await act(async () => done?.click());
-    expect(document.body.textContent).not.toContain(`foi_${"B".repeat(43)}`);
-    // "Shown once" has to be true of the cache as well as the screen.
-    expect(JSON.stringify(client.getMutationCache().getAll().map((mutation) => mutation.state.data))).not.toContain(`foi_${"B".repeat(43)}`);
-    expect(document.body.textContent).toContain("Rotate when a token may have been exposed");
-    await act(async () => root.unmount());
-  });
-
-  it("explains a rotation that failed, and forgets it when the dialog is reopened", async () => {
-    fetchMock.mockImplementation(async (_url, init) => ((init as RequestInit | undefined)?.method === "POST" ? json({ message: "nope" }, 500) : json(connection)));
-    const root = await mount();
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Rotate token"));
-    const open = () => [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Rotate token" && !button.closest('[role="dialog"]'));
-    await act(async () => open()?.click());
-    const confirm = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent?.trim() === "Rotate token");
-    await act(async () => confirm?.click());
-    await vi.waitFor(() => expect(document.body.textContent).toContain("could not issue a new token"));
-    const cancel = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent?.trim() === "Cancel");
-    await act(async () => cancel?.click());
-    await act(async () => open()?.click());
-    // A stale failure standing over an untouched dialog reads as a new one.
-    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain("could not issue a new token");
-    await act(async () => root.unmount());
-  });
-
   it("offers a retry instead of a spinner when the details cannot be loaded", async () => {
     fetchMock.mockImplementation(async () => json({ message: "boom" }, 500));
     const root = await mount();
@@ -246,20 +315,23 @@ describe("connect telemetry", () => {
     await act(async () => root.unmount());
   });
 
-  it("gives a viewer the connection details without a rotate button", async () => {
+  it("gives a viewer the connection details without token management or token details", async () => {
     role = "viewer";
     const root = await mount();
     await vi.waitFor(() => expect(document.body.textContent).toContain("Collector configuration"));
-    expect(document.body.textContent).toContain("An administrator issues and rotates the ingest token");
-    expect([...document.querySelectorAll("button")].some((button) => button.textContent?.includes("Rotate token"))).toBe(false);
+    expect(document.body.textContent).toContain("An administrator creates and revokes ingest tokens");
+    expect(button("Create token")).toBeUndefined();
+    expect(button("Revoke")).toBeUndefined();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === tokensURL)).toBe(false);
+    expect(document.body.textContent).not.toContain("prod-collector");
     await act(async () => root.unmount());
   });
 
-  it("says the workspace is rejecting telemetry when no token exists", async () => {
-    fetchMock.mockImplementation(async () => json({ ...connection, token_required: false }));
+  it("says the workspace is rejecting telemetry when no token is active", async () => {
+    fetchMock.mockImplementation(async (url) => json(String(url) === tokensURL ? tokenList() : { ...connection, token_required: false }));
     const root = await mount();
     await vi.waitFor(() => expect(document.body.textContent).toContain("rejecting telemetry"));
-    expect([...document.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Issue token")).toBe(true);
+    expect(button("Create token")).not.toBeUndefined();
     await act(async () => root.unmount());
   });
 });

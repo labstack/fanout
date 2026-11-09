@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorizedFetch, browserViewerFromMe, logout, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { authorizedFetch, browserViewerFromMe, logout, oauthReturnTo, oidcReturnTo, unauthorizedEvent } from "./auth-session";
 import { ApiError } from "./dashboards/api";
 
 declare global {
@@ -12,11 +12,37 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+describe("oidcReturnTo", () => {
+  afterEach(() => window.happyDOM.setURL("http://localhost:3000/"));
+
+  it("returns to the ingest token page when that is where sign-in started", () => {
+    window.happyDOM.setURL("http://localhost:3000/settings/ingest");
+    expect(oidcReturnTo()).toBe("/settings/ingest");
+  });
+
+  it("honors an explicit return path", () => {
+    window.happyDOM.setURL(`http://localhost:3000/?return_to=${encodeURIComponent("/settings/ingest")}`);
+    expect(oidcReturnTo()).toBe("/settings/ingest");
+  });
+
+  it("ignores unrelated pages and off-origin return paths", () => {
+    window.happyDOM.setURL("http://localhost:3000/settings");
+    expect(oidcReturnTo()).toBe("");
+    window.happyDOM.setURL(`http://localhost:3000/?return_to=${encodeURIComponent("https://evil.example/settings/ingest")}`);
+    expect(oidcReturnTo()).toBe("");
+  });
+});
+
 describe("oauthReturnTo", () => {
   function withReturnTo(value: string | null) {
     const url = value === null ? "http://localhost:3000/" : `http://localhost:3000/?return_to=${encodeURIComponent(value)}`;
     window.happyDOM.setURL(url);
   }
+
+  it("accepts the ingest token page as a sign-in return path", () => {
+    withReturnTo("/settings/ingest");
+    expect(oauthReturnTo()).toBe("/settings/ingest");
+  });
 
   it("returns empty without a return_to parameter", () => {
     withReturnTo(null);

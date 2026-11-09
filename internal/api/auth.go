@@ -150,26 +150,15 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
 	}
 
-	// Generate the ingest token only if one doesn't exist yet, so a database
-	// that already carries one is never rotated out from under live collectors
-	// — to rotate deliberately, the admin uses the Settings page.
+	// Issue a token only if none has ever existed, so a database that already
+	// carries one is never changed under live collectors.
 	resp := map[string]string{"status": "authenticated"}
-	current, err := h.settings.GetIngest(c.Request().Context())
+	ingestToken, err := h.settings.IssueFirstIngestToken(c.Request().Context(), settings.IngestTokenActor{UserID: user.ID, RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent()})
 	if err != nil {
-		slog.Error("auth: setup load ingest config failed", "err", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load ingest config")
+		slog.Error("auth: setup issue ingest token failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to issue ingest token")
 	}
-	if current.TokenHash == "" {
-		ingestToken, ingestHash, err := settings.GenerateIngestToken()
-		if err != nil {
-			slog.Error("auth: setup generate ingest token failed", "err", err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate ingest token")
-		}
-		ingestEvent := auth.AuditEvent{ActorUserID: user.ID, EventType: "ingest_key.rotated", Outcome: "success", TargetType: "ingest", TargetID: "default", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent(), Metadata: map[string]any{"source": "setup"}}
-		if err := h.settings.SetIngestWithAudit(c.Request().Context(), settings.Ingest{TokenHash: ingestHash}, h.audit, ingestEvent); err != nil {
-			slog.Error("auth: setup persist ingest token failed", "err", err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist ingest token")
-		}
+	if ingestToken != "" {
 		resp["ingest_token"] = ingestToken
 		resp["ingest_header_name"] = "Authorization"
 		// The endpoint collectors should actually use. Behind a reverse proxy

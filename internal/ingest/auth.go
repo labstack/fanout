@@ -29,7 +29,6 @@ type ingestAuthorizer struct {
 
 var (
 	errIngestAuthUnavailable = errors.New("ingest auth unavailable")
-	errIngestNotInitialized  = errors.New("fanout not initialized")
 	errInvalidIngestToken    = errors.New("invalid ingest token")
 )
 
@@ -46,16 +45,13 @@ func (a *ingestAuthorizer) Unary() grpc.UnaryServerInterceptor {
 	}
 }
 
-// authorize requires a valid ingest token on every request (set from
-// configuration or during admin creation, rotatable from the settings page). Peer IP is not
+// authorize requires an active ingest token on every request. Peer IP is not
 // considered — operators decide who reaches the port.
 func (a *ingestAuthorizer) authorize(ctx context.Context) error {
 	err := a.authorizeToken(ctx, ingestTokenFromContext(ctx))
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, errIngestNotInitialized):
-		return status.Error(codes.Unauthenticated, "fanout not initialized")
 	case errors.Is(err, errInvalidIngestToken):
 		return status.Error(codes.Unauthenticated, "invalid ingest token")
 	default:
@@ -75,19 +71,13 @@ func (a *ingestAuthorizer) authorizeToken(ctx context.Context, token string) err
 		slog.Error("ingest: settings store not wired; rejecting request")
 		return errIngestAuthUnavailable
 	}
-	ingestCfg, err := a.settingsStore.GetIngest(ctx)
+	authenticated, err := a.settingsStore.AuthenticateIngestToken(ctx, token)
 	if err != nil {
 		// Don't leak the wrapped error to the client — log it server-side.
-		slog.Error("ingest: load config failed", "err", err)
+		slog.Error("ingest: token lookup failed", "err", err)
 		return fmt.Errorf("%w: %v", errIngestAuthUnavailable, err)
 	}
-	if ingestCfg.TokenHash == "" {
-		// No token exists to check against: none was configured and setup has
-		// not issued one. Reject all requests; collectors must wait.
-		slog.Warn("ingest: rejecting request — no ingest token configured (setup not complete)")
-		return errIngestNotInitialized
-	}
-	if token == "" || !settings.CheckIngestToken(token, ingestCfg.TokenHash) {
+	if !authenticated {
 		return errInvalidIngestToken
 	}
 	return nil

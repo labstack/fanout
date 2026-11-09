@@ -167,7 +167,7 @@ resources and protocol-defined contracts keep their own semantics.
   representation, PATCH partially modifies it, and DELETE removes it.
   Choose the method from the handler's behavior, not its current name.
 - Custom actions use POST and a slash-separated action, for example
-  `/api/users/{id}/access/revoke` or `/api/settings/ingest/token/rotate`.
+  `/api/users/{id}/access/revoke` or `/api/settings/ingest/tokens/{id}/revoke`.
   Each segment should have a domain, resource, or action meaning; do not
   mechanically split compound words. Colon actions are conventions in other
   API ecosystems.

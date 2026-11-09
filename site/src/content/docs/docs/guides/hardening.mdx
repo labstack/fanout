@@ -54,7 +54,7 @@ platform layer; Fanout does not check file modes. See
 Keep the setup URL, login links, session cookies and ingest token out of public
 logs and tickets. Restrict access to startup logs until setup is complete.
 Use the [ingest rotation procedure](/docs/get-started/send-telemetry#the-ingest-token)
-if the ingest token is lost or exposed.
+if a token is lost or exposed: create a replacement, then revoke the exposed one.
 
 Report vulnerabilities privately through
 [SECURITY.md](https://github.com/labstack/fanout/blob/main/SECURITY.md).

@@ -1,23 +1,14 @@
 import { LoadingSkeleton } from "./loading-skeleton";
 import { formatTimestamp } from "../../panels/units";
 import { ConfirmDialog, DataState, KeyValueList, Notice, PageHeader } from "@labstack/ui";
-import { Anchor, Box, Button, Code, CopyButton, Group, Paper, Stack, Text, TextInput, Title, Tooltip } from "@mantine/core";
-import { ArrowsClockwise, Check, Copy } from "@phosphor-icons/react";
+import { Anchor, Box, Button, Code, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { getJSON } from "./api";
 import { useFanoutApp } from "./app-context";
-import { authorizedFetch, useRuntimeStatus, useViewer } from "./auth";
+import { authorizedFetch, useRuntimeStatus } from "./auth";
+import { ConnectTelemetry } from "./connect-telemetry";
 import { docs } from "../../links";
-
-type IngestSettings = {
-  token_required: boolean;
-  suggested_endpoint: string;
-  tls_configured: boolean;
-  header_name: string;
-};
-
-const ingestQueryKey = ["settings", "ingest"] as const;
 
 type OAuthConnection = {
   client_id: string;
@@ -103,212 +94,13 @@ function AccountOwnership() {
   </Stack>;
 }
 
-/** Whether the exporter reaches this instance over TLS.
- *
- *  Three things can say so: the process holds the certificate itself, the
- *  advertised endpoint carries an https scheme, or it names port 443 — an
- *  operator pointing at a TLS-terminating proxy usually writes the port and
- *  not the scheme, and telling that collector to send plaintext produces a
- *  gRPC error that explains nothing. Anything else is treated as plaintext,
- *  which is what an unproxied instance serves. */
-function overTLS(endpoint: string, tlsConfigured: boolean) {
-  const value = endpoint.trim();
-  return tlsConfigured || /^https:\/\//i.test(value) || /:443$/.test(value);
-}
-
-/** The collector block an engineer actually pastes, with this instance's own
- *  endpoint already in it. Everything else on the page is a fact about the
- *  connection; this is the thing that makes telemetry arrive.
- *
- *  The endpoint is quoted because an advertised IPv6 address arrives as
- *  "[2001:db8::1]:7520", which unquoted YAML reads as a flow sequence. The
- *  token is referenced as ${env:INGEST_TOKEN}, the name and the form the
- *  documentation and the README both use — the braced form alone is ambiguous
- *  where a distribution sets its own default config scheme. */
-function collectorConfig(endpoint: string, header: string, tlsConfigured: boolean) {
-  // Collector's gRPC exporter requires an explicit port even with an HTTP(S)
-  // scheme. Keep the scheme so its TLS semantics survive normalization.
-  if (/^https?:\/\//i.test(endpoint.trim())) {
-    try {
-      const url = new URL(endpoint);
-      endpoint = `${url.protocol}//${url.hostname}:${url.port || (url.protocol === "https:" ? "443" : "80")}`;
-    } catch {
-      // Leave an invalid advertised override visible without breaking the page.
-    }
-  }
-  const insecure = overTLS(endpoint, tlsConfigured) ? "" : "\n    tls:\n      insecure: true";
-  return `exporters:
-  otlp/fanout:
-    endpoint: "${endpoint}"
-    headers:
-      ${header}: "Bearer \${env:INGEST_TOKEN}"${insecure}
-
-service:
-  pipelines:
-    traces:
-      exporters: [otlp/fanout]
-    logs:
-      exporters: [otlp/fanout]
-    metrics:
-      exporters: [otlp/fanout]`;
-}
-
-function Field({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return <KeyValueList layout="stacked" items={[{ label, hint, value: <Group gap="xs" wrap="nowrap" align="center">
-      <Code style={{ flex: 1, overflowX: "auto" }}>{value}</Code>
-      <CopyButton value={value} timeout={1500}>
-        {({ copied, copy }) => <Tooltip label={copied ? "Copied" : `Copy ${label.toLowerCase()}`} withArrow>
-          <Button variant="subtle" color="gray" size="sm" onClick={copy} aria-label={`Copy ${label.toLowerCase()}`}>
-            {copied ? <Check size={15} weight="bold" /> : <Copy size={15} />}
-          </Button>
-        </Tooltip>}
-      </CopyButton>
-    </Group> }]} />;
-}
-
 export default function Settings() {
   const { agentAvailable } = useFanoutApp();
-  const viewer = useViewer();
-  const queryClient = useQueryClient();
-  const settings = useQuery({ queryKey: ingestQueryKey, queryFn: () => getJSON<IngestSettings>("/api/settings/ingest") });
-  const [confirming, setConfirming] = useState(false);
-  const [issued, setIssued] = useState<string | null>(null);
-  const [endpointOverride, setEndpointOverride] = useState<string | null>(null);
-
-  const rotate = useMutation({
-    // The plaintext lives in this mutation's result, and the cache keeps a
-    // result for five minutes after its last observer lets go. Zero means
-    // "shown once" is true of the tab as well as the screen.
-    gcTime: 0,
-    // A GET already in flight resolves after the POST and writes the
-    // pre-rotation answer over the refreshed one — the page then says the
-    // workspace is rejecting telemetry and offers to issue the token it has
-    // just issued. Cancelling first is what makes the write below hold.
-    onMutate: () => queryClient.cancelQueries({ queryKey: ingestQueryKey }),
-    mutationFn: async () => {
-      // A failure between the write and the response leaves the old token dead
-      // and the new one unrecoverable, so this case gets its own instruction
-      // rather than the browser's "Failed to fetch".
-      const response = await authorizedFetch("/api/settings/ingest/token/rotate", { method: "POST" })
-        .catch(() => { throw new Error("Fanout could not be reached. A token may still have been issued — reload this page before trying again."); });
-      if (!response.ok) throw new Error("Fanout could not issue a new token. Try again.");
-      // The plaintext comes back once, under the same key the setup response
-      // uses; the rest of the payload is the refreshed settings.
-      return response.json() as Promise<IngestSettings & { ingest_token?: string }>;
-    },
-    onSuccess: (data) => {
-      setConfirming(false);
-      setIssued(data.ingest_token ?? null);
-      // The page has just changed the fact it is describing. Writing the
-      // refreshed settings back — without the plaintext, which belongs in no
-      // cache — stops the copy below still saying this workspace has no token
-      // and offering to issue one, which would destroy the token just issued.
-      queryClient.setQueryData<IngestSettings>(ingestQueryKey, {
-        token_required: data.token_required,
-        suggested_endpoint: data.suggested_endpoint,
-        tls_configured: data.tls_configured,
-        header_name: data.header_name,
-      });
-    },
-  });
-
-  function dismissToken() {
-    setIssued(null);
-    // Drops the mutation's result, and with gcTime: 0 the cache entry goes
-    // with it rather than lingering.
-    rotate.reset();
-  }
-
-  // A page that has loaded stays loaded: one failed background refetch is not
-  // a reason to replace a working screen with an alert.
-  if (!settings.data) return settings.isLoading ? <Loading /> : <Unavailable onRetry={() => void settings.refetch()} />;
-
-  const { suggested_endpoint: suggestedEndpoint, header_name: header, tls_configured: tlsConfigured, token_required: hasToken } = settings.data;
-  const endpointInput = endpointOverride ?? suggestedEndpoint;
-  const endpoint = endpointInput.trim() || suggestedEndpoint;
-  const canRotate = viewer.role === "admin";
-  const authorization = `${header}: Bearer <your token>`;
 
   return <Box w="100%" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
     <Stack gap="xl">
       <PageHeader title="Settings" description="Manage telemetry connections and authorized agents." />
-      <Title order={2} fz={18}>Connect telemetry</Title>
-      <Text c="dimmed" size="sm">Point an OpenTelemetry collector or SDK at this workspace.</Text>
-
-      <Paper withBorder radius="md" p="lg">
-        <Stack gap="lg">
-          <Stack gap={4}>
-            <Text size="sm" fw={600}>Endpoint</Text>
-            <Group gap="xs" wrap="nowrap" align="center">
-              <TextInput aria-label="Endpoint" value={endpointInput} onChange={(event) => setEndpointOverride(event.currentTarget.value)} style={{ flex: 1 }} styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }} />
-              <CopyButton value={endpoint} timeout={1500}>
-                {({ copied, copy }) => <Tooltip label={copied ? "Copied" : "Copy endpoint"} withArrow>
-                  <Button variant="subtle" color="gray" size="sm" onClick={copy} aria-label="Copy endpoint">
-                    {copied ? <Check size={15} weight="bold" /> : <Copy size={15} />}
-                  </Button>
-                </Tooltip>}
-              </CopyButton>
-            </Group>
-            <Text c="dimmed" size="xs">{overTLS(endpoint, tlsConfigured) ? "OTLP over gRPC, secured with TLS." : "OTLP over gRPC. Fanout serves this endpoint in plaintext, so an exporter needs tls.insecure unless a proxy in front of it terminates TLS."} Edit this when collectors reach Fanout through another hostname.</Text>
-          </Stack>
-          <Field label="Authorization" value={authorization} hint="Send the token your workspace issued. Fanout stores only its hash, so it cannot show you an existing one." />
-        </Stack>
-      </Paper>
-
-      <Stack gap="sm">
-        <Box>
-          <Title order={2} fz={22} lts="-0.02em">Collector configuration</Title>
-          <Text c="dimmed" size="sm" mt={2}>Merge these blocks into your collector configuration, alongside the receivers it already has, and set INGEST_TOKEN in its environment.</Text>
-        </Box>
-        <Paper withBorder radius="md" p="md">
-          <Stack gap="sm">
-            <Code block style={{ fontSize: 12 }}>{collectorConfig(endpoint, header, tlsConfigured)}</Code>
-            <Group justify="flex-end">
-              <CopyButton value={collectorConfig(endpoint, header, tlsConfigured)} timeout={1500}>
-                {({ copied, copy }) => <Button variant="light" size="compact-sm" leftSection={copied ? <Check size={15} weight="bold" /> : <Copy size={15} />} onClick={copy}>
-                  {copied ? "Copied" : "Copy configuration"}
-                </Button>}
-              </CopyButton>
-            </Group>
-          </Stack>
-        </Paper>
-      </Stack>
-
-      <Stack gap="sm">
-        <Box>
-          <Title order={2} fz={22} lts="-0.02em">Ingest token</Title>
-          <Text c="dimmed" size="sm" mt={2}>
-            {hasToken
-              ? "This workspace has a token. Rotating issues a new one and stops the current one working immediately."
-              : "This workspace has no token yet, so it is rejecting telemetry. Issue one to start accepting data."}
-          </Text>
-        </Box>
-        <Paper withBorder radius="md" p="lg">
-          {issued
-            ? <Stack gap="sm">
-                <Text size="sm" fw={600}>Your new token</Text>
-                <Code block>{`${header}: Bearer ${issued}`}</Code>
-                <Text c="dimmed" size="xs">Fanout shows this once and keeps only its hash. Store it with your collector secrets before closing this, then update any collector still using the old token. Lose it and the only way back is another rotation.</Text>
-                <Group>
-                  <CopyButton value={`${header}: Bearer ${issued}`} timeout={1500}>
-                    {({ copied, copy }) => <Button variant="light" size="compact-sm" leftSection={copied ? <Check size={15} weight="bold" /> : <Copy size={15} />} onClick={copy}>{copied ? "Copied" : "Copy header"}</Button>}
-                  </CopyButton>
-                  <Button variant="subtle" color="gray" size="compact-sm" onClick={dismissToken}>Done</Button>
-                </Group>
-              </Stack>
-            : canRotate
-              ? <Group justify="space-between" align="center">
-                  <Text size="sm" c="dimmed">{hasToken ? "Rotate when a token may have been exposed." : "No token issued yet."}</Text>
-                  <Button variant={hasToken ? "default" : "filled"} leftSection={<ArrowsClockwise size={15} weight="bold" />} onClick={() => { rotate.reset(); setConfirming(true); }}>
-                    {hasToken ? "Rotate token" : "Issue token"}
-                  </Button>
-                </Group>
-              : <Text size="sm" c="dimmed">An administrator issues and rotates the ingest token.</Text>}
-        </Paper>
-      </Stack>
-      <Text c="dimmed" size="xs">
-        <Anchor href={docs.ingest} target="_blank" rel="noopener noreferrer" underline="always">Sending telemetry</Anchor> covers SDK setup, the collector, and the OTLP/HTTP endpoint.
-      </Text>
+      <ConnectTelemetry />
       {!agentAvailable && <Stack gap="sm">
         <Title order={2} fz={22} lts="-0.02em">Chat is disabled</Title>
         <Paper withBorder radius="md" p="lg">
@@ -321,19 +113,16 @@ export default function Settings() {
       <AccountOwnership />
       <ConnectedAgents />
     </Stack>
-
-    <ConfirmDialog opened={confirming} onClose={() => { rotate.reset(); setConfirming(false); }} title={hasToken ? "Rotate the ingest token?" : "Issue an ingest token?"} confirmLabel={hasToken ? "Rotate token" : "Issue token"} tone={hasToken ? "danger" : "primary"} pending={rotate.isPending ? "confirm" : null} error={rotate.error?.message} onConfirm={() => rotate.mutate()}>
-      {hasToken
-        ? "The current token stops working the moment the new one is issued. Any collector still sending with it will be rejected until you update it. Fanout shows the new token once and stores only its hash."
-        : "Fanout will show the new token once, and store only its hash."}
-    </ConfirmDialog>
   </Box>;
 }
 
-function Loading() {
-  return <Box w="100%" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl"><Stack gap="xl"><PageHeader title="Settings" description="Manage telemetry connections and authorized agents." /><DataState state="loading" loadingLabel="Loading connection details" skeleton={<LoadingSkeleton shape="settings" />} /></Stack></Box>;
-}
-
-function Unavailable({ onRetry }: { onRetry: () => void }) {
-  return <Stack p="lg"><PageHeader title="Settings" description="Manage telemetry connections and authorized agents." /><DataState state="error" error={{message: "Fanout could not load this workspace's connection details.", onRetry}} /></Stack>;
+/** The ingest token page. Its URL, /settings/ingest, is stable and doubles as a
+ *  sign-in return path, so a sign-in link can land on it directly. */
+export function IngestSettings() {
+  return <Box w="100%" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
+    <Stack gap="xl">
+      <PageHeader title="Ingest tokens" description="Create and revoke the tokens Collectors use to send telemetry." />
+      <ConnectTelemetry />
+    </Stack>
+  </Box>;
 }

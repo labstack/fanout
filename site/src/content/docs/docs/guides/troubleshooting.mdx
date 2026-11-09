@@ -105,7 +105,7 @@ Work down this list in order:
 1. **Has setup finished?** Before the first administrator exists there is no
    ingest token to check against, and ingest rejects everything. A collector
    started ahead of setup fails until you complete it.
-2. **Is it the right credential, in the right header?** The ingest token is
+2. **Is it the right credential, in the right header?** An active ingest token is
    `foi_`-prefixed and goes in `Authorization: Bearer`. Browser sessions and MCP
    tokens are not ingest credentials.
 3. **Is the listener reachable?** Both OTLP transports use `FANOUT_ADDR`
@@ -119,11 +119,10 @@ For OTLP/HTTP, set the exporter protocol to `http/protobuf` and give it the base
 endpoint, `http://fanout:7520`. Exporters derive `/v1/traces`, `/v1/metrics`
 and `/v1/logs` from it themselves.
 
-The raw token is shown once after setup or rotation. If it is lost, an
-administrator can issue a replacement in **Connect telemetry → Ingest token** in the account menu, or
-with `POST /api/settings/ingest/token/rotate`. Save the new token when it is
-shown. Rotation invalidates the old token immediately and cuts off existing
-exporters until you update their credentials.
+The raw token is shown once when it is created. If it is lost, an administrator
+creates a new one at `/settings/ingest` on your Fanout instance, or under
+**Connect telemetry** in the account menu, and updates the Collector. A token
+that was revoked is rejected on the next request.
 
 ### HTTP 415: unsupported media type
 

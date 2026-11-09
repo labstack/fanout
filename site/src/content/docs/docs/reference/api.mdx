@@ -41,8 +41,8 @@ paths. [MCP](/docs/guides/mcp) is the agent interface. OTLP ingest and
 [operational endpoints](/docs/reference/endpoints) have their own contracts.
 
 Manage alert rules on the [Alerts page](/docs/guides/alerts) or through the HTTP API.
-Administrators rotate ingest tokens on **Connect telemetry** or with
-`POST /api/settings/ingest/token/rotate`.
+Administrators manage ingest tokens on **Connect telemetry** or with
+`/api/settings/ingest/tokens`.
 
 ## Errors
 
@@ -140,7 +140,9 @@ Operational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.
 | `POST` | `/api/queries/run` | `telemetry:read` |
 | `POST` | `/api/queries/variables/resolve` | `telemetry:read` |
 | `GET` | `/api/settings/ingest` | `ingest:read-metadata` |
-| `POST` | `/api/settings/ingest/token/rotate` | `ingest:manage` |
+| `GET` | `/api/settings/ingest/tokens` | `ingest:manage` |
+| `POST` | `/api/settings/ingest/tokens` | `ingest:manage` |
+| `POST` | `/api/settings/ingest/tokens/:id/revoke` | `ingest:manage` |
 | `GET` | `/api/telemetry/schema` | `telemetry:read` |
 | `GET` | `/api/traces/:id` | `telemetry:read` |
 | `GET` | `/api/users` | `users:manage` |

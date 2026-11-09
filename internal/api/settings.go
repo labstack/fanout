@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -8,7 +10,6 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/settings"
 )
@@ -16,68 +17,126 @@ import (
 type SettingsHandler struct {
 	cfg   config.Config
 	store *settings.Store
-	audit *auth.AuditStore
 }
 
-func RegisterSettingsRoutes(e *echo.Echo, cfg config.Config, store *settings.Store, audit *auth.AuditStore) {
-	if store == nil || audit == nil {
+func RegisterSettingsRoutes(e *echo.Echo, cfg config.Config, store *settings.Store) {
+	if store == nil {
 		panic("api: settings route dependencies are required")
 	}
-	h := &SettingsHandler{cfg: cfg, store: store, audit: audit}
+	h := &SettingsHandler{cfg: cfg, store: store}
 	// GET returns non-secret metadata (token_required, endpoint, header name)
 	// used by the home empty state — readable by any authenticated user.
 	e.GET("/api/settings/ingest", h.GetIngest, RequireCapability(ReadIngestMetadata))
-	e.POST("/api/settings/ingest/token/rotate", h.RotateIngestToken, RequireCapability(ManageIngest))
+	// Names and hints identify a workspace's collectors, so the token list is
+	// for administrators only, unlike the metadata above.
+	e.GET("/api/settings/ingest/tokens", h.ListIngestTokens, RequireCapability(ManageIngest))
+	e.POST("/api/settings/ingest/tokens", h.CreateIngestToken, RequireCapability(ManageIngest))
+	e.POST("/api/settings/ingest/tokens/:id/revoke", h.RevokeIngestToken, RequireCapability(ManageIngest))
 }
 
-// GetIngest returns the current ingest config: whether a token is set
-// (but not the token itself) and the endpoint collectors should use.
+// GetIngest returns connection metadata and whether any token is active. Token
+// names and hints are not part of it.
 func (h *SettingsHandler) GetIngest(c *echo.Context) error {
-	current, err := h.store.GetIngest(c.Request().Context())
+	active, err := h.store.HasActiveIngestToken(c.Request().Context())
 	if err != nil {
 		slog.Error("settings: load ingest failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load ingest config")
 	}
-	return c.JSON(http.StatusOK, ingestResponse{
-		TokenRequired:     current.TokenHash != "",
-		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg),
-		TLSConfigured:     h.cfg.TLSEnabled(),
-		HeaderName:        "Authorization",
+	return c.JSON(http.StatusOK, h.ingestConnection(c, active))
+}
+
+// ListIngestTokens returns active tokens only: revoked rows are kept for audit
+// and for the seed rule, but no longer identify anything an administrator
+// can act on.
+func (h *SettingsHandler) ListIngestTokens(c *echo.Context) error {
+	tokens, err := h.store.ListActiveIngestTokens(c.Request().Context())
+	if err != nil {
+		slog.Error("settings: list ingest tokens failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list ingest tokens")
+	}
+	return c.JSON(http.StatusOK, ingestTokensResponse{Tokens: tokens, MaxActive: settings.MaxActiveIngestTokens})
+}
+
+// CreateIngestToken issues a named token. The plaintext appears only in this
+// response, which must never be cached.
+func (h *SettingsHandler) CreateIngestToken(c *echo.Context) error {
+	var req createIngestTokenRequest
+	if err := c.Bind(&req); err != nil {
+		return newAPIError(http.StatusBadRequest, "invalid_ingest_token_name", invalidIngestTokenNameMessage)
+	}
+	token, plaintext, err := h.store.CreateIngestToken(c.Request().Context(), req.Name, ingestTokenActor(c))
+	switch {
+	case errors.Is(err, settings.ErrInvalidIngestTokenName):
+		return newAPIError(http.StatusBadRequest, "invalid_ingest_token_name", invalidIngestTokenNameMessage)
+	case errors.Is(err, settings.ErrIngestTokenNameTaken):
+		return newAPIError(http.StatusConflict, "ingest_token_name_taken", "An active token already uses that name. Choose another name.")
+	case errors.Is(err, settings.ErrIngestTokenLimitReached):
+		return newAPIError(http.StatusConflict, "ingest_token_limit_reached", fmt.Sprintf("This workspace has %d active ingest tokens, the maximum. Revoke one before creating another.", settings.MaxActiveIngestTokens))
+	case err != nil:
+		slog.Error("settings: create ingest token failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create ingest token")
+	}
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return c.JSON(http.StatusCreated, createIngestTokenResponse{
+		ingestResponse: h.ingestConnection(c, true),
+		Token:          token,
+		IngestToken:    plaintext,
 	})
 }
 
-// RotateIngestToken issues a new token, persists only its hash, and returns
-// the plaintext exactly once in the response.
-func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
-	token, hash, err := settings.GenerateIngestToken()
+// RevokeIngestToken stops one token. Revoking the last active token is allowed;
+// the browser warns first because ingest then rejects every export.
+func (h *SettingsHandler) RevokeIngestToken(c *echo.Context) error {
+	err := h.store.RevokeIngestToken(c.Request().Context(), c.Param("id"), ingestTokenActor(c))
+	if errors.Is(err, settings.ErrIngestTokenNotFound) {
+		return newAPIError(http.StatusNotFound, "ingest_token_not_found", "That token does not exist or was already revoked.")
+	}
 	if err != nil {
-		slog.Error("settings: generate ingest token failed", "err", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate ingest token")
+		slog.Error("settings: revoke ingest token failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to revoke ingest token")
 	}
-	event := auth.AuditEvent{EventType: "ingest_key.rotated", Outcome: "success", TargetType: "ingest", TargetID: "default", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent()}
-	if user := GetCurrentUser(c); user != nil {
-		event.ActorUserID = user.ID
-	}
-	if err := h.store.SetIngestWithAudit(c.Request().Context(), settings.Ingest{TokenHash: hash}, h.audit, event); err != nil {
-		slog.Error("settings: persist ingest token failed", "err", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update ingest config")
-	}
-	c.Response().Header().Set("Cache-Control", "no-store")
-	return c.JSON(http.StatusOK, ingestResponse{
-		TokenRequired:     true,
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *SettingsHandler) ingestConnection(c *echo.Context, active bool) ingestResponse {
+	return ingestResponse{
+		TokenRequired:     active,
 		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg),
 		TLSConfigured:     h.cfg.TLSEnabled(),
 		HeaderName:        "Authorization",
-		IngestToken:       token,
-	})
+	}
 }
+
+func ingestTokenActor(c *echo.Context) settings.IngestTokenActor {
+	actor := settings.IngestTokenActor{RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent()}
+	if user := GetCurrentUser(c); user != nil {
+		actor.UserID = user.ID
+	}
+	return actor
+}
+
+var invalidIngestTokenNameMessage = fmt.Sprintf("Name must be 1 to %d printable characters.", settings.MaxIngestTokenNameLength)
 
 type ingestResponse struct {
 	TokenRequired     bool   `json:"token_required"`
 	SuggestedEndpoint string `json:"suggested_endpoint"`
 	TLSConfigured     bool   `json:"tls_configured"`
 	HeaderName        string `json:"header_name"`
-	IngestToken       string `json:"ingest_token,omitempty"`
+}
+
+type ingestTokensResponse struct {
+	Tokens    []settings.IngestToken `json:"tokens"`
+	MaxActive int                    `json:"max_active"`
+}
+
+type createIngestTokenRequest struct {
+	Name string `json:"name"`
+}
+
+type createIngestTokenResponse struct {
+	ingestResponse
+	Token       settings.IngestToken `json:"token"`
+	IngestToken string               `json:"ingest_token"`
 }
 
 func suggestedIngestEndpoint(req *http.Request, cfg config.Config) string {

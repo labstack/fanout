@@ -46,10 +46,11 @@ setup**. The raw token is displayed once; Fanout stores only its hash and cannot
 show it again. If `FANOUT_INGEST_TOKEN` already set the token, setup shows no
 token and leaves that one in place.
 
-An administrator can issue a replacement in **Connect telemetry → Ingest token** in the account menu, or
-with `POST /api/settings/ingest/token/rotate`. Save the new token when it is
-shown. Rotation invalidates the old token immediately and cuts off existing
-exporters until you update their credentials.
+An administrator can create more named tokens on the ingest token page, which
+is `/settings/ingest` on your Fanout instance, or under **Connect telemetry** in
+the account menu. To rotate a token without downtime, create a replacement, move
+the Collector to it, then revoke the old one. See
+[ingest tokens](/docs/get-started/send-telemetry#the-ingest-token).
 
 The setup form sends `email`, `display_name`, and `setup_token` to
 `POST /api/auth/setup`. The first administrator starts with status `active`.

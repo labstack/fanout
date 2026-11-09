@@ -44,14 +44,13 @@ func newHTTPIngestFixture(t *testing.T, configured bool) *httpIngestFixture {
 	store := newRuntimeStore(t)
 	token := ""
 	if configured {
-		var hash string
 		var err error
-		token, hash, err = settings.GenerateIngestToken()
+		token, _, err = settings.GenerateIngestToken()
 		if err != nil {
 			t.Fatalf("GenerateIngestToken: %v", err)
 		}
-		if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
-			t.Fatalf("SetIngest: %v", err)
+		if _, err := store.ApplyConfiguredIngestToken(context.Background(), token); err != nil {
+			t.Fatalf("ApplyConfiguredIngestToken: %v", err)
 		}
 	}
 	spans := make(chan telemetry.Span, 8)
@@ -149,18 +148,28 @@ func TestHTTPIngestAuthentication(t *testing.T) {
 			t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
 		}
 	})
-	t.Run("rotation invalidates old token", func(t *testing.T) {
+	t.Run("create then revoke rotates without a gap", func(t *testing.T) {
 		f := newHTTPIngestFixture(t, true)
-		oldToken := f.token
-		newToken, hash, err := settings.GenerateIngestToken()
+		ctx := context.Background()
+		listed, err := f.store.ListActiveIngestTokens(ctx)
+		if err != nil || len(listed) != 1 {
+			t.Fatalf("tokens = %+v err = %v", listed, err)
+		}
+		_, replacement, err := f.store.CreateIngestToken(ctx, "replacement", settings.IngestTokenActor{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := f.store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
+		// Both work while the collectors move across.
+		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), f.token, http.StatusOK)
+		<-f.spans
+		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), replacement, http.StatusOK)
+		<-f.spans
+		if err := f.store.RevokeIngestToken(ctx, listed[0].ID, settings.IngestTokenActor{}); err != nil {
 			t.Fatal(err)
 		}
-		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), oldToken, http.StatusUnauthorized)
-		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), newToken, http.StatusOK)
+		// Same process, no restart and no wait: the next request is refused.
+		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), f.token, http.StatusUnauthorized)
+		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), replacement, http.StatusOK)
 		<-f.spans
 	})
 }
