@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Change product maturity (alpha, beta, rc, or empty for GA) when the product graduates.
-readonly PRODUCT_MATURITY=alpha
+readonly PRODUCT_MATURITY=
 
 die() {
   printf 'release: %s\n' "$1" >&2

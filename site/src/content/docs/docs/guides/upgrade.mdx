@@ -6,7 +6,7 @@ read_when:
   - You are upgrading an existing instance.
   - You are choosing which releases to run in production.
   - You maintain scripts or clients against Fanout's HTTP routes, MCP tools or settings.
-status: preview
+status: shipped
 ---
 
 ## Release channels
@@ -76,10 +76,14 @@ changing a credential format; and changing the batch format.
 
 - **Prereleases** may ship a breaking change in any release, without notice.
   The release's upgrade notes mark it.
-- **Stable releases** announce a breaking change in the notes of an earlier
-  stable release at least 30 days before a stable release ships it. The
-  announcement names what changes, its replacement, and the earliest release
-  that may change it.
+- **Stable releases** announce a breaking change to a `shipped` capability in
+  the notes of an earlier stable release at least 30 days before a stable
+  release ships it. The announcement names what changes, its replacement, and
+  the earliest release that may change it.
+- **`preview` capabilities** can change in any release, stable or not, without
+  that notice. The release's upgrade notes mark the change. The
+  [capabilities page](/docs/reference/capabilities) lists each capability's
+  status.
 
 Additions are not breaking: new routes, tools, optional fields and settings
 can appear in any release.
@@ -91,7 +95,8 @@ changes the route registration, its clients, its authorization and the
 generated [HTTP routes](/docs/reference/api) and [MCP tools](/docs/reference/mcp)
 reference in one release, with no alias or fallback.
 
-Deprecation is therefore a notice, not a transition period:
+For `shipped` capabilities, deprecation is therefore a notice, not a transition
+period:
 
 1. A stable release's upgrade notes announce the deprecated route, field, tool
    or setting, with its replacement and the earliest release that removes it.

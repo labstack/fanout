@@ -212,7 +212,7 @@ generated assets, hooks, and project layout.
 ## Releases
 
 Versions are CalVer — `vYYYY.M.N[-alpha|-beta|-rc]`, numbered from 0 within each month across all
-maturity suffixes. Fanout is alpha (for example, `v2026.11.0-alpha`); GA has no suffix.
+maturity suffixes (for example, `v2026.11.0-alpha`). A stable release has no suffix.
 Container tags omit the leading `v`, and every release moves `latest`. Tagged releases publish
 identical manifests to Docker Hub (`labstack/fanout`) and GHCR (`ghcr.io/labstack/fanout`); GHCR is
 canonical and also carries development images.
