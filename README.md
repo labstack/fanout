@@ -15,8 +15,8 @@ Fanout's built-in agent or connect your own over MCP.
 </a>
 
 Fanout keeps OpenTelemetry traces, logs, and metrics in one binary and one data directory, with no
-external storage services to operate. Fanout is pre-release and changes without migration paths; the browser
-client, built-in agent, MCP tools, dashboards, and alerts are preview capabilities
+external storage services to operate. The browser client, built-in agent, MCP tools, dashboards, and alerts are
+preview capabilities and can change without a migration path
 ([status](https://fanout.run/docs/reference/capabilities)). Start with the
 [documentation](https://fanout.run) or run it below.
 
