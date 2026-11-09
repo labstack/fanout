@@ -15,7 +15,7 @@ Fanout publishes one release from a verified commit on `main`. A release contain
 
 Tags use unpadded CalVer: `vYYYY.M.N[-alpha|-beta|-rc]`. The suffix states product
 maturity; GA has no suffix. The first release in a month is `.0`, and every
-release increments `N` regardless of suffix. For example,
+release increments `N` regardless of suffix. Fanout is alpha. For example,
 `v2026.10.1-alpha` follows `v2026.10.0-alpha`.
 Container tags omit the leading `v`, so `v2026.10.1-alpha` publishes
 `ghcr.io/labstack/fanout:2026.10.1-alpha` and `labstack/fanout:2026.10.1-alpha`.

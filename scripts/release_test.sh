@@ -31,12 +31,12 @@ assert_next_tag() (
 )
 
 test_next_release_tags() {
-  assert_next_tag first-of-month v2026.10.0 $'v2026.9.12-alpha\nv2025.10.4\nv2026.11.3-rc'
-  assert_next_tag bare-tag v2026.10.1 v2026.10.0
-  assert_next_tag suffixed-tags v2026.10.3 $'v2026.10.0-alpha\nv2026.10.1-alpha\nv2026.10.2-alpha'
-  assert_next_tag mixed-suffixes v2026.10.5 $'v2026.10.3-rc\nv2026.10.1-beta\nv2026.10.4\nv2026.10.2-alpha'
-  assert_next_tag numeric-order v2026.10.11 $'v2026.10.9-rc\nv2026.10.10-alpha\nv2026.10.2-beta'
-  assert_next_tag malformed-tags v2026.10.1 $'v2026.10.0\nv2026.10.01-alpha\nv2026.10.90-preview\nv2026.10.91-alpha.1\nv2026.10.92-ALPHA\nv2026.10.93-extra\nv2026.10.94.0\nv2026.010.95\nv2026x10.96\nv2026.10.-1\n2026.10.97\nv20260.10.98'
+  assert_next_tag first-of-month v2026.10.0-alpha $'v2026.9.12-alpha\nv2025.10.4\nv2026.11.3-rc'
+  assert_next_tag bare-tag v2026.10.1-alpha v2026.10.0
+  assert_next_tag suffixed-tags v2026.10.3-alpha $'v2026.10.0-alpha\nv2026.10.1-alpha\nv2026.10.2-alpha'
+  assert_next_tag mixed-suffixes v2026.10.5-alpha $'v2026.10.3-rc\nv2026.10.1-beta\nv2026.10.4\nv2026.10.2-alpha'
+  assert_next_tag numeric-order v2026.10.11-alpha $'v2026.10.9-rc\nv2026.10.10-alpha\nv2026.10.2-beta'
+  assert_next_tag malformed-tags v2026.10.1-alpha $'v2026.10.0\nv2026.10.01-alpha\nv2026.10.90-preview\nv2026.10.91-alpha.1\nv2026.10.92-ALPHA\nv2026.10.93-extra\nv2026.10.94.0\nv2026.010.95\nv2026x10.96\nv2026.10.-1\n2026.10.97\nv20260.10.98'
 }
 
 # Exercise the actual workflow block with local function stubs, without git writes or network.
@@ -98,22 +98,22 @@ test_reserved_tags_are_skipped() (
 
   gh() {
     case "$*" in
-    *refs/tags/v2026.8.0* | *refs/tags/v2026.8.1*)
+    *refs/tags/v2026.8.0-alpha* | *refs/tags/v2026.8.1-alpha*)
       printf 'gh: Reference update failed (HTTP 422)\n' >&2
       return 1
       ;;
-    *refs/tags/v2026.8.2*) return 0 ;;
+    *refs/tags/v2026.8.2-alpha*) return 0 ;;
     *) return 64 ;;
     esac
   }
 
   git() {
-    [ "$*" = "fetch origin refs/tags/v2026.8.2:refs/tags/v2026.8.2" ] ||
+    [ "$*" = "fetch origin refs/tags/v2026.8.2-alpha:refs/tags/v2026.8.2-alpha" ] ||
       fail "unexpected fetch: $*"
   }
 
   created=$(create_release_tag labstack/fanout deadbeef v2026.8 0)
-  [ "$created" = "v2026.8.2" ] || fail "created $created, want v2026.8.2"
+  [ "$created" = "v2026.8.2-alpha" ] || fail "created $created, want v2026.8.2-alpha"
 )
 
 test_unrelated_errors_are_not_retried() (
