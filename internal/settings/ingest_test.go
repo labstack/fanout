@@ -169,6 +169,37 @@ func TestMigrationWithoutStoredTokenLeavesSeedAvailable(t *testing.T) {
 	}
 }
 
+func TestMigrationDropsMalformedStoredTokenRows(t *testing.T) {
+	for _, tc := range []struct{ name, value string }{
+		{"invalid JSON", `not json`},
+		{"truncated JSON", `{"token_hash":"abc`},
+		{"array", `["token_hash"]`},
+		{"number", `42`},
+		{"numeric token_hash", `{"token_hash":1234567890}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database := oldIngestDatabase(t, "")
+			if _, err := database.Exec(`INSERT INTO settings (key, value, updated_at) VALUES ('ingest', ?, '2026-10-01T12:00:00Z')`, tc.value); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Migrate(t.Context(), database); err != nil {
+				t.Fatalf("a malformed row must not stop startup: %v", err)
+			}
+			store := NewStore(database)
+			if got := ingestTokenRowCount(t, store); got != 0 {
+				t.Fatalf("rows = %d, want 0", got)
+			}
+			var legacy int
+			if err := database.QueryRow(`SELECT COUNT(*) FROM settings WHERE key = 'ingest'`).Scan(&legacy); err != nil || legacy != 0 {
+				t.Fatalf("legacy settings rows = %d err = %v", legacy, err)
+			}
+			if applied, err := store.ApplyConfiguredIngestToken(context.Background(), configuredIngestToken("A")); err != nil || !applied {
+				t.Fatalf("applied = %v err = %v, want the first token seeded", applied, err)
+			}
+		})
+	}
+}
+
 func TestApplyConfiguredIngestTokenSeedsFreshInstall(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

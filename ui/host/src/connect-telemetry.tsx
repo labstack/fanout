@@ -104,7 +104,6 @@ function lastUsedLabel(token: IngestToken) {
 /** The one place a token's value appears. The state holding it lives in this
  *  page and dies with it; the mutation that produced it keeps nothing. */
 function CreatedToken({ created, config, onDone }: { created: { name: string; value: string }; config: string; onDone: () => void }) {
-  const snippet = `INGEST_TOKEN=${created.value}\n\n${config}`;
   return <Paper withBorder radius="md" p="lg">
     <Stack gap="sm">
       <Notice tone="warning" title="Save this token now">Fanout shows it only here and stores only a digest. Close this page or choose Done and the value is gone; creating another token is the only way back.</Notice>
@@ -113,10 +112,11 @@ function CreatedToken({ created, config, onDone }: { created: { name: string; va
       <Stack gap={4}>
         <Text size="sm" fw={600}>Collector configuration</Text>
         <Text c="dimmed" size="xs">Set INGEST_TOKEN in the Collector&apos;s environment, not in a file you commit.</Text>
-        <Code block style={{ fontSize: 12 }}>{snippet}</Code>
+        <Code block style={{ fontSize: 12 }}>{`INGEST_TOKEN=${created.value}`}</Code>
+        <Code block style={{ fontSize: 12 }}>{config}</Code>
       </Stack>
       <Group>
-        <CopyButton value={snippet} timeout={1500}>
+        <CopyButton value={config} timeout={1500}>
           {({ copied, copy }) => <Button variant="light" size="compact-sm" leftSection={copied ? <Check size={15} weight="bold" /> : <Copy size={15} />} onClick={copy}>{copied ? "Copied" : "Copy configuration"}</Button>}
         </CopyButton>
         <Button variant="subtle" color="gray" size="compact-sm" onClick={onDone}>Done</Button>

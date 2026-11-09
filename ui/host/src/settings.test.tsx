@@ -208,6 +208,29 @@ describe("connect telemetry", () => {
     await act(async () => root.unmount());
   });
 
+  it("copies Collector configuration without the token value", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const root = await mount();
+    await typeTokenName("edge");
+    await submitTokenForm();
+    const value = `foi_${"A".repeat(43)}`;
+    await vi.waitFor(() => expect(document.body.textContent).toContain(`INGEST_TOKEN=${value}`));
+    const copyConfiguration = [...document.querySelectorAll<HTMLButtonElement>("button")].filter((candidate) => candidate.textContent?.trim() === "Copy configuration");
+    await act(async () => copyConfiguration.at(-1)?.click());
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const copied = String((writeText.mock.calls[0] as unknown[])[0]);
+    expect(copied).toContain("${env:INGEST_TOKEN}");
+    expect(copied).toMatch(/^exporters:/);
+    expect(copied).not.toContain(value);
+    expect(copied).not.toContain("INGEST_TOKEN=");
+    const copyToken = document.querySelector<HTMLButtonElement>('button[aria-label="Copy token"]');
+    await act(async () => copyToken?.click());
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
+    expect((writeText.mock.calls[1] as unknown[])[0]).toBe(value);
+    await act(async () => root.unmount());
+  });
+
   it("reports a refused create with the server's reason", async () => {
     fetchMock.mockImplementation(telemetryResponder([collectorToken], () => json({ code: "ingest_token_name_taken", message: "An active token already uses that name. Choose another name." }, 409)));
     const root = await mount();

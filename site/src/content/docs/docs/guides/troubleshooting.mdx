@@ -105,13 +105,17 @@ Work down this list in order:
 1. **Has setup finished?** Before the first administrator exists there is no
    ingest token to check against, and ingest rejects everything. A collector
    started ahead of setup fails until you complete it.
-2. **Is it the right credential, in the right header?** An active ingest token is
+2. **Were all tokens revoked?** When no token is active, every exporter gets
+   `invalid ingest token` over gRPC or 401 over HTTP, the same answer as a wrong
+   token, and the server logs nothing for it. Open `/settings/ingest` on your
+   Fanout instance. If the list is empty, create a token and update the Collector.
+3. **Is it the right credential, in the right header?** An active ingest token is
    `foi_`-prefixed and goes in `Authorization: Bearer`. Browser sessions and MCP
    tokens are not ingest credentials.
-3. **Is the listener reachable?** Both OTLP transports use `FANOUT_ADDR`
+4. **Is the listener reachable?** Both OTLP transports use `FANOUT_ADDR`
    (`127.0.0.1:7520` by default; the image sets `:7520`).
    Check container port mappings, bind address and firewall rules.
-4. **Right protocol?** Both use port `7520`. gRPC requires HTTP/2 through
+5. **Right protocol?** Both use port `7520`. gRPC requires HTTP/2 through
    any proxy. Use `grpc` or `http/protobuf` consistently with the exporter
    configuration; HTTP/1.1 proxy forwarding cannot carry gRPC.
 
