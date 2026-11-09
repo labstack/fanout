@@ -316,6 +316,21 @@ func TestCreateBreakGlassLoginLinkForActiveAdministrator(t *testing.T) {
 	}
 }
 
+// Break-glass exists for when the identity provider cannot help, so it must
+// not depend on who owns accounts.
+func TestCreateBreakGlassLoginLinkWhenIdentityProviderOwnsAccounts(t *testing.T) {
+	cfg := breakGlassTestConfig(t, auth.RoleAdmin, auth.UserStatusActive)
+	cfg.OIDCAdminGroups = "fanout-admins"
+	cfg.SCIMToken = "scim-test-token-0123456789abcdef0123"
+	var output bytes.Buffer
+	if err := createLoginLink(cfg, "user@example.com", true, &output); err != nil {
+		t.Fatalf("createLoginLink: %v", err)
+	}
+	if links, issued, breakGlassIssued := loginLinkState(t, cfg); links != 1 || issued != 0 || breakGlassIssued != 1 {
+		t.Fatalf("state = %d links, %d issued, %d break-glass issued; want 1, 0, 1", links, issued, breakGlassIssued)
+	}
+}
+
 func TestCreateBreakGlassLoginLinkRefusals(t *testing.T) {
 	const email = "user@example.com"
 	for _, tc := range []struct {

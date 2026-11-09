@@ -18,10 +18,52 @@ type UserHandler struct {
 	smtp           auth.SMTPConfig
 	mode           string
 	smtpConfigured bool
+	ownership      accountOwnership
 }
 
 // userBodyLimit bounds user administration requests, which carry a few short fields.
 const userBodyLimit = 16 << 10
+
+// accountOwnership says which account changes belong to the identity provider
+// and are refused by the browser user routes. /api/auth/status publishes it so
+// the browser never has to work it out.
+type accountOwnership string
+
+const (
+	accountOwnershipLocal accountOwnership = "local"
+	// accountOwnershipRoles applies with an OIDC group-to-role mapping and
+	// auto-provisioning: the provider decides who has an account, created at
+	// first sign-in, and which role it holds.
+	accountOwnershipRoles accountOwnership = "identity_provider_roles"
+	// accountOwnershipRolesNoProvisioning is the same mapping without
+	// auto-provisioning. Nothing can create an account, so people without one
+	// stay out until provisioning or SCIM is configured.
+	accountOwnershipRolesNoProvisioning accountOwnership = "identity_provider_roles_no_provisioning"
+	// accountOwnershipDirectory adds a SCIM token to the mapping: the directory
+	// also owns each account's status, email, and existence.
+	accountOwnershipDirectory accountOwnership = "identity_provider_directory"
+)
+
+// accountOwnershipFor needs the mapping, so a SCIM token without one leaves
+// local administration unchanged.
+func accountOwnershipFor(cfg config.Config) accountOwnership {
+	if strings.ToLower(strings.TrimSpace(cfg.AuthMode)) != "oidc" || !cfg.OIDCRoleMappingConfigured() {
+		return accountOwnershipLocal
+	}
+	if cfg.SCIMToken != "" {
+		return accountOwnershipDirectory
+	}
+	if !cfg.OIDCAutoProvision {
+		return accountOwnershipRolesNoProvisioning
+	}
+	return accountOwnershipRoles
+}
+
+// ownedByIdentityProvider is the refusal for a change the provider owns. The
+// message names the kind of change and never the configuration behind it.
+func ownedByIdentityProvider(message string) error {
+	return newAPIError(http.StatusForbidden, "managed_by_identity_provider", message)
+}
 
 // RegisterUserRoutes registers user management endpoints.
 func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore, smtp auth.SMTPConfig, cfg config.Config) {
@@ -29,7 +71,7 @@ func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore, smtp auth.SMTPConfi
 	if mode == "" {
 		mode = "local"
 	}
-	h := &UserHandler{users: users, smtp: smtp, mode: mode, smtpConfigured: cfg.SMTPConfigured()}
+	h := &UserHandler{users: users, smtp: smtp, mode: mode, smtpConfigured: cfg.SMTPConfigured(), ownership: accountOwnershipFor(cfg)}
 	adminOnly := RequireCapability(ManageUsers)
 
 	e.GET("/api/users", h.ListUsers, adminOnly)
@@ -69,6 +111,9 @@ func (h *UserHandler) ListUsers(c *echo.Context) error {
 
 // CreateUser adds a new user (admin only).
 func (h *UserHandler) CreateUser(c *echo.Context) error {
+	if h.ownership != accountOwnershipLocal {
+		return ownedByIdentityProvider("Accounts are created by the identity provider, not in Fanout.")
+	}
 	var req struct {
 		Email       string `json:"email"`
 		DisplayName string `json:"display_name"`
@@ -134,6 +179,9 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 	if err := decodeStrict(c, &req, userBodyLimit); err != nil {
 		return err
 	}
+	if req.Email != nil && h.ownership == accountOwnershipDirectory {
+		return ownedByIdentityProvider("Email addresses are managed by the identity provider, not in Fanout.")
+	}
 	if req.Email != nil {
 		email, err := auth.NormalizeEmail(*req.Email)
 		if err != nil {
@@ -146,6 +194,9 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 
 // UpdateRole modifies a user's role (admin only).
 func (h *UserHandler) UpdateRole(c *echo.Context) error {
+	if h.ownership != accountOwnershipLocal {
+		return ownedByIdentityProvider("Roles are assigned by the identity provider, not in Fanout.")
+	}
 	var req struct {
 		Role string `json:"role"`
 	}
@@ -161,6 +212,9 @@ func (h *UserHandler) UpdateRole(c *echo.Context) error {
 
 // UpdateStatus modifies a user's status (admin only).
 func (h *UserHandler) UpdateStatus(c *echo.Context) error {
+	if h.ownership == accountOwnershipDirectory {
+		return ownedByIdentityProvider("Account status is managed by the identity provider, not in Fanout.")
+	}
 	var req struct {
 		Status string `json:"status"`
 	}
@@ -199,6 +253,9 @@ func (h *UserHandler) updateUser(c *echo.Context, email, displayName *string, ro
 
 // DeleteUser removes a user (admin only).
 func (h *UserHandler) DeleteUser(c *echo.Context) error {
+	if h.ownership == accountOwnershipDirectory {
+		return ownedByIdentityProvider("Accounts are deactivated by the identity provider, not deleted in Fanout.")
+	}
 	id := c.Param("id")
 	if err := h.users.DeleteWithAudit(id, userAuditEvent(c, "user.deleted")); err != nil {
 		if err == auth.ErrLastActiveAdmin {

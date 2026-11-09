@@ -18,6 +18,18 @@ export const RotatedToken: Story = { play: async ({ canvas, userEvent }) => {
   await waitFor(() => expect(document.querySelector(".mantine-Modal-content")).not.toBeInTheDocument());
 } };
 
+export const IdentityProviderRoles: Story = { parameters: { scenario: { accountOwnership: "identity_provider_roles" } }, play: async ({ canvas }) => {
+  await expect(await canvas.findByText("Managed by your identity provider")).toBeVisible();
+} };
+
+export const IdentityProviderRolesNoProvisioning: Story = { parameters: { scenario: { accountOwnership: "identity_provider_roles_no_provisioning" } }, play: async ({ canvas }) => {
+  await expect(await canvas.findByText("New people cannot be added")).toBeVisible();
+} };
+
+export const IdentityProviderDirectory: Story = { parameters: { scenario: { accountOwnership: "identity_provider_directory" } }, play: async ({ canvas }) => {
+  await expect(await canvas.findByText("Managed by your identity provider")).toBeVisible();
+} };
+
 export const ChatDisabled: Story = { parameters: { scenario: { chatDisabled: true } }, play: async ({ canvas }) => {
   await expect(await canvas.findByRole("heading", { name: "Chat is disabled" })).toBeVisible();
 } };

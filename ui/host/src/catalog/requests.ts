@@ -7,6 +7,7 @@ export type Scenario = {
   signedOut?: boolean;
   signInError?: boolean;
   chatDisabled?: boolean;
+  accountOwnership?: Status["account_ownership"];
   setup?: boolean;
   empty?: boolean;
   dashboard?: "loading" | "empty" | "error" | "invalid";
@@ -18,7 +19,7 @@ export type Scenario = {
 export type CatalogService = ReturnType<typeof makeService>;
 type Event = Record<string, unknown>;
 const viewer: Viewer = { id: "alex-rivera", email: "alex@example.test", display_name: "Alex Rivera", status: "active", role: "admin" };
-const runtime: Status = { setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true, self_signup: true };
+const runtime: Status = { setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true, self_signup: true, account_ownership: "local" };
 type Thread = { id: string; title: string; updated_at: string; messages: Message[] };
 const threadTitle = (messages: Message[]) => {
   const first = messages.find(message => message.role === "user");
@@ -120,7 +121,7 @@ export function makeService(scenario: Scenario = {}, staticFetch: typeof fetch =
     const panelResponse = (rows: typeof results) => new Headers(init?.headers).get("accept") === "application/x-ndjson"
       ? new Response(rows.map(row => JSON.stringify(row)).join("\n") + "\n", { headers: { "content-type": "application/x-ndjson" } })
       : json({ results: rows });
-    if (path === "/api/auth/status" && method === "GET") return json({ ...runtime, setup_required: Boolean(scenario.setup), agent_available: !scenario.chatDisabled });
+    if (path === "/api/auth/status" && method === "GET") return json({ ...runtime, setup_required: Boolean(scenario.setup), agent_available: !scenario.chatDisabled, account_ownership: scenario.accountOwnership ?? runtime.account_ownership });
     if (path === "/api/auth/me" && method === "GET") return scenario.signedOut || scenario.setup ? json({}, 401) : json(viewer);
     if (path === "/api/auth/code/send" && method === "POST") return json({ code_sent: true });
     if (path === "/api/auth/code/verify" && method === "POST") return scenario.signInError ? json({ code: "invalid_code", message: "Invalid or expired code. Request a new code." }, 401) : json({ status: "authenticated" });

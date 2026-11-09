@@ -83,6 +83,8 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 		"agent_available": h.cfg.AgentConfigured(),
 		"smtp_configured": h.cfg.SMTPConfigured(),
 		"self_signup":     h.cfg.SelfSignup,
+		// A mode rather than the settings behind it: this route is public.
+		"account_ownership": accountOwnershipFor(h.cfg),
 	})
 }
 

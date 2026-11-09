@@ -45,7 +45,8 @@ Invalid configuration, including a provider that answers for a different
 issuer at startup, still fails startup.
 
 If neither `FANOUT_OIDC_ALLOWED_GROUPS` nor `FANOUT_OIDC_ALLOWED_DOMAINS` is
-configured, no eligibility allow policy is enforced; membership is managed locally.
+configured, no eligibility allow policy is enforced. Membership is then managed
+locally, unless a role mapping is set; see [Who owns accounts](#who-owns-accounts).
 
 ### Account provisioning
 
@@ -70,6 +71,32 @@ Without a role-group mapping, administrators manage roles inside Fanout and
 OIDC sign-in preserves them. Reconciliation cannot demote the last active
 administrator; promote a second administrator before applying that mapping.
 
+### Who owns accounts
+
+Role mapping moves account ownership to the identity provider.
+`GET /api/auth/status` reports the mode as `account_ownership`, and Settings
+explains it to signed-in users.
+
+| `account_ownership` | Configuration | Browser user routes refuse |
+|---|---|---|
+| `local` | No role mapping, with or without a SCIM token | Nothing |
+| `identity_provider_roles` | Role mapping and `FANOUT_OIDC_AUTO_PROVISION`, no SCIM token | Creating a user and changing a role |
+| `identity_provider_roles_no_provisioning` | Role mapping, no `FANOUT_OIDC_AUTO_PROVISION`, no SCIM token | Creating a user and changing a role |
+| `identity_provider_directory` | Role mapping and a SCIM token | Creating and deleting a user; changing a role, status or email |
+
+To add users under a role mapping, set `FANOUT_OIDC_AUTO_PROVISION` with an
+allowed group or domain, or configure a SCIM token. With neither, nobody new can
+get an account: `POST /api/users` is refused and a first login is denied. Fanout
+still starts, logs a warning, and Settings says so.
+
+A refused request returns `403` with the code `managed_by_identity_provider`
+and changes nothing. On `PATCH /api/users/{id}`, malformed JSON returns `400`
+because the body must be decoded to see whether `email` is present. SCIM, login-time role reconciliation and provisioning,
+display-name edits, `POST /api/users/{id}/access/revoke`, first-administrator
+setup and `fanout login-link --break-glass` keep working in every mode.
+Without a SCIM token, administrators can still suspend, reactivate, delete and
+change the email of a user.
+
 ### Microsoft Entra ID group overage
 
 Entra can omit the `groups` claim when an account has too many memberships.
@@ -86,8 +113,10 @@ roles with `PATCH /api/users/{id}/role` and `{"role":"viewer"}`. Suspend with
 `PATCH /api/users/{id}/status` and `{"status":"suspended"}`; restore with
 `{"status":"active"}`. Unknown fields and invalid statuses return `400`.
 Email, role and status changes revoke browser sessions. Suspension blocks local
-and OIDC sign-in and revokes the user's OAuth tokens. Reactivation restores
-neither sessions nor tokens. The last active administrator cannot be demoted, suspended or deleted.
+and OIDC sign-in and revokes the user's OAuth tokens. Reactivation revokes any
+that remain, so a reactivated user signs in again. The last active administrator cannot be demoted, suspended or deleted.
+With an OIDC role mapping some of these routes are refused; see
+[Who owns accounts](#who-owns-accounts).
 
 `GET /api/users` returns a `users` array. `DELETE /api/users/{id}` removes an
 account and cascades to its sessions, OAuth grants and owned dashboards. Use

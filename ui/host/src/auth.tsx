@@ -15,6 +15,7 @@ export type Status = {
   agent_available: boolean;
   smtp_configured: boolean;
   self_signup: boolean;
+  account_ownership: "local" | "identity_provider_roles" | "identity_provider_roles_no_provisioning" | "identity_provider_directory";
 };
 type SetupResult = { status: string; ingest_token?: string; ingest_header_name?: string; suggested_endpoint?: string };
 const RuntimeStatusContext = createContext<Status | null>(null);

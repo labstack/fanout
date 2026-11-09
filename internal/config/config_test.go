@@ -527,6 +527,60 @@ func TestSecureCookies(t *testing.T) {
 	}
 }
 
+func TestLogStartupWarnsWhenNoPathCanAddUsers(t *testing.T) {
+	const group = "fanout-admins-group-name"
+	const token = "scim-token-value-0123456789abcdef0123"
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{"admin mapping alone", Config{AuthMode: "oidc", OIDCAdminGroups: group}, true},
+		{"operator mapping alone", Config{AuthMode: " OIDC ", OIDCOperatorGroups: group}, true},
+		{"auto-provisioning", Config{AuthMode: "oidc", OIDCAdminGroups: group, OIDCAutoProvision: true}, false},
+		{"scim token", Config{AuthMode: "oidc", OIDCAdminGroups: group, SCIMToken: token}, false},
+		{"no mapping", Config{AuthMode: "oidc"}, false},
+		{"blank mapping", Config{AuthMode: "oidc", OIDCAdminGroups: " , ", OIDCOperatorGroups: ","}, false},
+		{"local mode", Config{AuthMode: "local", OIDCAdminGroups: group}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
+			tc.cfg.LogStartup()
+
+			output := logs.String()
+			if got := strings.Contains(output, "FANOUT_OIDC_AUTO_PROVISION"); got != tc.want {
+				t.Fatalf("warning present = %v, want %v; logs: %s", got, tc.want, output)
+			}
+			if strings.Contains(output, group) || strings.Contains(output, token) {
+				t.Fatalf("logs contain a configuration value: %s", output)
+			}
+		})
+	}
+}
+
+// The combination is a warning so that existing installations still start.
+func TestLoadAcceptsRoleMappingWithoutProvisioning(t *testing.T) {
+	env := append(validEnvironment(),
+		"FANOUT_AUTH_MODE=oidc",
+		"FANOUT_OIDC_ISSUER_URL=https://issuer.example.com",
+		"FANOUT_OIDC_CLIENT_ID=client",
+		"FANOUT_OIDC_CLIENT_SECRET=secret",
+		"FANOUT_PUBLIC_URL=https://fanout.example.com",
+		"FANOUT_OIDC_ADMIN_GROUPS=fanout-admins",
+	)
+	cfg, err := Load(LoadOptions{Environ: env})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OIDCAutoProvision || !cfg.OIDCRoleMappingConfigured() {
+		t.Fatalf("auto-provision = %v, mapping = %v", cfg.OIDCAutoProvision, cfg.OIDCRoleMappingConfigured())
+	}
+}
+
 func TestLogStartupWarnsAboutUnusableBreakGlassSecret(t *testing.T) {
 	const shortSecret = "not-long-enough-value"
 	for _, tc := range []struct {

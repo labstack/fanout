@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	appauth "github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/secret"
@@ -243,6 +244,21 @@ func (c Config) LogStartup() {
 	if c.SelfSignup {
 		slog.Info("self-signup is enabled", "role", appauth.RoleViewer)
 	}
+	// A warning and not a validation error: an installation with this
+	// combination must still start after upgrading.
+	if strings.ToLower(strings.TrimSpace(c.AuthMode)) == "oidc" && c.OIDCRoleMappingConfigured() && !c.OIDCAutoProvision && c.SCIMToken == "" {
+		slog.Warn("OIDC role mapping refuses browser user creation and FANOUT_OIDC_AUTO_PROVISION is off, so no new user can get an account; set FANOUT_OIDC_AUTO_PROVISION with an allowed group or domain, or FANOUT_SCIM_TOKEN")
+	}
+}
+
+// OIDCRoleMappingConfigured reports whether a group list names at least one
+// group. A list of only separators and spaces maps nothing.
+func (c Config) OIDCRoleMappingConfigured() bool {
+	return nameListed(c.OIDCAdminGroups) || nameListed(c.OIDCOperatorGroups)
+}
+
+func nameListed(raw string) bool {
+	return len(strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || unicode.IsSpace(r) })) != 0
 }
 
 func (c Config) TelemetryDir() string {
