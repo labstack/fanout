@@ -14,11 +14,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/intelligence"
-	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/toolerror"
+	"github.com/labstack/pitot/internal/dashboard"
+	"github.com/labstack/pitot/internal/intelligence"
+	"github.com/labstack/pitot/internal/observability"
+	"github.com/labstack/pitot/internal/query"
+	"github.com/labstack/pitot/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -118,14 +118,14 @@ func NewWithIntelligence(queries Observability, dashboards *dashboard.Service, p
 func newServer(queries Observability, dashboards *dashboard.Service, panels *query.Executor, snapshots IntelligenceSnapshots, version string) *Server {
 	s := &Server{
 		mcp: mcp.NewServer(&mcp.Implementation{
-			Name:    "fanout",
-			Title:   "Fanout Observability",
+			Name:    "pitot",
+			Title:   "Pitot Observability",
 			Version: version,
 		}, &mcp.ServerOptions{SupportedProtocolVersions: supportedProtocolVersions, Instructions: serverInstructions, Capabilities: &mcp.ServerCapabilities{
 			Extensions: map[string]any{
 				mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
 			},
-			// Fanout's tool and resource sets are fixed for the process lifetime.
+			// Pitot's tool and resource sets are fixed for the process lifetime.
 			Tools:     &mcp.ToolCapabilities{},
 			Resources: &mcp.ResourceCapabilities{},
 		}}),
@@ -328,7 +328,7 @@ func (s *Server) HTTPHandler() http.Handler {
 	// The MCP OAuth bearer middleware runs before this handler. Disable the SDK's
 	// localhost Host heuristic because a legitimate local reverse proxy connects
 	// over loopback while preserving the public Host (for example,
-	// fanout.example.com); the heuristic otherwise rejects every browser MCP App.
+	// pitot.example.com); the heuristic otherwise rejects every browser MCP App.
 	modern := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return s.mcp },
 		&mcp.StreamableHTTPOptions{

@@ -7,7 +7,7 @@ const config: StorybookConfig = {
   framework: "@storybook/react-vite",
   core: { disableTelemetry: true },
   features: { sidebarOnboardingChecklist: false, menuOnboardingChecklist: false },
-  staticDirs: [{ from: "../node_modules/.cache/fanout-catalog-apps", to: "/catalog-apps" }],
+  staticDirs: [{ from: "../node_modules/.cache/pitot-catalog-apps", to: "/catalog-apps" }],
   addons: ["@storybook/addon-docs", "@storybook/addon-a11y", "@storybook/addon-vitest"],
   viteFinal: vite => ({
     ...vite,

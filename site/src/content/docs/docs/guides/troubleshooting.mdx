@@ -1,6 +1,6 @@
 ---
 title: Troubleshoot
-description: The failures a Fanout instance actually produces, and what each one means.
+description: The failures a Pitot instance actually produces, and what each one means.
 summary: Startup refusals, rejected exporters, locked-out users, and where to look when telemetry is not arriving.
 read_when:
   - The process will not start, or an exporter is being rejected.
@@ -10,18 +10,18 @@ status: preview
 
 ## The process will not start
 
-Fanout validates its whole configuration before opening any listener, so a
+Pitot validates its whole configuration before opening any listener, so a
 configuration refusal names the setting. Other startup errors can report
 storage, listener, or identity-provider failures; read the error before changing
 settings.
 
-Unknown `FANOUT_` setting names fail startup, except platform-injected service
+Unknown `PITOT_` setting names fail startup, except platform-injected service
 discovery names. Check spelling against the [configuration reference](/docs/reference/configuration).
 
 ## An unresolved compaction blocks startup
 
 One startup refusal is not about configuration. If a compaction was interrupted
-and Fanout can neither finish nor undo it, recovery fails closed and the error
+and Pitot can neither finish nor undo it, recovery fails closed and the error
 names `telemetry/COMPACTION.json`.
 
 The marker identifies the authoritative batch set during a swap. The replacement
@@ -33,7 +33,7 @@ deletes any that remain. Releases before deferred deletion named retired inputs
 `<id>.retired-<output id>`. A completed publish can already have deleted some
 inputs; verify every input before attempting a rollback.
 
-**Clear the underlying cause, such as a full disk, and start Fanout again.**
+**Clear the underlying cause, such as a full disk, and start Pitot again.**
 Recovery runs automatically at startup.
 
 If recovery keeps failing, roll the compaction back by hand. With the process
@@ -53,7 +53,7 @@ stopped, use `telemetry/parquet/batches/` as the batch directory:
    it exists its `replaces.json` retires the inputs, and startup deletes them;
    a corrupt replacement continues to block startup.
 6. Delete `telemetry/COMPACTION.json`.
-7. Start Fanout.
+7. Start Pitot.
 
 :::caution[Verify inputs before deleting the replacement]
 Restore the retired inputs before removing the compaction marker. The marker
@@ -63,14 +63,14 @@ every input is restored; it may hold the only surviving copy of some rows.
 
 ## An unreadable telemetry batch blocks startup
 
-Fanout also refuses to start when an authoritative `.batch` directory has
+Pitot also refuses to start when an authoritative `.batch` directory has
 invalid metadata, a corrupt Parquet file, a missing signal file, or a damaged
-trace index. First stop Fanout and back up `telemetry/`, then verify the full
+trace index. First stop Pitot and back up `telemetry/`, then verify the full
 authoritative set:
 
 ```sh
 # Use the same environment and data directory as the server.
-fanout repair verify
+pitot repair verify
 ```
 
 The command is read-only and reports confirmed corrupt batches. It verifies
@@ -82,14 +82,14 @@ discarding only its telemetry is preferable to leaving the instance offline,
 set it aside explicitly:
 
 ```sh
-fanout repair quarantine --batch <id>
+pitot repair quarantine --batch <id>
 ```
 
 Quarantine is an atomic rename beside the authoritative batch set, not a
 deletion. It refuses a batch that validates successfully and refuses any input
 or output protected by a live compaction marker. Preserve the reported
 quarantine directory for later recovery, run `repair verify` again, and only
-then restart Fanout.
+then restart Pitot.
 
 :::caution[Quarantine makes those rows unavailable]
 The command is intentionally batch-specific and never runs during startup.
@@ -108,11 +108,11 @@ Work down this list in order:
 2. **Were all tokens revoked?** When no token is active, every exporter gets
    `invalid ingest token` over gRPC or 401 over HTTP, the same answer as a wrong
    token, and the server logs nothing for it. Open `/settings/ingest` on your
-   Fanout instance. If the list is empty, create a token and update the Collector.
+   Pitot instance. If the list is empty, create a token and update the Collector.
 3. **Is it the right credential, in the right header?** An active ingest token is
    `foi_`-prefixed and goes in `Authorization: Bearer`. Browser sessions and MCP
    tokens are not ingest credentials.
-4. **Is the listener reachable?** Both OTLP transports use `FANOUT_ADDR`
+4. **Is the listener reachable?** Both OTLP transports use `PITOT_ADDR`
    (`127.0.0.1:7520` by default; the image sets `:7520`).
    Check container port mappings, bind address and firewall rules.
 5. **Right protocol?** Both use port `7520`. gRPC requires HTTP/2 through
@@ -120,11 +120,11 @@ Work down this list in order:
    configuration; HTTP/1.1 proxy forwarding cannot carry gRPC.
 
 For OTLP/HTTP, set the exporter protocol to `http/protobuf` and give it the base
-endpoint, `http://fanout:7520`. Exporters derive `/v1/traces`, `/v1/metrics`
+endpoint, `http://pitot:7520`. Exporters derive `/v1/traces`, `/v1/metrics`
 and `/v1/logs` from it themselves.
 
 The raw token is shown once when it is created. If it is lost, an administrator
-creates a new one at `/settings/ingest` on your Fanout instance, or under
+creates a new one at `/settings/ingest` on your Pitot instance, or under
 **Connect telemetry** in the account menu, and updates the Collector. A token
 that was revoked is rejected on the next request.
 
@@ -137,7 +137,7 @@ See [Common SDKs](/docs/get-started/send-telemetry#common-sdks) for language set
 
 ### HTTP 429 or gRPC RESOURCE_EXHAUSTED
 
-Fanout throttles whole exports under ingest pressure. Enable exporter retries
+Pitot throttles whole exports under ingest pressure. Enable exporter retries
 and honor HTTP `Retry-After` or gRPC `RetryInfo`. Check disk space, compaction
 backlog and query pressure. See [ingest admission](/docs/concepts/storage#rollups-follow-durable-publication)
 for thresholds and metrics.
@@ -150,9 +150,9 @@ operator with shell access to the same configuration and data directory then
 mints a link directly:
 
 ```sh
-fanout login-link user@example.com
+pitot login-link user@example.com
 # For Docker:
-docker exec fanout fanout login-link user@example.com
+docker exec pitot pitot login-link user@example.com
 ```
 
 The link expires after 15 minutes, works once, and is recorded in the
@@ -171,8 +171,8 @@ Use a login link for an active local account.
 
 ## Telemetry arrives but queries look empty
 
-Check the namespace. Fanout reads `service.namespace` from the OTLP resource and
-falls back to `FANOUT_DEFAULT_NAMESPACE`, so telemetry exported without one
+Check the namespace. Pitot reads `service.namespace` from the OTLP resource and
+falls back to `PITOT_DEFAULT_NAMESPACE`, so telemetry exported without one
 lands in `default`.
 
 An unscoped query spans every namespace, so this is only a problem when

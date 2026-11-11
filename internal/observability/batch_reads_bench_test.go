@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 // TestCompletedReadBenchmark measures actual dashboard methods over identical
@@ -30,7 +30,7 @@ func TestCompletedReadBenchmark(t *testing.T) {
 	defer repo.Close()
 	at := time.Now().UTC().Truncate(time.Hour)
 	rowsPerBatch := 25000
-	if os.Getenv("FANOUT_READ_BENCH_LARGE") == "1" {
+	if os.Getenv("PITOT_READ_BENCH_LARGE") == "1" {
 		rowsPerBatch = 100000
 	}
 	for batch := range 12 {

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@fanout/web",
+      "name": "@pitot/web",
       "dependencies": {
         "@ag-ui/client": "1.0.4",
         "@codemirror/autocomplete": "6.20.3",

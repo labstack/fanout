@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
 )
 
 func TestMCPOriginsPrecedeAuthenticationOnBothMounts(t *testing.T) {
-	s := newTestAuthServerWith(t, config.Config{PublicURL: "https://FANOUT.example.com:443/path/"}, auth.SMTPConfig{})
+	s := newTestAuthServerWith(t, config.Config{PublicURL: "https://PITOT.example.com:443/path/"}, auth.SMTPConfig{})
 	h, err := NewMCPAuthorization(auth.NewOAuthStore(s.db.DB), s.users, testMCPResource)
 	if err != nil {
 		t.Fatal(err)
@@ -22,11 +22,11 @@ func TestMCPOriginsPrecedeAuthenticationOnBothMounts(t *testing.T) {
 	s.e.Any("/mcp", echo.WrapHandler(h.ProtectMCP(next)))
 	s.e.Any("/api/mcp", h.ProtectBrowserMCP(s.sessions, next))
 	for _, path := range []string{"/mcp", "/api/mcp"} {
-		for _, origin := range []string{"absent", "https://fanout.example.com", "https://attacker.example", "null", "https://fanout.example.com/", "http://[broken"} {
+		for _, origin := range []string{"absent", "https://pitot.example.com", "https://attacker.example", "null", "https://pitot.example.com/", "http://[broken"} {
 			for _, method := range []string{"POST", "GET", "DELETE"} {
-				headers := map[string]string{"Authorization": "Bearer invalid", "Fanout-Request": "1"}
+				headers := map[string]string{"Authorization": "Bearer invalid", "Pitot-Request": "1"}
 				want := http.StatusForbidden
-				if origin == "absent" || origin == "https://fanout.example.com" {
+				if origin == "absent" || origin == "https://pitot.example.com" {
 					want = http.StatusUnauthorized
 				}
 				if origin != "absent" {
@@ -41,8 +41,8 @@ func TestMCPOriginsPrecedeAuthenticationOnBothMounts(t *testing.T) {
 	}
 	for _, path := range []string{"/mcp", "/api/mcp"} {
 		r := httptest.NewRequest("POST", path, nil)
-		r.Host = "fanout.example.com"
-		r.Header["Origin"] = []string{"https://fanout.example.com", "https://fanout.example.com"}
+		r.Host = "pitot.example.com"
+		r.Header["Origin"] = []string{"https://pitot.example.com", "https://pitot.example.com"}
 		rec := httptest.NewRecorder()
 		s.e.ServeHTTP(rec, r)
 		if rec.Code != http.StatusForbidden {
@@ -68,23 +68,23 @@ func TestMCPOriginValidation(t *testing.T) {
 		origins               []string
 		want                  bool
 	}{
-		{"absent", "https://fanout.example.com", "internal:7520", nil, true},
-		{"https default port", "https://fanout.example.com:443", "internal:7520", []string{"https://fanout.example.com"}, true},
-		{"http default port", "http://fanout.example.com:80", "internal:7520", []string{"http://fanout.example.com"}, true},
-		{"uppercase configuration", "HTTPS://FANOUT.example.com:443", "internal:7520", []string{"https://fanout.example.com"}, true},
-		{"trailing slash configuration", "https://fanout.example.com/", "internal:7520", []string{"https://fanout.example.com"}, true},
-		{"path configuration", "https://fanout.example.com/path/", "internal:7520", []string{"https://fanout.example.com"}, true},
-		{"non-default port", "https://fanout.example.com:8443/path", "internal:7520", []string{"https://fanout.example.com:8443"}, true},
-		{"non-default port required", "https://fanout.example.com:8443", "internal:7520", []string{"https://fanout.example.com"}, false},
+		{"absent", "https://pitot.example.com", "internal:7520", nil, true},
+		{"https default port", "https://pitot.example.com:443", "internal:7520", []string{"https://pitot.example.com"}, true},
+		{"http default port", "http://pitot.example.com:80", "internal:7520", []string{"http://pitot.example.com"}, true},
+		{"uppercase configuration", "HTTPS://PITOT.example.com:443", "internal:7520", []string{"https://pitot.example.com"}, true},
+		{"trailing slash configuration", "https://pitot.example.com/", "internal:7520", []string{"https://pitot.example.com"}, true},
+		{"path configuration", "https://pitot.example.com/path/", "internal:7520", []string{"https://pitot.example.com"}, true},
+		{"non-default port", "https://pitot.example.com:8443/path", "internal:7520", []string{"https://pitot.example.com:8443"}, true},
+		{"non-default port required", "https://pitot.example.com:8443", "internal:7520", []string{"https://pitot.example.com"}, false},
 		{"IPv6 default port", "https://[::1]:443/path", "internal:7520", []string{"https://[::1]"}, true},
 		{"IPv6 non-default port", "https://[::1]:8443/path", "internal:7520", []string{"https://[::1]:8443"}, true},
-		{"request must be serialized", "https://fanout.example.com", "internal:7520", []string{"https://FANOUT.example.com"}, false},
-		{"explicit default request port", "https://fanout.example.com", "internal:7520", []string{"https://fanout.example.com:443"}, false},
-		{"scheme mismatch", "https://fanout.example.com", "fanout.example.com", []string{"http://fanout.example.com"}, false},
-		{"untrusted", "https://fanout.example.com", "attacker.example", []string{"https://attacker.example"}, false},
-		{"empty", "https://fanout.example.com", "internal:7520", []string{""}, false},
-		{"two values", "https://fanout.example.com", "internal:7520", []string{"https://fanout.example.com", "https://attacker.example"}, false},
-		{"two identical values", "https://fanout.example.com", "internal:7520", []string{"https://fanout.example.com", "https://fanout.example.com"}, false},
+		{"request must be serialized", "https://pitot.example.com", "internal:7520", []string{"https://PITOT.example.com"}, false},
+		{"explicit default request port", "https://pitot.example.com", "internal:7520", []string{"https://pitot.example.com:443"}, false},
+		{"scheme mismatch", "https://pitot.example.com", "pitot.example.com", []string{"http://pitot.example.com"}, false},
+		{"untrusted", "https://pitot.example.com", "attacker.example", []string{"https://attacker.example"}, false},
+		{"empty", "https://pitot.example.com", "internal:7520", []string{""}, false},
+		{"two values", "https://pitot.example.com", "internal:7520", []string{"https://pitot.example.com", "https://attacker.example"}, false},
+		{"two identical values", "https://pitot.example.com", "internal:7520", []string{"https://pitot.example.com", "https://pitot.example.com"}, false},
 		{"local absent", "", "localhost:7520", nil, true},
 		{"localhost", "", "localhost:7520", []string{"http://localhost:7520"}, true},
 		{"local HTTPS", "", "LOCALHOST:7520", []string{"HTTPS://localhost:7520"}, true},
@@ -106,8 +106,8 @@ func TestMCPOriginValidation(t *testing.T) {
 			}
 		})
 	}
-	for _, publicURL := range []string{"https://fanout.example.com", ""} {
-		for _, origin := range []string{"null", "", "http://[broken", "https://user@fanout.example.com", "https://fanout.example.com/", "https://fanout.example.com/path", "https://fanout.example.com?", "https://fanout.example.com#", "https://fanout.example.com:99999", "https://fanout.example.com https://attacker.example", "http://localhost:7520/"} {
+	for _, publicURL := range []string{"https://pitot.example.com", ""} {
+		for _, origin := range []string{"null", "", "http://[broken", "https://user@pitot.example.com", "https://pitot.example.com/", "https://pitot.example.com/path", "https://pitot.example.com?", "https://pitot.example.com#", "https://pitot.example.com:99999", "https://pitot.example.com https://attacker.example", "http://localhost:7520/"} {
 			r := httptest.NewRequest("POST", "/mcp", nil)
 			r.Host = "localhost:7520"
 			r.Header.Set("Origin", origin)

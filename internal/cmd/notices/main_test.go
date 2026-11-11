@@ -66,7 +66,7 @@ func writeTestFile(t *testing.T, path, contents string) {
 func TestCollectGoExcludesToolOnlyModules(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "go.mod"), "module fixture\ngo 1.27.1\nrequire example.com/tools v0.0.0\nreplace example.com/tools => ./tools\ntool example.com/tools/cmd/check\n")
-	writeTestFile(t, filepath.Join(root, "cmd/fanout/main.go"), "package main\nfunc main() {}\n")
+	writeTestFile(t, filepath.Join(root, "cmd/pitot/main.go"), "package main\nfunc main() {}\n")
 	writeTestFile(t, filepath.Join(root, "tools/go.mod"), "module example.com/tools\ngo 1.27.1\n")
 	writeTestFile(t, filepath.Join(root, "tools/cmd/check/main.go"), "package main\nfunc main() {}\n")
 	all := map[string]component{}

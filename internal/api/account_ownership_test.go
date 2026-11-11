@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
 )
 
 const (
-	ownershipAdminGroup    = "fanout-admins-group-name"
-	ownershipOperatorGroup = "fanout-operators-group-name"
+	ownershipAdminGroup    = "pitot-admins-group-name"
+	ownershipOperatorGroup = "pitot-operators-group-name"
 )
 
 func roleMappedConfig() config.Config {
@@ -50,7 +50,7 @@ func createOwnershipUser(t *testing.T, s *scimServer, email string, role auth.Ro
 }
 
 func browserHeaders() map[string]string {
-	return map[string]string{"Content-Type": "application/json", "Fanout-Request": "1"}
+	return map[string]string{"Content-Type": "application/json", "Pitot-Request": "1"}
 }
 
 type browserUserOperation struct {

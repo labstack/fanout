@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/pitot/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/annotations"
+	"github.com/labstack/pitot/internal/annotations"
 )
 
 type annotationFake struct{}

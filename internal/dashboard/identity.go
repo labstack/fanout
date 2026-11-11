@@ -3,19 +3,19 @@ package dashboard
 import (
 	"context"
 
-	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/pitot/internal/auth"
 )
 
 // OwnerMetaKey carries the dashboard owner's user ID in MCP request _meta.
 //
-// Trust model (three-file invariant): io.fanout/owner-id and
-// io.fanout/build-origin are client-suppliable metadata. Dashboard tools trust
+// Trust model (three-file invariant): io.pitot/owner-id and
+// io.pitot/build-origin are client-suppliable metadata. Dashboard tools trust
 // these values ONLY on the in-process path with authenticated owner injection
 // from internal/agent/tools.go. ProtectMCP and ProtectBrowserMCP
 // (internal/api/oauth.go) guarantee OAuth TokenInfo on both HTTP mounts; remote TokenInfo takes precedence,
 // and remote metadata cannot fabricate ownership or conversation provenance.
-const OwnerMetaKey = "io.fanout/owner-id"
-const BuildOriginMetaKey = "io.fanout/build-origin"
+const OwnerMetaKey = "io.pitot/owner-id"
+const BuildOriginMetaKey = "io.pitot/build-origin"
 const OAuthScope = auth.MCPScopeDashboardManage
 
 type ownerContextKey struct{}

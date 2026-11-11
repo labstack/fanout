@@ -11,10 +11,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/sqlscan"
-	"github.com/labstack/fanout/internal/suggest"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/query"
+	"github.com/labstack/pitot/internal/sqlscan"
+	"github.com/labstack/pitot/internal/suggest"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 type Notice struct {

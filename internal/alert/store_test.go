@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	appstore "github.com/labstack/fanout/internal/store"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 func newTestStore(t *testing.T) *Store {

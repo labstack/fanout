@@ -2,8 +2,8 @@ import { test, expect } from "../../fixtures/test";
 import { capture, chooseView, longError, openSurface, readyCard, settle, spec, staleSurface, type Capture, type Scenario, type Surface } from "../../support/accessibility-support";
 
 // Screenshots are review artifacts, never pixel baselines or automatic visual PASS,
-// so they are captured only on request: FANOUT_E2E_SCREENSHOTS=1 just e2e.
-test.skip(process.env.FANOUT_E2E_SCREENSHOTS !== "1", "set FANOUT_E2E_SCREENSHOTS=1 to capture review screenshots");
+// so they are captured only on request: PITOT_E2E_SCREENSHOTS=1 just e2e.
+test.skip(process.env.PITOT_E2E_SCREENSHOTS !== "1", "set PITOT_E2E_SCREENSHOTS=1 to capture review screenshots");
 for (const surface of ["dashboard", "chat"] as Surface[]) {
   const groups = surface === "dashboard" ? [spec.panels] : spec.panels.map(panel => [panel]);
   for (const panels of groups) test(`capture ${surface} ${panels.length === 1 ? panels[0].viz : "all fifteen types"} for visual review`, async ({ page, request }, info) => {

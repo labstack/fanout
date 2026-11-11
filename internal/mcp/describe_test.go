@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/pitot/internal/dashboard"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -148,7 +148,7 @@ func TestDescribeToolsReportsCompleteMetadata(t *testing.T) {
 			t.Errorf("%+v: incomplete metadata", doc)
 		}
 		if doc.OpenWorld {
-			t.Errorf("%s reports open-world; every Fanout tool is closed-world", doc.Name)
+			t.Errorf("%s reports open-world; every Pitot tool is closed-world", doc.Name)
 		}
 		for _, input := range doc.Inputs {
 			if input.Type == "" {

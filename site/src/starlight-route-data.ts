@@ -4,7 +4,7 @@ import { defineRouteMiddleware } from "@astrojs/starlight/route-data";
 //
 // Starlight builds the canonical from `Astro.url.pathname`, and under
 // `build.format: "preserve"` that pathname is the file it wrote to disk, so the tag
-// read `https://fanout.run/docs/get-started/install.html`. Nothing else on the site uses
+// read `https://pitot.dev/docs/get-started/install.html`. Nothing else on the site uses
 // that form: the sitemap lists `/docs/get-started/install`, every internal link points at
 // `/docs/get-started/install`, `llms.txt` points at `/docs/get-started/install.md`, and Cloudflare
 // Pages — where this site is published — serves the extensionless path and 301s

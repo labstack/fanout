@@ -3,8 +3,8 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/observability"
+	"github.com/labstack/pitot/internal/query"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"reflect"
 	"strings"

@@ -2,7 +2,7 @@ package fanql
 
 import (
 	"fmt"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 	"strings"
 )
 

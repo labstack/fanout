@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/reac
 import { Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { threadHistoryQueryKey } from "./api";
-import { activityLabel, FanoutAppContext, runErrorMessage, type TurnOptions } from "./app-context";
+import { activityLabel, PitotAppContext, runErrorMessage, type TurnOptions } from "./app-context";
 import AuthGate, { authorizedFetch, useRuntimeStatus } from "./auth";
 import { createID } from "./id";
 import { dashboardsKey } from "./dashboards/api";
@@ -215,9 +215,9 @@ function Session() {
   }
   function reloadThread() { setReloadCount((n) => n + 1); }
 
-  return <FanoutAppContext.Provider value={{ agentAvailable, threadID, threadMissing, messages, messageTimes, ready, running, activity, stopped, input, setInput, error, inputRef, send, submit, stop, retry, reloadThread, openChat, newThread, selectThread }}>
+  return <PitotAppContext.Provider value={{ agentAvailable, threadID, threadMissing, messages, messageTimes, ready, running, activity, stopped, input, setInput, error, inputRef, send, submit, stop, retry, reloadThread, openChat, newThread, selectThread }}>
     <Shell><Outlet /></Shell>
-  </FanoutAppContext.Provider>;
+  </PitotAppContext.Provider>;
 }
 
 export default function App() {

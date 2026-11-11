@@ -32,20 +32,20 @@ describe("EChartCanvas", () => {
       expect(instance.on.mock.calls.some(([event])=>event==="finished")).toBe(false);
       expect(getDisplayList).not.toHaveBeenCalled();
       expect(container.querySelector("[data-chart-audit],[data-chart-labels],[data-chart-legend],[data-chart-plot]")).toBeNull();
-      expect((window as any).__fanoutAudit).toBeUndefined();
+      expect((window as any).__pitotAudit).toBeUndefined();
       expect(container.querySelector("[role=img]")!.hasAttribute("id")).toBe(false);
       for(const node of container.querySelectorAll("*")) for(const attr of node.attributes) if(attr.name.startsWith("data-")) expect(attr.value.length).toBeLessThanOrEqual(1024);
     } finally { await act(async()=>root.unmount()); vi.unstubAllEnvs(); }
   });
 
   it("inspects native text only on demand in development",async()=>{
-    vi.stubEnv("DEV",true); window.history.replaceState({},"","/?__fanout_audit=1");
+    vi.stubEnv("DEV",true); window.history.replaceState({},"","/?__pitot_audit=1");
     const instance=fresh();
     const rect={x:10,y:10,width:40,height:12,clone(){return this;},applyTransform(){}};
     Object.assign(instance,{getZr:()=>({storage:{getDisplayList:()=>[{type:"tspan",style:{text:"300 ms",font:"11px monospace",fill:"#6b7280"},getBoundingRect:()=>rect,getComputedTransform:()=>null}]}})});
     const container=document.createElement("div");document.body.append(container);const root=createRoot(container);
     await act(async()=>root.render(<EChartCanvas option={{tooltip:{backgroundColor:"#fcfcfc"},xAxis:{axisLabel:{fontSize:11}},series:[]}} height={100} label="Native audit"/>));
-    const audit=window.__fanoutAudit!(container.querySelector<HTMLElement>("[role=img]")!.id)!.audit;
+    const audit=window.__pitotAudit!(container.querySelector<HTMLElement>("[role=img]")!.id)!.audit;
     expect(audit.texts).toContainEqual(expect.objectContaining({text:"300 ms",size:11,color:"#6b7280",surface:"#fcfcfc",family:"11px monospace"}));
     await act(async()=>root.unmount()); window.history.replaceState({},"","/"); vi.unstubAllEnvs();
   });
@@ -162,14 +162,14 @@ describe("EChartCanvas", () => {
 });
 
 it("inspects rendered legend text bounds on demand", async () => {
- vi.stubEnv("DEV",true); window.history.replaceState({},"","/?__fanout_audit=1");
+ vi.stubEnv("DEV",true); window.history.replaceState({},"","/?__pitot_audit=1");
  const instance = fresh();
  Object.assign(instance, { getZr: () => ({ storage: { getDisplayList: () => [{ style: { text: "load-generator" }, getBoundingRect: () => ({ clone: () => ({ x: 10, y: 0, width: 100, height: 16, applyTransform: () => {} }) }), getComputedTransform: () => null }] } }) });
  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
  await act(async () => root.render(<EChartCanvas option={{ legend: { type: "plain", show: true, data: ["load-generator"] }, grid: { top: 30 } }} height={100} label="Legend" />));
  const chart = container.querySelector<HTMLElement>("[role=img]")!;
- expect(window.__fanoutAudit!(chart.id)!.legend).toMatchObject({ type: "plain", names: ["load-generator"], entries: [{ name: "load-generator", text: "load-generator", left: 10, top: 0, right: 110, bottom: 16 }] });
- expect(window.__fanoutAudit!(chart.id)!.legendBottom).toBe(30);
+ expect(window.__pitotAudit!(chart.id)!.legend).toMatchObject({ type: "plain", names: ["load-generator"], entries: [{ name: "load-generator", text: "load-generator", left: 10, top: 0, right: 110, bottom: 16 }] });
+ expect(window.__pitotAudit!(chart.id)!.legendBottom).toBe(30);
  await act(async () => root.unmount()); container.remove(); window.history.replaceState({},"","/"); vi.unstubAllEnvs();
 });
 
@@ -177,7 +177,7 @@ it("registers end-label collision management",()=>{expect(mocks.registered).toCo
 it("keeps nice duration intervals when adapting to native plot height",async()=>{
  const instance=fresh();Object.assign(instance,{getModel:()=>({getComponent:()=>({coordinateSystem:{getRect:()=>({height:750})}})})});
  const container=document.createElement("div");document.body.append(container);const root=createRoot(container);
- try {await act(async()=>root.render(<EChartCanvas option={{yAxis:{type:"value",fanout_unit:"ms",min:0,max:90000,interval:50000,splitNumber:2,axisLabel:{formatter:(v:number)=>v+"ms"}}}} height={800} label="Latency"/>));
+ try {await act(async()=>root.render(<EChartCanvas option={{yAxis:{type:"value",pitot_unit:"ms",min:0,max:90000,interval:50000,splitNumber:2,axisLabel:{formatter:(v:number)=>v+"ms"}}}} height={800} label="Latency"/>));
  const axis=instance.setOption.mock.lastCall![0].yAxis;expect(axis.interval).toBe(10000);expect(axis.splitNumber).toBe(9);
  }finally {await act(async()=>root.unmount());container.remove();}
 });

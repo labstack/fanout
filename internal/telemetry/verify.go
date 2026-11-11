@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	driver "github.com/duckdb/duckdb-go/v2"
-	engine "github.com/labstack/fanout/internal/duckdb"
-	"github.com/labstack/fanout/internal/telemetry/semconv"
+	engine "github.com/labstack/pitot/internal/duckdb"
+	"github.com/labstack/pitot/internal/telemetry/semconv"
 	"github.com/parquet-go/parquet-go"
 )
 

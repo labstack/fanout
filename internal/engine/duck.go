@@ -17,14 +17,14 @@ import (
 
 	"github.com/duckdb/duckdb-go/v2"
 
-	"github.com/labstack/fanout/internal/config"
-	engine "github.com/labstack/fanout/internal/duckdb"
-	"github.com/labstack/fanout/internal/engine/writegate"
-	"github.com/labstack/fanout/internal/metrics"
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/readpressure"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	engine "github.com/labstack/pitot/internal/duckdb"
+	"github.com/labstack/pitot/internal/engine/writegate"
+	"github.com/labstack/pitot/internal/metrics"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/readpressure"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 type Duck struct {
@@ -164,7 +164,7 @@ func duckDBPoolSize(cfg config.Config) int {
 // of a constant that's wrong everywhere but the box it was tuned for.
 func duckDSN(dbPath, mem string, threads int) (string, error) {
 	if strings.ContainsAny(mem, "&?'\"\\; ") {
-		return "", fmt.Errorf("invalid FANOUT_DUCKDB_MEMORY value: %q", mem)
+		return "", fmt.Errorf("invalid PITOT_DUCKDB_MEMORY value: %q", mem)
 	}
 	params := make([]string, 0, 2)
 	if threads > 0 {
@@ -278,7 +278,7 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 	// Reads are the pool that can starve, so it is the one worth watching.
 	d.releasePoolGauges = metrics.SetDuckDBPoolSource(db.Stats)
 	if cfg.DuckDBMemory == "" {
-		// Only when the operator hasn't pinned FANOUT_DUCKDB_MEMORY: keep DuckDB's
+		// Only when the operator hasn't pinned PITOT_DUCKDB_MEMORY: keep DuckDB's
 		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
 		// small ones, so the kernel doesn't OOM-kill the whole process.
 		if err := applyMemoryHeadroom(ctx, db); err != nil {

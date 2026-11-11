@@ -1,6 +1,6 @@
 ---
 title: Terminate TLS
-description: Serve Fanout over TLS directly, or behind a reverse proxy, for both application traffic and ingest.
+description: Serve Pitot over TLS directly, or behind a reverse proxy, for both application traffic and ingest.
 summary: The two supported TLS patterns, and the proxy-trust setting that has to accompany the second one.
 read_when:
   - You are exposing an instance beyond a trusted network.
@@ -8,7 +8,7 @@ read_when:
 status: preview
 ---
 
-Fanout serves the browser, API, MCP and both OTLP transports on one listener.
+Pitot serves the browser, API, MCP and both OTLP transports on one listener.
 Use direct TLS or terminate TLS at a reverse proxy.
 
 ## Direct TLS
@@ -16,8 +16,8 @@ Use direct TLS or terminate TLS at a reverse proxy.
 Set both files; supplying only one fails startup:
 
 ```sh
-export FANOUT_TLS_CERT_FILE=/etc/fanout/tls/cert.pem
-export FANOUT_TLS_KEY_FILE=/etc/fanout/tls/key.pem
+export PITOT_TLS_CERT_FILE=/etc/pitot/tls/cert.pem
+export PITOT_TLS_KEY_FILE=/etc/pitot/tls/key.pem
 ```
 
 That enables TLS 1.3 on the shared listener. Browser traffic and OTLP/HTTP
@@ -29,17 +29,17 @@ To accept connections only from clients holding a certificate from a CA you
 choose, add a PEM bundle of those CA certificates:
 
 ```sh
-export FANOUT_TLS_CLIENT_CA_FILE=/etc/fanout/tls/client-ca.pem
+export PITOT_TLS_CLIENT_CA_FILE=/etc/pitot/tls/client-ca.pem
 ```
 
 The listener then requires and verifies a client certificate on every
 handshake, for the browser, API, MCP, OTLP/HTTP and gRPC alike. TLS 1.3 and
 ALPN are unchanged. A handshake without a certificate from a listed CA fails
-before any request is read. The setting requires `FANOUT_TLS_CERT_FILE` and
-`FANOUT_TLS_KEY_FILE`; an unreadable bundle, or one with no certificates, a
+before any request is read. The setting requires `PITOT_TLS_CERT_FILE` and
+`PITOT_TLS_KEY_FILE`; an unreadable bundle, or one with no certificates, a
 non-certificate block or an invalid certificate, fails startup and names the path.
 
-The bundle is read once at startup, so restart Fanout after changing it. To
+The bundle is read once at startup, so restart Pitot after changing it. To
 rotate a CA without rejecting clients, list both the old and new CA in the
 bundle until every client has a certificate from the new one, then remove the
 old CA and restart again.
@@ -48,7 +48,7 @@ A typical use is
 [Cloudflare Authenticated Origin Pulls](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/),
 where Cloudflare presents a client certificate on every connection to your
 origin. Use zone-level or per-hostname pulls: you upload a client certificate
-issued by your own CA to Cloudflare, and set `FANOUT_TLS_CLIENT_CA_FILE` to
+issued by your own CA to Cloudflare, and set `PITOT_TLS_CLIENT_CA_FILE` to
 that CA. The certificate is exclusive to your account, so the origin accepts
 only connections that Cloudflare makes on behalf of your zone or hostname.
 Connections that bypass Cloudflare are rejected.
@@ -65,18 +65,18 @@ need their own client certificate from a CA in the bundle.
 
 #### Health checks
 
-`fanout healthcheck` (the container image's `HEALTHCHECK`) connects to the same
+`pitot healthcheck` (the container image's `HEALTHCHECK`) connects to the same
 listener, so it also needs a client certificate. Give the probe a certificate
 and key:
 
 ```sh
-export FANOUT_HEALTHCHECK_CERT_FILE=/etc/fanout/tls/healthcheck.pem
-export FANOUT_HEALTHCHECK_KEY_FILE=/etc/fanout/tls/healthcheck-key.pem
+export PITOT_HEALTHCHECK_CERT_FILE=/etc/pitot/tls/healthcheck.pem
+export PITOT_HEALTHCHECK_KEY_FILE=/etc/pitot/tls/healthcheck-key.pem
 ```
 
 Issue the probe certificate from a private CA used only by this host, and append
-that CA to this host's `FANOUT_TLS_CLIENT_CA_FILE` bundle next to your
-Authenticated Origin Pulls CA. Keep any CA you append dedicated to Fanout
+that CA to this host's `PITOT_TLS_CLIENT_CA_FILE` bundle next to your
+Authenticated Origin Pulls CA. Keep any CA you append dedicated to Pitot
 clients: the listener accepts every certificate it issues. Reusing the
 Authenticated Origin Pulls CA for the probe is acceptable only if this is the
 sole host that trusts it.
@@ -86,36 +86,36 @@ A probe key from a CA that several hosts trust would pass the client certificate
 check on all of them.
 :::
 
-The probe presents the pair only on its derived HTTPS check of `FANOUT_ADDR`;
-an explicit `fanout healthcheck <url>` does not. Both settings need
-`FANOUT_TLS_CLIENT_CA_FILE`, and supplying only one fails. Without them, the
+The probe presents the pair only on its derived HTTPS check of `PITOT_ADDR`;
+an explicit `pitot healthcheck <url>` does not. Both settings need
+`PITOT_TLS_CLIENT_CA_FILE`, and supplying only one fails. Without them, the
 probe's handshake is rejected and the health check fails.
 
 ## Behind a reverse proxy
 
-Terminate at the proxy and forward to Fanout's shared port (`7520` by default). Two settings have to
+Terminate at the proxy and forward to Pitot's shared port (`7520` by default). Two settings have to
 come with it:
 
 ```sh
-export FANOUT_PUBLIC_URL=https://fanout.example.com
-export FANOUT_TRUSTED_PROXY_CIDRS=10.0.1.0/24
+export PITOT_PUBLIC_URL=https://pitot.example.com
+export PITOT_TRUSTED_PROXY_CIDRS=10.0.1.0/24
 ```
 
-`FANOUT_PUBLIC_URL` is the externally reachable HTTPS origin. Fanout uses it to
+`PITOT_PUBLIC_URL` is the externally reachable HTTPS origin. Pitot uses it to
 mark browser session cookies `Secure` when TLS terminates at the proxy.
 
-Without local TLS or an HTTPS `FANOUT_PUBLIC_URL`, browser session cookies lack
-`Secure`, and Fanout warns at startup.
+Without local TLS or an HTTPS `PITOT_PUBLIC_URL`, browser session cookies lack
+`Secure`, and Pitot warns at startup.
 
-`FANOUT_TRUSTED_PROXY_CIDRS` is the list of networks whose forwarded client
-addresses Fanout will believe. Set it to the proxy network and nothing wider.
+`PITOT_TRUSTED_PROXY_CIDRS` is the list of networks whose forwarded client
+addresses Pitot will believe. Set it to the proxy network and nothing wider.
 Never `0.0.0.0/0`: audit attribution and sign-in rate limits use the client address.
-Trusting every source lets any caller claim any address. Fanout warns
+Trusting every source lets any caller claim any address. Pitot warns
 when a public URL is set, TLS is not terminated locally, and this is empty.
 
 ### HTTP/2 to the backend
 
-For gRPC, the proxy must forward HTTP/2 to Fanout. If Fanout has no local
+For gRPC, the proxy must forward HTTP/2 to Pitot. If Pitot has no local
 certificate, use an h2c upstream (plaintext HTTP/2 with prior knowledge).
 Forwarding HTTP/1.1 supports the UI, API and OTLP/HTTP, but breaks gRPC.
 Preserve the original Host header for MCP, and allow long-lived SSE responses.
@@ -124,13 +124,13 @@ For example, [Caddy's h2c upstream](https://caddyserver.com/docs/caddyfile/direc
 can serve all surfaces with:
 
 ```text
-fanout.example.com {
+pitot.example.com {
     reverse_proxy h2c://127.0.0.1:7520
 }
 ```
 
-On a platform that supplies one port, set `FANOUT_ADDR` to that port
-(for example `:8080`). For Cloud Run, [enable end-to-end HTTP/2](https://docs.cloud.google.com/run/docs/configuring/http2); Fanout accepts
+On a platform that supplies one port, set `PITOT_ADDR` to that port
+(for example `:8080`). For Cloud Run, [enable end-to-end HTTP/2](https://docs.cloud.google.com/run/docs/configuring/http2); Pitot accepts
 its h2c backend connections. A dedicated ingest hostname can still point at the
 same backend port. Enter that hostname on **Connect telemetry** before copying
 the Collector configuration; it belongs to the collector's network route, not
@@ -138,7 +138,7 @@ the server listener configuration.
 
 ## External MCP clients
 
-For `FANOUT_PUBLIC_URL` requirements, see [MCP setup](/docs/guides/mcp#set-the-public-url-first).
+For `PITOT_PUBLIC_URL` requirements, see [MCP setup](/docs/guides/mcp#set-the-public-url-first).
 
 MCP also validates `Origin` before authentication; see
 [Connect an agent over MCP](/docs/guides/mcp#protocol).

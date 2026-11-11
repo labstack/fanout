@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/intelligence"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/intelligence"
 )
 
 type fakeIntelligenceSnapshots struct {

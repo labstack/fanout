@@ -4,13 +4,17 @@
 
 - Configuration is environment-only. `internal/config/config.go` is the
   authoritative schema: built-in defaults, then nonempty process environment.
-  Custom names use `FANOUT_` plus a clear name, adding the area only when it
+  Custom names use `PITOT_` plus a clear name, adding the area only when it
   clarifies; vendor credentials and endpoints keep `ANTHROPIC_API_KEY`,
   `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL`.
-  Provider and model selection remain `FANOUT_AI_PROVIDER` and `FANOUT_AI_MODEL`.
+  Provider and model selection remain `PITOT_AI_PROVIDER` and `PITOT_AI_MODEL`.
   An empty provider disables chat; exactly `anthropic` or `openai` requires
   that provider's key. Ignore AI credentials and endpoints when chat is disabled;
   validate only the selected provider's endpoint.
+- For the first Pitot alpha, `internal/config/loader.go` resolves legacy
+  `FANOUT_*` only when the equivalent primary name is unset. Preserve explicit
+  empty primaries and emit one names-only warning. See `CHANGELOG.md` for the
+  removal window and storage compatibility names.
 - Every `secret:"true"` field accepts `<ENV>_FILE`. Both forms nonempty fail;
   secret files lose exactly one trailing LF or CRLF and must remain nonempty.
   Unselected AI providers' value and file forms are ignored.
@@ -23,10 +27,10 @@
 - The binary does not load dotenv. `just run` uses Node's native `parseEnv` for
   optional ignored `./.env`, then inherited environment values win. Personal
   development credentials may live there. Never shell-source dotenv. Only
-  Fanout's namespace rejects unknown names; tolerate platform service variables
+  Pitot's namespace rejects unknown names; tolerate platform service variables
   and ignore unrelated names in shared vendor namespaces.
 - Native listener default is `127.0.0.1:7520`. The image supplies
-  `FANOUT_ADDR=:7520` and `FANOUT_DATA_DIR=/var/lib/fanout/data`.
+  `PITOT_ADDR=:7520` and `PITOT_DATA_DIR=/var/lib/pitot/data`.
 - Repository-managed secret profiles adopt SOPS authority through a verified
   migration, with key recovery in 1Password. Existing vault/platform delivery
   remains authoritative until all consumers and recovery are verified. Follow
@@ -127,7 +131,7 @@
 
 ## Product versioning
 
-Fanout uses CalVer with the format `YYYY.M.N[-alpha|-beta|-rc]`.
+Pitot uses CalVer with the format `YYYY.M.N[-alpha|-beta|-rc]`.
 
 - `YYYY` is the full year and `M` is the unpadded month.
 - `N` is the release number within that month, starting at `0`.
@@ -177,7 +181,7 @@ resources and protocol-defined contracts keep their own semantics.
   `/api/auth/code/verify`, and `POST /api/auth/logout`. Flow selection, passkeys,
   account linking, and sign-in link verification are distinct operations.
   OIDC sign-in uses `/api/auth/oidc/start` and `/api/auth/oidc/callback` without
-  a provider segment because Fanout supports exactly one configured provider.
+  a provider segment because Pitot supports exactly one configured provider.
 - Operational routes use `/healthz` for liveness, `/readyz` for readiness,
   and `/metrics` for Prometheus exposition. Preserve authorization requirements.
 - MCP tool names use verb-first snake_case and describe their behavior:

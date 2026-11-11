@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/pitot/internal/metrics"
 )
 
-// ErrStalled reports a stall in work Fanout owns: a Parquet publication
+// ErrStalled reports a stall in work Pitot owns: a Parquet publication
 // running far past its budget, or an idle engine that does not answer a ping.
 // Only a restart frees it.
 var ErrStalled = errors.New("query engine stalled")
@@ -26,7 +26,7 @@ var ErrStalled = errors.New("query engine stalled")
 // connection, not the engine, so it never fails liveness.
 const overrunGrace = longestRead
 
-// longestRead bounds the deadline of every read Fanout issues; panel batches
+// longestRead bounds the deadline of every read Pitot issues; panel batches
 // take 20 s and the detector's statements 15 s.
 const longestRead = 25 * time.Second
 
@@ -200,7 +200,7 @@ func (d *Duck) Ping(ctx context.Context) error {
 	return nil
 }
 
-// stallExit is how long a stall must last before Fanout exits for a restart:
+// stallExit is how long a stall must last before Pitot exits for a restart:
 // another overrunGrace, so supervisors that restart only on exit recover too.
 const stallExit = overrunGrace
 
@@ -230,7 +230,7 @@ func (w *stallWatch) observe(now time.Time, stall string) bool {
 }
 
 // Watch reports read overruns, and delivers ErrStalled on Fatal once a stall
-// in Fanout's own work has lasted stallExit, so the process exits and its
+// in Pitot's own work has lasted stallExit, so the process exits and its
 // supervisor restarts it. Overload and costly queries are no stall. It stops
 // with ctx, so shutdown cannot fire it.
 func (d *Duck) Watch(ctx context.Context) {

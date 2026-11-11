@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/telemetry"
-	store "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/telemetry"
+	store "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 // A schema-first catalog estimates zero raw rows while materialized children

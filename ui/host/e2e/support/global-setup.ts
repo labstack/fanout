@@ -50,13 +50,13 @@ function seed(binary: string | undefined, base: string, tokenFile: string, log: 
 
 export default async function globalSetup({ signalCleanup = true, onSignal = () => {}, directory }: { signalCleanup?: boolean | "startup"; onSignal?: () => void; directory?: string } = {}) {
   // Recordings require a real AI-enabled instance; never start the seeded server.
-  if (process.env.FANOUT_LANDING_RECORDINGS === "1" && !process.env.FANOUT_LANDING_BASE_URL) {
-    throw new Error("Landing recordings require FANOUT_LANDING_BASE_URL and FANOUT_LANDING_SESSION_COOKIE for an external instance");
+  if (process.env.PITOT_LANDING_RECORDINGS === "1" && !process.env.PITOT_LANDING_BASE_URL) {
+    throw new Error("Landing recordings require PITOT_LANDING_BASE_URL and PITOT_LANDING_SESSION_COOKIE for an external instance");
   }
   // External landing media use an existing instance and an in-memory session.
-  if (process.env.FANOUT_LANDING_BASE_URL) return;
+  if (process.env.PITOT_LANDING_BASE_URL) return;
 
-  const dir = directory ?? await mkdtemp(join(tmpdir(), "fanout-e2e-"));
+  const dir = directory ?? await mkdtemp(join(tmpdir(), "pitot-e2e-"));
   let child: ChildProcess | undefined;
   let seedChild: ChildProcess | undefined;
   let api: Awaited<ReturnType<typeof request.newContext>> | undefined;
@@ -82,21 +82,21 @@ export default async function globalSetup({ signalCleanup = true, onSignal = () 
     const base = `http://127.0.0.1:${await freePort()}`;
     // Ignore inherited product configuration and keys; this instance is disposable.
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-      !key.startsWith("FANOUT_") && !key.startsWith("ANTHROPIC_") && !key.startsWith("OPENAI_") &&
+      !key.startsWith("PITOT_") && !key.startsWith("ANTHROPIC_") && !key.startsWith("OPENAI_") &&
       !/(?:API_KEY|TOKEN|SECRET)$/.test(key)));
     const startDeadline = Date.now() + 30_000;
     const fd = openSync(serverLog, "a", 0o600);
-    child = spawn(resolve(process.env.FANOUT_E2E_BINARY ?? join(root, "bin/fanout")), [], {
+    child = spawn(resolve(process.env.PITOT_E2E_BINARY ?? join(root, "bin/pitot")), [], {
       cwd: dir,
-      env: { ...env, FANOUT_DATA_DIR: join(dir, "data"), FANOUT_ADDR: new URL(base).host,
-        FANOUT_AUTH_CODE_SECRET: randomBytes(32).toString("hex"),
-        FANOUT_ROLLUP_INTERVAL: "1s",
+      env: { ...env, PITOT_DATA_DIR: join(dir, "data"), PITOT_ADDR: new URL(base).host,
+        PITOT_AUTH_CODE_SECRET: randomBytes(32).toString("hex"),
+        PITOT_ROLLUP_INTERVAL: "1s",
         // Specs assert data they just wrote; cached panels would hide it.
-        FANOUT_QUERY_CACHE_TTL: "0" },
+        PITOT_QUERY_CACHE_TTL: "0" },
       stdio: ["ignore", fd, fd],
     });
     closeSync(fd);
-    // Fanout prints the setup banner (with the one-time credential) to stderr.
+    // Pitot prints the setup banner (with the one-time credential) to stderr.
     // Both streams stay in a private file; only redacted tails reach diagnostics.
     let spawnFailed = false;
     child.once("error", () => { spawnFailed = true; });
@@ -104,11 +104,11 @@ export default async function globalSetup({ signalCleanup = true, onSignal = () 
     while (Date.now() < startDeadline) {
       token = (await readFile(serverLog, "utf8")).match(/setup_token=([A-Za-z0-9_%.-]+)/)?.[1];
       if (token) break;
-      if (spawnFailed || child.exitCode !== null || child.signalCode !== null) throw new Error("Fanout exited before setup");
+      if (spawnFailed || child.exitCode !== null || child.signalCode !== null) throw new Error("Pitot exited before setup");
       await pause(100);
     }
     if (!token) throw new Error("No setup URL in server stderr within 30 seconds");
-    api = await request.newContext({ baseURL: base, extraHTTPHeaders: { "Fanout-Request": "1" }, timeout: 25_000 });
+    api = await request.newContext({ baseURL: base, extraHTTPHeaders: { "Pitot-Request": "1" }, timeout: 25_000 });
     const requestJSON = async (path: string, data: unknown, timeout = 25_000) => {
       const response = await safeRequest(path, () => api!.post(path, { data, timeout }));
       let body;
@@ -126,7 +126,7 @@ export default async function globalSetup({ signalCleanup = true, onSignal = () 
     const tokenFile = join(dir, "ingest-token");
     // The command contract requires a temporary file; never put credentials in argv.
     await writeFile(tokenFile, ingestToken, { mode: 0o600 });
-    try { await seed(process.env.FANOUT_E2E_SEED_BINARY, base, tokenFile, seedLog, process => { seedChild = process; }); }
+    try { await seed(process.env.PITOT_E2E_SEED_BINARY, base, tokenFile, seedLog, process => { seedChild = process; }); }
     finally { await rm(tokenFile, { force: true }); }
 
     const dashboard = { version: 1, name: "Readiness", time: { range: "3h", refresh: "off" }, panels: [
@@ -161,13 +161,13 @@ export default async function globalSetup({ signalCleanup = true, onSignal = () 
     });
     const { response: performanceCreated, body: performanceRecord } = await requestJSON("/api/dashboards", { spec: performanceSpec });
     if (performanceCreated.status() !== 201 || typeof performanceRecord.id !== "string") throw new Error("Performance dashboard was not created");
-    process.env.FANOUT_E2E_PERFORMANCE_ID = performanceRecord.id;
-    process.env.FANOUT_E2E_PERFORMANCE_WINDOW = JSON.stringify(performanceSpec.time);
+    process.env.PITOT_E2E_PERFORMANCE_ID = performanceRecord.id;
+    process.env.PITOT_E2E_PERFORMANCE_WINDOW = JSON.stringify(performanceSpec.time);
     const state = join(dir, "storage-state.json");
     await writeFile(state, JSON.stringify(await api.storageState()), { mode: 0o600 });
-    process.env.FANOUT_E2E_BASE_URL = base;
-    process.env.FANOUT_E2E_DASHBOARD_ID = record.id;
-    process.env.FANOUT_E2E_STORAGE_STATE = state;
+    process.env.PITOT_E2E_BASE_URL = base;
+    process.env.PITOT_E2E_DASHBOARD_ID = record.id;
+    process.env.PITOT_E2E_STORAGE_STATE = state;
     if (signalCleanup === "startup") removeSignalHandlers();
     return cleanup;
   } catch (error) {

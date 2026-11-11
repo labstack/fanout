@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/labstack/fanout/internal/db/generated"
-	appid "github.com/labstack/fanout/internal/id"
+	"github.com/labstack/pitot/internal/db/generated"
+	appid "github.com/labstack/pitot/internal/id"
 )
 
 // ErrNotFound is returned when a requested record does not exist.

@@ -12,7 +12,7 @@ const formats = ["mp4", "webm"];
 export function clipObject(name, format, contents) {
   const hash = createHash("sha256").update(contents).digest("hex").slice(0, 12);
   const key = `videos/${name}-${hash}.${format}`;
-  return { key, url: `https://assets.fanout.run/${key}` };
+  return { key, url: `https://assets.pitot.dev/${key}` };
 }
 
 function put(args) {
@@ -32,7 +32,7 @@ export function uploadClips({ input = defaultInput, manifestPath = defaultManife
       const file = join(input, filename);
       const { key, url } = clipObject(name, format, readFileSync(file));
       if (manifest[name]?.[format] === url) continue;
-      upload(["r2", "object", "put", `fanout/${key}`, "--file", file,
+      upload(["r2", "object", "put", `pitot/${key}`, "--file", file,
         "--content-type", `video/${format}`, "--cache-control", "public, max-age=31536000, immutable", "--remote"]);
       manifest[name] = { ...manifest[name], [format]: url };
     }

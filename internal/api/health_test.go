@@ -12,8 +12,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
 )
 
 func TestLiveness(t *testing.T) {
@@ -77,13 +77,13 @@ func TestReadiness_NilDuck(t *testing.T) {
 
 func TestReadinessReportsSizingResolvedByLoader(t *testing.T) {
 	environ := []string{
-		"FANOUT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef",
+		"PITOT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef",
 		"ANTHROPIC_API_KEY=sk-test",
-		"FANOUT_SMTP_HOST=smtp.example.com",
-		"FANOUT_SMTP_USERNAME=user",
-		"FANOUT_SMTP_PASSWORD=pass",
-		"FANOUT_SMTP_FROM=noreply@example.com",
-		"FANOUT_DATA_DIR=" + t.TempDir(),
+		"PITOT_SMTP_HOST=smtp.example.com",
+		"PITOT_SMTP_USERNAME=user",
+		"PITOT_SMTP_PASSWORD=pass",
+		"PITOT_SMTP_FROM=noreply@example.com",
+		"PITOT_DATA_DIR=" + t.TempDir(),
 	}
 	cfg, err := config.Load(config.LoadOptions{Environ: environ})
 	if err != nil {
@@ -254,7 +254,7 @@ func (p *fakePool) Overruns() int              { return p.overruns }
 func (p *fakePool) Live(context.Context) error { return p.live }
 
 // Probes time out alike on an overloaded engine and a stalled one. Only a
-// stall in Fanout's own work fails readiness and liveness, so the supervisor
+// stall in Pitot's own work fails readiness and liveness, so the supervisor
 // restarts it; an overloaded engine, or one running a query past its
 // deadline, stays alive and reads as degraded.
 func TestOnlyAStalledEngineFailsReadinessAndLiveness(t *testing.T) {

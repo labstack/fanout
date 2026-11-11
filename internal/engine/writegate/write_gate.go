@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/pitot/internal/metrics"
 )
 
 // Operation is a bounded metric label for a rollup-cache write.

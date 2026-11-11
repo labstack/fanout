@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/observability"
+	"github.com/labstack/pitot/internal/queryrows"
 )
 
 type pooledEngine struct {

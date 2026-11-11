@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 func TestBatchBytesChargesResourceIdentityOnceAcrossSignals(t *testing.T) {

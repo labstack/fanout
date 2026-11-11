@@ -14,15 +14,15 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/labstack/fanout/internal/fanql"
-	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/fanql"
+	"github.com/labstack/pitot/internal/observability"
+	"github.com/labstack/pitot/internal/query"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type QueryTelemetryInput struct {
 	Panel     query.Panel            `json:"panel" jsonschema:"One v1 panel to display in the answer"`
-	Text      string                 `json:"text,omitempty" jsonschema:"FanQL text that becomes panel.query; prefer panel.query (structured) or panel.sql; see fanout://fanql/reference"`
+	Text      string                 `json:"text,omitempty" jsonschema:"FanQL text that becomes panel.query; prefer panel.query (structured) or panel.sql; see pitot://fanql/reference"`
 	Variables []query.Variable       `json:"variables,omitempty" jsonschema:"Optional v1 variable definitions used by this panel"`
 	Time      *query.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
 	Vars      map[string]query.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`

@@ -22,7 +22,7 @@ const RuntimeStatusContext = createContext<Status | null>(null);
 
 export function useRuntimeStatus(): Status {
   const status = useContext(RuntimeStatusContext);
-  if (!status) throw new Error("Fanout runtime status is unavailable");
+  if (!status) throw new Error("Pitot runtime status is unavailable");
   return status;
 }
 
@@ -31,7 +31,7 @@ const ViewerContext = createContext<Viewer | null>(null);
 
 export function useViewer(): Viewer {
   const viewer = useContext(ViewerContext);
-  if (!viewer) throw new Error("Fanout viewer is unavailable");
+  if (!viewer) throw new Error("Pitot viewer is unavailable");
   return viewer;
 }
 
@@ -178,20 +178,20 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   if (setupResult?.ingest_token) {
     return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>} size="lg"><Stack gap="lg">
       <PageHeader eyebrow="Setup complete" title="Save your ingest token" />
-      <Text c="dimmed">Fanout shows this token once. Store it with your collector secrets before continuing.</Text>
+      <Text c="dimmed">Pitot shows this token once. Store it with your collector secrets before continuing.</Text>
       <Stack gap="xs"><Text size="sm" fw={600}>OTLP endpoint</Text><Code block>{setupResult.suggested_endpoint ?? window.location.origin}</Code></Stack>
       <Stack gap="xs"><Text size="sm" fw={600}>Header</Text><Code block>{setupResult.ingest_header_name ?? "Authorization"}: Bearer {setupResult.ingest_token}</Code></Stack>
       {error && <Notice tone="danger">{error}</Notice>}
       <Group grow align="stretch">
         <Button variant="light" radius="md" leftSection={copied ? <Check size={16} weight="bold" /> : <Copy size={16} />} onClick={() => void copyText(`${setupResult.ingest_header_name ?? "Authorization"}: Bearer ${setupResult.ingest_token}`)}>{copied ? "Copied" : "Copy header"}</Button>
-        <Button radius="md" rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setViewer("user"); setSetupResult(null); void refreshAccount(); }}>Continue to Fanout</Button>
+        <Button radius="md" rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setViewer("user"); setSetupResult(null); void refreshAccount(); }}>Continue to Pitot</Button>
       </Group>
       <Button variant="subtle" size="compact-xs" onClick={() => void copyText(setupResult.ingest_token ?? "")}>Copy token only</Button>
     </Stack></AuthFrame>;
   }
 
   if (!sessionReady || !statusReady || loginToken) return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>}><DataState state="loading" loadingLabel="Loading sign-in" rows={4} /></AuthFrame>;
-  if (!status) return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>}><Stack gap="lg"><PageHeader title="Fanout is unavailable" /><Notice tone="danger">{error || "Authentication status could not be loaded."}</Notice></Stack></AuthFrame>;
+  if (!status) return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>}><Stack gap="lg"><PageHeader title="Pitot is unavailable" /><Notice tone="danger">{error || "Authentication status could not be loaded."}</Notice></Stack></AuthFrame>;
   if (authenticated && returnTo) return null;
   if (authenticated) return <RuntimeStatusContext.Provider value={status}>
     <ViewerContext.Provider value={account ?? { id: "", email, display_name: displayName, status: "active", role: "" }}>{children}</ViewerContext.Provider>
@@ -201,7 +201,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     const oidcReturn = oidcReturnTo();
     const target = oidcReturn ? `/api/auth/oidc/start?return_to=${encodeURIComponent(oidcReturn)}` : "/api/auth/oidc/start";
     return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>}><Stack gap={28}>
-      <PageHeader title="Sign in to Fanout" description="Use your organization’s identity provider to continue." />
+      <PageHeader title="Sign in to Pitot" description="Use your organization’s identity provider to continue." />
       {error && <Notice tone="danger">{error}</Notice>}
       <Button component="a" href={target} size="md" radius="md" rightSection={<ArrowRight size={17} weight="bold" />}>Continue with SSO</Button>
     </Stack></AuthFrame>;
@@ -275,8 +275,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     <fieldset disabled={!status.smtp_configured} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <EmailCodeSignIn
         step={codeSent ? "code" : "email"}
-        title="Sign in to Fanout"
-        description={!status.smtp_configured ? "Email delivery is not configured. Ask the operator to run fanout login-link with your email address." : status.self_signup ? "We'll email you a 6-digit code. New here? This creates your account." : "We'll email you a 6-digit code."}
+        title="Sign in to Pitot"
+        description={!status.smtp_configured ? "Email delivery is not configured. Ask the operator to run pitot login-link with your email address." : status.self_signup ? "We'll email you a 6-digit code. New here? This creates your account." : "We'll email you a 6-digit code."}
         email={email} onEmailChange={setEmail} inputRef={emailInput} onSendCode={() => { if (emailInput.current?.reportValidity()) void sendCode(); }}
         code={code} onCodeChange={setCode} onVerify={value => void verifyCode(value)}
         onChangeEmail={changeEmail} onResend={() => void sendCode()} resendIn={resendWait}
@@ -289,7 +289,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   </AuthFrame>;
 
   return <AuthFrame surface="plain" brand={<BrandMark />} footer={<Anchor href={docs.home} size="xs" target="_blank" rel="noopener noreferrer">Docs</Anchor>}><Stack gap={28}>
-    <PageHeader eyebrow="One-time setup" title="Create the first admin" description="Use the one-time token printed by the Fanout process." />
+    <PageHeader eyebrow="One-time setup" title="Create the first admin" description="Use the one-time token printed by the Pitot process." />
     <form onSubmit={submit}><Stack gap="md">
       <TextInput label="Email" placeholder="you@company.com" type="email" required value={email} onChange={event => setEmail(event.currentTarget.value)} autoFocus />
       <TextInput label="Display name" placeholder="Your display name" value={displayName} onChange={event => setDisplayName(event.currentTarget.value)} />

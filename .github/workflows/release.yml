@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 env:
-  IMAGE: ghcr.io/labstack/fanout
-  DOCKERHUB_IMAGE: docker.io/labstack/fanout
+  IMAGE: ghcr.io/labstack/pitot
+  DOCKERHUB_IMAGE: docker.io/labstack/pitot
   MCP_PUBLISHER_VERSION: "1.8.1"
   MCP_PUBLISHER_LINUX_AMD64_SHA256: "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc"
 
@@ -149,20 +149,20 @@ jobs:
           version="${GITHUB_REF_NAME}"
           bash scripts/with-duckdb.sh go test ./internal/engine -run 'TestPinnedEngine|TestSQLBoundary' -count=1
           mkdir -p stage
-          bash scripts/with-duckdb.sh go build -trimpath -ldflags "-s -w -X main.version=${version}" -o stage/fanout ./cmd/fanout
+          bash scripts/with-duckdb.sh go build -trimpath -ldflags "-s -w -X main.version=${version}" -o stage/pitot ./cmd/pitot
           for doc in LICENSE NOTICE README.md THIRD_PARTY_NOTICES TRADEMARK.md; do
             if [ -f "${doc}" ]; then cp "${doc}" stage/; fi
           done
-          tar -czf "fanout_${version}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" -C stage .
+          tar -czf "pitot_${version}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" -C stage .
       - name: Smoke test the binary
         run: |
           set -euo pipefail
-          got="$(./stage/fanout -version)"
+          got="$(./stage/pitot -version)"
           [ "${got}" = "${GITHUB_REF_NAME}" ] || { echo "version = ${got}, want ${GITHUB_REF_NAME}"; exit 1; }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: fanout_${{ matrix.goos }}_${{ matrix.goarch }}
-          path: fanout_*.tar.gz
+          name: pitot_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: pitot_*.tar.gz
           if-no-files-found: error
 
   # Each image layer is built natively and the two are joined into one manifest,
@@ -326,7 +326,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
-          pattern: fanout_*
+          pattern: pitot_*
           merge-multiple: true
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -336,8 +336,8 @@ jobs:
         run: |
           set -euo pipefail
           cd artifacts
-          ls -1 fanout_*.tar.gz
-          sha256sum fanout_*.tar.gz > SHA256SUMS
+          ls -1 pitot_*.tar.gz
+          sha256sum pitot_*.tar.gz > SHA256SUMS
           cat SHA256SUMS
       - name: Attest archives and checksum manifest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -356,7 +356,7 @@ jobs:
             --notes "$(cat notes/upgrade-notes.md)" \
             --generate-notes \
             --verify-tag \
-            artifacts/fanout_*.tar.gz artifacts/SHA256SUMS
+            artifacts/pitot_*.tar.gz artifacts/SHA256SUMS
 
   verify-release:
     name: verify public release
@@ -373,13 +373,13 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "${tmp}"' EXIT
           cd "${tmp}"
-          base="https://github.com/labstack/fanout/releases/download/${VERSION}"
+          base="https://github.com/labstack/pitot/releases/download/${VERSION}"
           curl -fsSLO "${base}/SHA256SUMS"
           for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
-            curl -fsSLO "${base}/fanout_${VERSION}_${target}.tar.gz"
+            curl -fsSLO "${base}/pitot_${VERSION}_${target}.tar.gz"
           done
           sha256sum -c SHA256SUMS
-          for archive in fanout_*.tar.gz; do
+          for archive in pitot_*.tar.gz; do
             listing="${archive}.contents"
             tar -tzf "${archive}" > "${listing}"
             for document in LICENSE NOTICE README.md THIRD_PARTY_NOTICES TRADEMARK.md; do
@@ -390,8 +390,8 @@ jobs:
             done
           done
           mkdir native
-          tar -xzf "fanout_${VERSION}_linux_amd64.tar.gz" -C native ./fanout
-          [ "$(native/fanout -version)" = "${VERSION}" ]
+          tar -xzf "pitot_${VERSION}_linux_amd64.tar.gz" -C native ./pitot
+          [ "$(native/pitot -version)" = "${VERSION}" ]
       - name: Verify the public installer
         env:
           VERSION: ${{ github.ref_name }}
@@ -399,9 +399,9 @@ jobs:
           set -euo pipefail
           tmp="$(mktemp -d)"
           trap 'rm -rf "${tmp}"' EXIT
-          curl -fsSL "https://raw.githubusercontent.com/labstack/fanout/${VERSION}/scripts/install.sh" -o "${tmp}/install.sh"
-          FANOUT_VERSION="${VERSION}" FANOUT_PREFIX="${tmp}/bin" sh "${tmp}/install.sh"
-          [ "$("${tmp}/bin/fanout" -version)" = "${VERSION}" ]
+          curl -fsSL "https://raw.githubusercontent.com/labstack/pitot/${VERSION}/scripts/install.sh" -o "${tmp}/install.sh"
+          PITOT_VERSION="${VERSION}" PITOT_PREFIX="${tmp}/bin" sh "${tmp}/install.sh"
+          [ "$("${tmp}/bin/pitot" -version)" = "${VERSION}" ]
       - name: Verify GitHub build provenance
         env:
           GH_TOKEN: ${{ github.token }}
@@ -411,11 +411,11 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "${tmp}"' EXIT
           cd "${tmp}"
-          base="https://github.com/labstack/fanout/releases/download/${VERSION}"
+          base="https://github.com/labstack/pitot/releases/download/${VERSION}"
           for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
-            archive="fanout_${VERSION}_${target}.tar.gz"
+            archive="pitot_${VERSION}_${target}.tar.gz"
             curl -fsSLO "${base}/${archive}"
-            gh attestation verify "${archive}" --repo labstack/fanout
+            gh attestation verify "${archive}" --repo labstack/pitot
           done
 
   mcp-registry:

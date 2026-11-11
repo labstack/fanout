@@ -1,6 +1,6 @@
 ## What changed
 
-<!-- Describe the user-visible outcome and why it belongs in Fanout OSS. -->
+<!-- Describe the user-visible outcome and why it belongs in Pitot OSS. -->
 
 ## Verification
 

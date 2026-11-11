@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 func resolvedText(t *testing.T, text string, opts Options) (*resolved, query.Problems) {

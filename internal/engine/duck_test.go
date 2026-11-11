@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine/writegate"
-	"github.com/labstack/fanout/internal/metrics"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine/writegate"
+	"github.com/labstack/pitot/internal/metrics"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -546,11 +546,11 @@ func TestParseDuckBytes(t *testing.T) {
 }
 
 // A rollup that fails after reading the source tip must still publish lag.
-// Otherwise fanout_rollup_lag_seconds freezes at its last healthy value during
+// Otherwise pitot_rollup_lag_seconds freezes at its last healthy value during
 // exactly the outage it exists to expose, and a lag alert never fires.
 // The publish-lag-on-error defer is copy-pasted into all three rollup
 // components, so it is covered for all three. A wrong component constant or a
-// missed sourceMax assignment in one copy freezes fanout_rollup_lag_seconds at
+// missed sourceMax assignment in one copy freezes pitot_rollup_lag_seconds at
 // its last healthy value during exactly the outage the gauge exists to expose,
 // and the lag alert never fires.
 func TestFailedRollupStillPublishesLag(t *testing.T) {

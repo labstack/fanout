@@ -16,7 +16,7 @@ await loaded;
 if (scenario === "unavailable") document.body.dataset.ready = "true";
 else {
   const recording = data[scenario === "cancelled" ? "overview" : scenario] ?? fail(`Unknown scenario: ${scenario}`);
-  const bridge = new AppBridge(null, { name: "Fanout test host", version: "1.0.0" }, { serverTools: {}, logging: {}, serverResources: {} }, {
+  const bridge = new AppBridge(null, { name: "Pitot test host", version: "1.0.0" }, { serverTools: {}, logging: {}, serverResources: {} }, {
     hostContext: { theme, displayMode: "inline", availableDisplayModes: ["inline"] },
   });
   const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
@@ -25,7 +25,7 @@ else {
     const match = recording.helpers.find(helper => canonical(helper.input) === canonical(request));
     return match?.result ?? fail(`Unexpected tools/call: ${canonical(input)}`);
   };
-  bridge.onreadresource = async ({ uri }) => uri === "ui://fanout/panels.html"
+  bridge.onreadresource = async ({ uri }) => uri === "ui://pitot/panels.html"
     ? { contents: [{ uri, mimeType: "text/html;profile=mcp-app", text: html }] } : fail(`Unexpected resources/read: ${uri}`);
   bridge.onopenlink = async ({ url }) => fail(`Unexpected ui/open-link: ${url}`);
   bridge.onrequestdisplaymode = async ({ mode }) => mode === "inline" ? { mode } : fail(`Unexpected display mode: ${mode}`);

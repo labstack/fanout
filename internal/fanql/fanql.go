@@ -1,10 +1,10 @@
-// Package fanql parses the text form of Fanout's structured telemetry queries.
+// Package fanql parses the text form of Pitot's structured telemetry queries.
 package fanql
 
 import (
 	"sort"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 type Options struct {

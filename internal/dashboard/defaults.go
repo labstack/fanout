@@ -1,6 +1,6 @@
 package dashboard
 
-import "github.com/labstack/fanout/internal/query"
+import "github.com/labstack/pitot/internal/query"
 
 // DefaultSpec is every owner's first dashboard: the shape of the whole system,
 // filterable to one service.
@@ -37,7 +37,7 @@ func DefaultSpec() query.Dashboard {
 }
 
 func receiverDescription(receiver, description string) string {
-	return description + " Supplied by the Collector `" + receiver + "` receiver. [Collector setup](https://fanout.run/docs/get-started/send-telemetry#watch-hosts-containers-and-endpoints)."
+	return description + " Supplied by the Collector `" + receiver + "` receiver. [Collector setup](https://pitot.dev/docs/get-started/send-telemetry#watch-hosts-containers-and-endpoints)."
 }
 
 func capacityPanel(id, title, receiver, description, sql string) query.Panel {

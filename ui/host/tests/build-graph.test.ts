@@ -7,7 +7,7 @@ import { expect, it } from "vitest";
 import { appBuildBoundary, blobWorkerOnly } from "../build/apps";
 
 it.each(["auth.ts", "auth-session.ts", "api.ts", "observability.ts", "mcp-app-frame.tsx", "router.ts", "routes/index.ts", "app.tsx", "main.tsx", "app-context.tsx", "provider-context.tsx", "dashboards/api.ts"].flatMap(file => [false, true].map(transitive => ({ file, transitive }))))("rejects forbidden runtime imports: $file transitive=$transitive", async ({ file, transitive }) => {
-  const root = mkdtempSync(resolve(tmpdir(), "fanout-graph-"));
+  const root = mkdtempSync(resolve(tmpdir(), "pitot-graph-"));
   try {
     mkdirSync(resolve(root, "src/mcp-apps"), { recursive: true }); mkdirSync(resolve(root, "src/dashboards"));
     mkdirSync(resolve(root, "src", file, ".."), { recursive: true });
@@ -18,7 +18,7 @@ it.each(["auth.ts", "auth-session.ts", "api.ts", "observability.ts", "mcp-app-fr
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 it("permits shared rendering and erased API contracts", async () => {
-  const root = mkdtempSync(resolve(tmpdir(), "fanout-graph-"));
+  const root = mkdtempSync(resolve(tmpdir(), "pitot-graph-"));
   try {
     mkdirSync(resolve(root, "src/mcp-apps"), { recursive: true }); mkdirSync(resolve(root, "src/dashboards"));
     writeFileSync(resolve(root, "src/dashboards/api.ts"), "export type QueryBody={name:string}; export const secret=1;");
@@ -28,7 +28,7 @@ it("permits shared rendering and erased API contracts", async () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 it("builds the real app graph into one self-contained HTML artifact", async () => {
-  const dir = mkdtempSync(resolve(tmpdir(), "fanout-app-"));
+  const dir = mkdtempSync(resolve(tmpdir(), "pitot-app-"));
   const previousEnvironment = process.env.NODE_ENV; process.env.NODE_ENV = "production";
   try {
     await build({ configFile: resolve("vite.apps.config.ts"), build: { outDir: dir } });
@@ -44,7 +44,7 @@ it("builds the real app graph into one self-contained HTML artifact", async () =
 }, 30_000);
 
 it("executes the Vite-emitted worker wrapper using a Blob URL and surfaces initialization failure", async () => {
-  const root = mkdtempSync(resolve(tmpdir(), "fanout-worker-"));
+  const root = mkdtempSync(resolve(tmpdir(), "pitot-worker-"));
   try {
     writeFileSync(resolve(root, "map.worker.ts"), "self.onmessage=()=>self.postMessage({nodes:[]});");
     writeFileSync(resolve(root, "main.ts"), "import MapWorker from './map.worker?worker&inline';new MapWorker();");

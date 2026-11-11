@@ -8,7 +8,7 @@ const checker = join(import.meta.dir, "ui-boundaries.mjs");
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 function check(files: Record<string, string>) {
-  const root = mkdtempSync(join(tmpdir(), "fanout-boundary-"));
+  const root = mkdtempSync(join(tmpdir(), "pitot-boundary-"));
   roots.push(root);
   for (const [path, source] of Object.entries(files)) {
     const file = join(root, "ui", path);

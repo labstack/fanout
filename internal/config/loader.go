@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"reflect"
 	"sort"
@@ -48,14 +49,14 @@ func Load(options LoadOptions) (Config, error) {
 	if environ == nil {
 		environ = os.Environ()
 	}
-	values, err := environmentValues(environ, known)
+	values, err := environmentValues(ResolveEnvironment(environ), known)
 	if err != nil {
 		return Config{}, err
 	}
 	for _, spec := range specs {
 		// Shared vendor settings, including secret mounts, belong only to the
-		// explicitly selected provider. Fanout-owned secrets always resolve.
-		if provider := providerForEnvironment(spec.env); provider != "" && provider != values["FANOUT_AI_PROVIDER"] {
+		// explicitly selected provider. Pitot-owned secrets always resolve.
+		if provider := providerForEnvironment(spec.env); provider != "" && provider != values["PITOT_AI_PROVIDER"] {
 			continue
 		}
 		text := values[spec.env]
@@ -97,6 +98,42 @@ func Load(options LoadOptions) (Config, error) {
 	return cfg, nil
 }
 
+// ResolveEnvironment provides the one-alpha-release legacy environment bridge.
+// Presence, including an empty value, takes precedence over the old spelling.
+// It reports only names, never values or secret file paths.
+func ResolveEnvironment(environ []string) []string {
+	present := make(map[string]bool, len(environ))
+	for _, assignment := range environ {
+		name, _, _ := strings.Cut(assignment, "=")
+		present[name] = true
+	}
+	resolved := make([]string, 0, len(environ))
+	var used []string
+	for _, assignment := range environ {
+		name, value, found := strings.Cut(assignment, "=")
+		if strings.HasPrefix(name, "FANOUT_") {
+			primary := "PITOT_" + strings.TrimPrefix(name, "FANOUT_")
+			if present[primary] {
+				continue
+			}
+			if value != "" && !isPlatformInjectedEnvironment(primary) {
+				used = append(used, name)
+			}
+			name = primary
+		}
+		if found {
+			resolved = append(resolved, name+"="+value)
+		} else {
+			resolved = append(resolved, name)
+		}
+	}
+	if len(used) > 0 {
+		sort.Strings(used)
+		slog.Warn("deprecated environment variables; use PITOT_ equivalents before the next alpha release", "names", strings.Join(used, ", "))
+	}
+	return resolved
+}
+
 func configFieldSpecs() ([]fieldSpec, error) {
 	return fieldSpecs(reflect.TypeOf(Config{}))
 }
@@ -116,7 +153,7 @@ func fieldSpecs(typ reflect.Type) ([]fieldSpec, error) {
 		if name == "" {
 			return nil, fmt.Errorf("configuration field %s must declare an env tag", field.Name)
 		}
-		if !strings.HasPrefix(name, "FANOUT_") && providerForEnvironment(name) == "" {
+		if !strings.HasPrefix(name, "PITOT_") && providerForEnvironment(name) == "" {
 			return nil, fmt.Errorf("environment variable %s is outside the supported configuration contract", name)
 		}
 		secret := field.Tag.Get("secret") == "true"
@@ -157,7 +194,7 @@ func environmentValues(environ []string, known map[string]bool) (map[string]stri
 	for _, assignment := range environ {
 		name, value, found := strings.Cut(assignment, "=")
 		isKnown := known[name]
-		if !isKnown && (!strings.HasPrefix(name, "FANOUT_") || isPlatformInjectedEnvironment(name)) {
+		if !isKnown && (!strings.HasPrefix(name, "PITOT_") || isPlatformInjectedEnvironment(name)) {
 			continue
 		}
 		if !found {
@@ -174,17 +211,17 @@ func environmentValues(environ []string, known map[string]bool) (map[string]stri
 	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
-		return nil, fmt.Errorf("unknown Fanout environment variables: %s", strings.Join(unknown, ", "))
+		return nil, fmt.Errorf("unknown Pitot environment variables: %s", strings.Join(unknown, ", "))
 	}
 	return values, nil
 }
 
 func isPlatformInjectedEnvironment(name string) bool {
-	return name == "FANOUT_SERVICE_HOST" ||
-		name == "FANOUT_SERVICE_PORT" ||
-		strings.HasPrefix(name, "FANOUT_SERVICE_PORT_") ||
-		name == "FANOUT_PORT" ||
-		strings.HasPrefix(name, "FANOUT_PORT_")
+	return name == "PITOT_SERVICE_HOST" ||
+		name == "PITOT_SERVICE_PORT" ||
+		strings.HasPrefix(name, "PITOT_SERVICE_PORT_") ||
+		name == "PITOT_PORT" ||
+		strings.HasPrefix(name, "PITOT_PORT_")
 }
 
 func parseTextValue(value string, typ reflect.Type) (any, error) {

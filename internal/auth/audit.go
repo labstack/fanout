@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	appid "github.com/labstack/fanout/internal/id"
-	appmetrics "github.com/labstack/fanout/internal/metrics"
+	appid "github.com/labstack/pitot/internal/id"
+	appmetrics "github.com/labstack/pitot/internal/metrics"
 )
 
 type AuditEventType string

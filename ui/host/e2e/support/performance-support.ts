@@ -32,7 +32,7 @@ export function performanceReadinessCause(body: { results?: { id: string; status
 // Self-contained callback: Playwright serializes this into the page. No Node
 // timestamps, locator assertions, scrolling, response parsing or DEV hooks.
 export function allPanelsPainted(panels: { id: string; viz: string }[]): number | false {
-  const state = window as typeof window & { __fanoutPerformanceReadyFrames?: number };
+  const state = window as typeof window & { __pitotPerformanceReadyFrames?: number };
   const visible = (node: HTMLElement) => {
     const rect = node.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0 || rect.top < 0 || rect.left < 0 || rect.bottom > innerHeight || rect.right > innerWidth) return false;
@@ -65,6 +65,6 @@ export function allPanelsPainted(panels: { id: string; viz: string }[]): number 
     }
     return true;
   });
-  state.__fanoutPerformanceReadyFrames = ready ? (state.__fanoutPerformanceReadyFrames ?? 0) + 1 : 0;
-  return state.__fanoutPerformanceReadyFrames >= 2 ? performance.now() : false;
+  state.__pitotPerformanceReadyFrames = ready ? (state.__pitotPerformanceReadyFrames ?? 0) + 1 : 0;
+  return state.__pitotPerformanceReadyFrames >= 2 ? performance.now() : false;
 }

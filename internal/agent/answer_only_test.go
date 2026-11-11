@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"github.com/labstack/fanout/internal/dashboard"
-	fanoutmcp "github.com/labstack/fanout/internal/mcp"
+	"github.com/labstack/pitot/internal/dashboard"
+	pitotmcp "github.com/labstack/pitot/internal/mcp"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -13,8 +13,8 @@ import (
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/auth"
-	controlstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/auth"
+	controlstore "github.com/labstack/pitot/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -177,7 +177,7 @@ func TestAnswerOnlyExecutorRequiresClassification(t *testing.T) {
 	}
 }
 func TestAnswerOnlyRealToolClassificationGolden(t *testing.T) {
-	registry, err := NewToolRegistry(t.Context(), fanoutmcp.NewWithIntelligence(registryQueries{}, &dashboard.Service{}, nil, registryIntelligence{}, "test").MCP())
+	registry, err := NewToolRegistry(t.Context(), pitotmcp.NewWithIntelligence(registryQueries{}, &dashboard.Service{}, nil, registryIntelligence{}, "test").MCP())
 	if err != nil {
 		t.Fatal(err)
 	}

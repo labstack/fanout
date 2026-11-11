@@ -1,4 +1,4 @@
-import { fanoutTheme } from "../../../../theme";
+import { pitotTheme } from "../../../../theme";
 import { MantineProvider } from "@mantine/core";
 import { within } from "@testing-library/dom";
 import { act } from "react";
@@ -38,7 +38,7 @@ const resultFor = (name: string, text: string): PanelResult => ({
   frame: { columns: [{ name, type: "string", role: "dimension" }], values: [[text]], rows: 1 },
 });
 const render = async (panel: Panel, result: PanelResult, traceLinks?: "button") => {
-  await act(async () => root.render(<MantineProvider theme={fanoutTheme}><RowPanel panel={panel} result={result} dark={false} height={200} traceLinks={traceLinks} /></MantineProvider>));
+  await act(async () => root.render(<MantineProvider theme={pitotTheme}><RowPanel panel={panel} result={result} dark={false} height={200} traceLinks={traceLinks} /></MantineProvider>));
 };
 const marks = () => [...container.querySelectorAll("tbody mark")].map(mark => mark.textContent);
 
@@ -52,7 +52,7 @@ it.each(["rows", "formatted table"])("builds a %s trace href byte-identical to t
     const search = {...parseSearch(router.options.parseSearch!(window.location.search)), drill: JSON.stringify(target)};
     const expected = router.buildLocation({to: "/dashboards/$dashboardId", params: {dashboardId: "d"}, search: toSearchParams(search)});
     if (surface === "rows") await render(p, result);
-    else await act(async () => root.render(<MantineProvider theme={fanoutTheme}><TableViz panel={p} result={result} height={200} /></MantineProvider>));
+    else await act(async () => root.render(<MantineProvider theme={pitotTheme}><TableViz panel={p} result={result} height={200} /></MantineProvider>));
     const link = container.querySelector<HTMLAnchorElement>("a[href]");
     expect(link).not.toBeNull();
     expect(link!.href).toBe(new URL(expected.href, window.location.origin).href);

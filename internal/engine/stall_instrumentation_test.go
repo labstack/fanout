@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -76,7 +76,7 @@ func TestWritesDoNotDrawFromTheReadPool(t *testing.T) {
 	}
 
 	// The read pool is the one worth watching, so it is the one the gauges read.
-	if got := int(metricFamily(t, "fanout_duckdb_pool_max_open").Metric[0].GetGauge().GetValue()); got != 4 {
+	if got := int(metricFamily(t, "pitot_duckdb_pool_max_open").Metric[0].GetGauge().GetValue()); got != 4 {
 		t.Fatalf("pool gauges read a pool with MaxOpenConnections = %d, want the read pool's 4", got)
 	}
 }
@@ -156,7 +156,7 @@ func TestClosingADisplacedDuckLeavesTheGaugeSourceAlone(t *testing.T) {
 	if err := first.Close(); err != nil {
 		t.Fatalf("close first: %v", err)
 	}
-	if got := int(metricFamily(t, "fanout_duckdb_pool_max_open").Metric[0].GetGauge().GetValue()); got != 3 {
+	if got := int(metricFamily(t, "pitot_duckdb_pool_max_open").Metric[0].GetGauge().GetValue()); got != 3 {
 		t.Fatalf("pool gauges read MaxOpenConnections = %d after a displaced Duck closed, want the live pool's 3", got)
 	}
 }
@@ -217,7 +217,7 @@ func TestStatementTimerExcludesTheWaitForAConnection(t *testing.T) {
 // statementSeconds reports the histogram's running total.
 func statementSeconds(t *testing.T) float64 {
 	t.Helper()
-	return metricFamily(t, "fanout_duckdb_statement_seconds").Metric[0].GetHistogram().GetSampleSum()
+	return metricFamily(t, "pitot_duckdb_statement_seconds").Metric[0].GetHistogram().GetSampleSum()
 }
 
 // Close is reached from error paths and from test cleanup, where a Duck may

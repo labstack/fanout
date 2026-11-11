@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/labstack/fanout/internal/telemetry/semconv"
+	"github.com/labstack/pitot/internal/telemetry/semconv"
 	"github.com/parquet-go/parquet-go"
 	"github.com/zeebo/xxh3"
 )
@@ -186,6 +186,7 @@ const metricNoRecordedValue = 1
 
 // spillPrefix starts the footer key whose value counts the rows whose value
 // of a key could not be converted to its type.
+// Preserve the published footer spelling so existing batches remain readable.
 const spillPrefix = "fanout.spill."
 
 // Spans keep trace locality, which the trace index depends on. Logs and

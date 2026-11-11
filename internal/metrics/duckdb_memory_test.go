@@ -17,7 +17,7 @@ func gatherDuckDBMemory(t *testing.T) map[string]float64 {
 	}
 	out := map[string]float64{}
 	for _, family := range families {
-		if family.GetName() != "fanout_duckdb_memory_bytes" {
+		if family.GetName() != "pitot_duckdb_memory_bytes" {
 			continue
 		}
 		for _, metric := range family.GetMetric() {
@@ -94,7 +94,7 @@ func TestDuckDBMemoryIsSafeUnderConcurrentScrapes(t *testing.T) {
 					return
 				}
 				for _, family := range families {
-					if family.GetName() != "fanout_duckdb_memory_bytes" {
+					if family.GetName() != "pitot_duckdb_memory_bytes" {
 						continue
 					}
 					if n := len(family.GetMetric()); n != 3 {
@@ -126,7 +126,7 @@ func gatherMemoryTimestamp(t *testing.T) float64 {
 		t.Fatal(err)
 	}
 	for _, family := range families {
-		if family.GetName() == "fanout_duckdb_memory_last_success_timestamp_seconds" {
+		if family.GetName() == "pitot_duckdb_memory_last_success_timestamp_seconds" {
 			return family.Metric[0].GetGauge().GetValue()
 		}
 	}

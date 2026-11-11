@@ -25,9 +25,9 @@ export const Error: Story = { parameters: { scenario: { signedOut: true, signInE
 } };
 export const Email: Story = { play: async ({ canvas, userEvent }) => {
   const email = await canvas.findByRole("textbox", { name: "Email" });
-  await expect(canvas.getByRole("heading", { name: "Sign in to Fanout" })).toBeVisible();
+  await expect(canvas.getByRole("heading", { name: "Sign in to Pitot" })).toBeVisible();
   await expect(canvas.getByText(/We'll email you a 6-digit code\./)).toBeVisible();
-  await expect(canvas.getByRole("link", { name: "Docs" })).toHaveAttribute("href", "https://fanout.run/docs");
+  await expect(canvas.getByRole("link", { name: "Docs" })).toHaveAttribute("href", "https://pitot.dev/docs");
   await expect(email).toBeRequired();
   await expect(email).toHaveAttribute("autocomplete", "email");
   await userEvent.click(canvas.getByRole("button", { name: "Continue with email" }));

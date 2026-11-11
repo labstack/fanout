@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/intelligence"
+	"github.com/labstack/pitot/internal/intelligence"
 )
 
 // IntelligenceSnapshots is the read side of the detector used by HTTP and

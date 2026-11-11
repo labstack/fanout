@@ -5,15 +5,15 @@ import { cardSelector, readyCard, settle } from "../../support/accessibility-sup
 import type { DashboardSpec } from "../../../../panels/types";
 
 // Use either the real seeded server or an existing instance, without intercepts.
-const externalBaseURL = process.env.FANOUT_LANDING_BASE_URL;
-test.skip(process.env.FANOUT_LANDING_CAPTURES !== "1", "set FANOUT_LANDING_CAPTURES=1 to refresh landing assets");
+const externalBaseURL = process.env.PITOT_LANDING_BASE_URL;
+test.skip(process.env.PITOT_LANDING_CAPTURES !== "1", "set PITOT_LANDING_CAPTURES=1 to refresh landing assets");
 test.use({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
 if (externalBaseURL) test.use({
   baseURL: externalBaseURL,
   storageState: async ({}, use) => {
-    const cookie = process.env.FANOUT_LANDING_SESSION_COOKIE ?? "";
+    const cookie = process.env.PITOT_LANDING_SESSION_COOKIE ?? "";
     const match = /^([!#$%&'*+.^_`|~\w-]+)=([^;\s]+)$/.exec(cookie);
-    if (!match) throw new Error("FANOUT_LANDING_SESSION_COOKIE must be a nonempty name=value session cookie");
+    if (!match) throw new Error("PITOT_LANDING_SESSION_COOKIE must be a nonempty name=value session cookie");
     const url = new URL(externalBaseURL);
     await use({ cookies: [{
       name: match[1], value: match[2], domain: url.hostname, path: "/",
@@ -63,7 +63,7 @@ test("capture the README overview", async ({ page, request }, info) => {
     else await page.screenshot({ ...options, fullPage: false });
   };
 
-  const seedWindow = externalBaseURL ? null : JSON.parse(process.env.FANOUT_E2E_PERFORMANCE_WINDOW ?? "null") as { to: string } | null;
+  const seedWindow = externalBaseURL ? null : JSON.parse(process.env.PITOT_E2E_PERFORMANCE_WINDOW ?? "null") as { to: string } | null;
   if (!externalBaseURL) {
     if (!seedWindow) throw new Error("Global setup did not provide the seed window");
     await page.clock.setFixedTime(new Date(seedWindow.to));

@@ -1,0 +1,1 @@
+import{t as e}from"./settings-BhplbQY-.js";var t=e;export{t as component};

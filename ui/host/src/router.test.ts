@@ -37,7 +37,7 @@ it('copies full-screen compare and drill links with exact instants and distinct 
  for(const service of ['$__all',[],[''],['checkout'],['checkout','payments'],'', 'a,b','[checkout]','{"literal":true}','{"values":[]}']) {
   const search={from,to,compare:'1' as const,view:'logs',drill,vars:{service}};
   const location=router.buildLocation({to:'/dashboards/$dashboardId',params:{dashboardId:'d'},search:toSearchParams(search)});
-  expect(parseSearch(router.options.parseSearch!(new URL(location.href,'https://fanout.test').search))).toEqual(search);
+  expect(parseSearch(router.options.parseSearch!(new URL(location.href,'https://pitot.test').search))).toEqual(search);
  }
 });
 
@@ -47,5 +47,5 @@ it("passes drill as an object for a single router serialization", () => {
   const search = toSearchParams({drill: JSON.stringify(target)});
   expect(search.drill).toEqual(target);
   const location = router.buildLocation({to: "/dashboards/$dashboardId", params: {dashboardId: "d"}, search});
-  expect(new URL(location.href, "https://fanout.test").searchParams.get("drill")).toBe(JSON.stringify(target));
+  expect(new URL(location.href, "https://pitot.test").searchParams.get("drill")).toBe(JSON.stringify(target));
 });

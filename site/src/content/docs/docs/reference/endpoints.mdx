@@ -1,6 +1,6 @@
 ---
 title: Endpoints
-description: The operational HTTP endpoints a Fanout instance exposes, and what each one requires.
+description: The operational HTTP endpoints a Pitot instance exposes, and what each one requires.
 summary: Health, readiness, metrics, profiling and the protocol endpoints, with the credential each expects.
 read_when:
   - You are configuring a load balancer, a probe or a Prometheus scrape.
@@ -9,7 +9,7 @@ status: preview
 ---
 
 Everything below is served by the same HTTP listener as the browser client, on
-`FANOUT_ADDR` (`127.0.0.1:7520` by default; the image sets `:7520`).
+`PITOT_ADDR` (`127.0.0.1:7520` by default; the image sets `:7520`).
 
 [HTTP routes](/docs/reference/api) lists every route and the credential it requires.
 
@@ -26,7 +26,7 @@ Use `/healthz` for restart decisions and `/readyz` for traffic decisions.
 when an idle engine does not answer a ping. A query running past its deadline
 never fails it: a restart would not stop the query from running again.
 
-Fanout exits with status 1 on a fatal query engine error, or when a stall
+Pitot exits with status 1 on a fatal query engine error, or when a stall
 that fails `/healthz` lasts another 25 seconds. Run it under a
 supervisor that restarts on exit: Docker or Compose with
 `restart: unless-stopped`, systemd with `Restart=on-failure`, or Kubernetes.
@@ -42,13 +42,13 @@ it.
 
 `/metrics` is Prometheus exposition. It accepts a service credential as well
 as an admin session, which is how a scraper reaches it without a browser login;
-set `FANOUT_METRICS_TOKEN`. `FANOUT_METRICS_PUBLIC=true` permits unauthenticated
+set `PITOT_METRICS_TOKEN`. `PITOT_METRICS_PUBLIC=true` permits unauthenticated
 scrapes and emits a startup warning.
 
 Metrics reveal traffic volumes, query activity and resource use. Keep `/metrics`
-private or authenticate scrapes with `FANOUT_METRICS_TOKEN`.
+private or authenticate scrapes with `PITOT_METRICS_TOKEN`.
 
-`/debug/pprof/*` is off unless `FANOUT_PPROF_ENABLED=true`, and is admin-only
+`/debug/pprof/*` is off unless `PITOT_PPROF_ENABLED=true`, and is admin-only
 even then. Profiling output can contain memory contents, which is why it sits
 behind `operations:read` rather than `telemetry:read`.
 
@@ -64,7 +64,7 @@ behind `operations:read` rather than `telemetry:read`.
 
 ## Ingest
 
-Both OTLP transports share `FANOUT_ADDR` with the application and require
+Both OTLP transports share `PITOT_ADDR` with the application and require
 `Authorization: Bearer <ingest-token>`. Browser sessions and MCP OAuth tokens
 cannot authorize ingest, and an ingest token cannot authorize browser API calls.
 
@@ -91,11 +91,11 @@ transports from outside the private network.
 Never ship the shared ingest token in browser or mobile code. Send public-client
 telemetry through a Collector or gateway you control. That gateway handles
 client authentication, rate limits and privacy controls, then forwards to
-private Fanout. Propagate `traceparent` and `tracestate` to correlate backend
+private Pitot. Propagate `traceparent` and `tracestate` to correlate backend
 requests.
 
 For gRPC, forward HTTP/2 to the backend: h2c for plaintext or HTTP/2 over TLS.
-Set `FANOUT_PUBLIC_URL` to the public HTTPS origin. Preserve the public Host
+Set `PITOT_PUBLIC_URL` to the public HTTPS origin. Preserve the public Host
 header for MCP and trust forwarded client IPs only from configured proxy CIDRs.
 See [TLS](/docs/guides/tls) and [hardening](/docs/guides/hardening).
 

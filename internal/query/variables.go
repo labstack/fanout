@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/queryrows"
 )
 
 type Option struct {

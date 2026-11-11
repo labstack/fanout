@@ -24,7 +24,7 @@ set -euo pipefail
 readonly RELEASE_TAG_PATTERN='^v([0-9]{4})\.([1-9]|1[0-2])\.(0|[1-9][0-9]*)(-(alpha|beta|rc))?$'
 readonly FORMAT_SOURCE=internal/telemetry/parquet.go
 readonly MIGRATIONS_DIR=internal/db/migrations
-readonly UPGRADE_GUIDE=https://fanout.run/docs/guides/upgrade
+readonly UPGRADE_GUIDE=https://pitot.dev/docs/guides/upgrade
 
 die() {
   printf 'release-notes: %s\n' "$1" >&2

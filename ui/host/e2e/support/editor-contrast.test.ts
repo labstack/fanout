@@ -1,7 +1,7 @@
 import axe from "axe-core";
 import { defaultCssVariablesResolver, DEFAULT_THEME, mergeMantineTheme } from "@mantine/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fanoutCssVariables, fanoutTheme } from "../../../theme";
+import { pitotCssVariables, pitotTheme } from "../../../theme";
 import { editorOverlapTargets, proveEditorText } from "./editor-contrast";
 
 beforeEach(() => {
@@ -13,9 +13,9 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); document.body.innerHTML = ""; });
 
 function validationProblem(scheme: "light" | "dark") {
-  const theme = mergeMantineTheme(DEFAULT_THEME, fanoutTheme);
+  const theme = mergeMantineTheme(DEFAULT_THEME, pitotTheme);
   const mantine = defaultCssVariablesResolver(theme);
-  const variables: Record<string, string> = { ...mantine.variables, ...mantine[scheme], ...fanoutCssVariables(theme)[scheme] };
+  const variables: Record<string, string> = { ...mantine.variables, ...mantine[scheme], ...pitotCssVariables(theme)[scheme] };
   const resolve = (value: string): string => value.startsWith("var(") ? resolve(variables[value.slice(4, -1)]) : value;
   // Mantine Alert's default variant paints a translucent semantic background;
   // its message uses --mantine-color-black/white according to the scheme.

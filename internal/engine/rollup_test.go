@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/pitot/internal/config"
 )
 
 func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {

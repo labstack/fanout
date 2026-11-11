@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/queryrows"
 	"log/slog"
 	"strings"
 	"sync/atomic"
@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 type slowBatchEngine struct {
@@ -329,12 +329,12 @@ func TestPanelOperationalErrorsKeepDetailsInLogs(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
 	defer slog.SetDefault(old)
 	detail := strings.Repeat("memory pressure; ", 80) + "final diagnostic"
-	got := failed(Result{ID: "p"}, fmt.Errorf("IO Error at /srv/fanout/private.parquet: %s", detail), nil)
-	if strings.Contains(got.Error, "/srv/fanout/private.parquet") ||
+	got := failed(Result{ID: "p"}, fmt.Errorf("IO Error at /srv/pitot/private.parquet: %s", detail), nil)
+	if strings.Contains(got.Error, "/srv/pitot/private.parquet") ||
 		got.Error != ReadFailure {
 		t.Fatalf("message lost or leaked: %q", got.Error)
 	}
-	if !strings.Contains(logs.String(), "final diagnostic") || !strings.Contains(logs.String(), "/srv/fanout/private.parquet") {
+	if !strings.Contains(logs.String(), "final diagnostic") || !strings.Contains(logs.String(), "/srv/pitot/private.parquet") {
 		t.Fatalf("missing operational cause in logs: %s", logs.String())
 	}
 }
@@ -344,7 +344,7 @@ func TestPanelErrorsKeepLongLogBindingDiagnosticsRedacted(t *testing.T) {
 	n := fixtureStart.UnixNano()
 	commit(t, repo, nil, []telemetry.Log{{Namespace: "shop", Body: "token=bodysecret failed", BodyTemplate: "token=templatesecret failed", EventUnixNanos: n, IngestedAt: n}})
 	e := NewExecutor(engine, 30)
-	missing := strings.Repeat("missing_detail_", 60) + " /srv/fanout/private.parquet final diagnostic"
+	missing := strings.Repeat("missing_detail_", 60) + " /srv/pitot/private.parquet final diagnostic"
 	p := Panel{ID: "p", Title: "SQL", Viz: "table", SQL: fmt.Sprintf(`SELECT body, body_template, %q FROM logs WHERE $__window(time)`, missing)}
 	// Exercise the execution error boundary directly: Run's validation normally
 	// catches binding failures before execution, using the same native binder.
@@ -352,7 +352,7 @@ func TestPanelErrorsKeepLongLogBindingDiagnosticsRedacted(t *testing.T) {
 	if got.Status != StatusError || strings.Contains(got.Error, "Binder Error") || len(got.Error) <= 500 || !strings.Contains(got.Error, "final diagnostic") {
 		t.Fatalf("binding diagnostic lost: %+v", got)
 	}
-	if strings.Contains(got.Error, "/srv/fanout/private.parquet") || strings.Contains(got.Error, "bodysecret") || strings.Contains(got.Error, "templatesecret") {
+	if strings.Contains(got.Error, "/srv/pitot/private.parquet") || strings.Contains(got.Error, "bodysecret") || strings.Contains(got.Error, "templatesecret") {
 		t.Fatalf("unsafe binding diagnostic: %q", got.Error)
 	}
 }

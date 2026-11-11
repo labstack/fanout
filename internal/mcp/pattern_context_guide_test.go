@@ -1,7 +1,7 @@
 package mcp
 
 import (
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 	"reflect"
 	"strings"
 	"testing"

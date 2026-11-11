@@ -1,5 +1,5 @@
 // dbmigrate applies the same embedded control migrations and database guard as
-// Fanout startup, without starting the server or loading runtime configuration.
+// Pitot startup, without starting the server or loading runtime configuration.
 package main
 
 import (
@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/store"
 )
 
 func main() {

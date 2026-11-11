@@ -5,7 +5,7 @@ Date: 2026-10-30
 
 ## Context
 
-Fanout ships frequently and its maturity is better described by date and stage
+Pitot ships frequently and its maturity is better described by date and stage
 than by semantic version numbers.
 
 ## Decision

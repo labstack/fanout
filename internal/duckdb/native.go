@@ -1,4 +1,4 @@
-// Package duckdb registers the extensions compiled into Fanout's pinned
+// Package duckdb registers the extensions compiled into Pitot's pinned
 // DuckDB engine. Building requires scripts/with-duckdb.sh; there is one engine.
 package duckdb
 
@@ -23,7 +23,7 @@ const SourceCommit = "d54cbbe3df"
 
 func init() {
 	if C.GoString(C.duckdb_library_version()) != Version {
-		panic("Fanout requires DuckDB " + Version + "; build with scripts/with-duckdb.sh")
+		panic("Pitot requires DuckDB " + Version + "; build with scripts/with-duckdb.sh")
 	}
 	if C.register_extensions() != 0 {
 		panic("DuckDB static extension registration failed")

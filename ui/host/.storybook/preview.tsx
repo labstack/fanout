@@ -11,7 +11,7 @@ import { type Args, INTERNAL_DEFAULT_PROJECT_ANNOTATIONS, type Preview, type Sto
 import { UPDATE_STORY_ARGS } from "storybook/internal/core-events";
 import { addons } from "storybook/preview-api";
 import { configure, expect, mocked, sb, spyOn } from "storybook/test";
-import { fanoutTheme, fanoutCssVariables } from "../../theme";
+import { pitotTheme, pitotCssVariables } from "../../theme";
 import { makeService, type CatalogService, type Scenario } from "../src/catalog/requests";
 import { createID } from "../src/id";
 import { storyNow } from "../src/catalog/fixtures";
@@ -83,6 +83,6 @@ const preview: Preview = {
     assertTextLayout(document.body);
     assertScrollbarsClear(document.body);
   },
-  decorators: [(Story, { globals, parameters }) => <MantineProvider key={globals.colorScheme} theme={fanoutTheme} cssVariablesResolver={fanoutCssVariables} defaultColorScheme={globals.colorScheme === "dark" ? "dark" : "light"} forceColorScheme={parameters.interactiveColorScheme ? undefined : globals.colorScheme === "dark" ? "dark" : "light"}><Story /></MantineProvider>],
+  decorators: [(Story, { globals, parameters }) => <MantineProvider key={globals.colorScheme} theme={pitotTheme} cssVariablesResolver={pitotCssVariables} defaultColorScheme={globals.colorScheme === "dark" ? "dark" : "light"} forceColorScheme={parameters.interactiveColorScheme ? undefined : globals.colorScheme === "dark" ? "dark" : "light"}><Story /></MantineProvider>],
 };
 export default preview;

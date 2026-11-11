@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 func TestMetricReplayCopyPreservesSourceAndStartTime(t *testing.T) {
@@ -98,19 +98,19 @@ func TestMetricReplayCopyPreservesSourceAndStartTime(t *testing.T) {
 func BenchmarkPanelQueries24Hours(b *testing.B) {
 	b.StopTimer()
 	var data panelBenchData
-	input := os.Getenv("FANOUT_PANEL_BENCH_DATA_DIR")
+	input := os.Getenv("PITOT_PANEL_BENCH_DATA_DIR")
 	if input != "" {
 		volume := 1
-		if raw := os.Getenv("FANOUT_PANEL_BENCH_VOLUME"); raw != "" {
+		if raw := os.Getenv("PITOT_PANEL_BENCH_VOLUME"); raw != "" {
 			var err error
 			volume, err = strconv.Atoi(raw)
 			if err != nil || (volume != 1 && volume != 10) {
-				b.Fatal("FANOUT_PANEL_BENCH_VOLUME must be 1 or 10")
+				b.Fatal("PITOT_PANEL_BENCH_VOLUME must be 1 or 10")
 			}
 		}
 		data = preparePanelReplay(b, input, volume)
 	} else {
-		if os.Getenv("FANOUT_PANEL_BENCH_VOLUME") != "" {
+		if os.Getenv("PITOT_PANEL_BENCH_VOLUME") != "" {
 			b.Fatal("volume requires replay input")
 		}
 		data = preparePanelRegression(b)

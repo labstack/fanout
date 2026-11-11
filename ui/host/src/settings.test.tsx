@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Settings from "./settings";
 
 const app = vi.hoisted(() => ({ agentAvailable: true }));
-vi.mock("./app-context", () => ({ useFanoutApp: () => app }));
+vi.mock("./app-context", () => ({ usePitotApp: () => app }));
 beforeEach(() => { app.agentAvailable = true; });
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -116,14 +116,14 @@ describe("connect telemetry", () => {
     try {
       await vi.waitFor(() => expect(document.body.textContent).toContain("Connected agents"));
       expect(document.body.textContent?.includes("Chat is disabled")).toBe(!available);
-      expect(document.body.textContent?.includes("FANOUT_AI_PROVIDER")).toBe(!available);
+      expect(document.body.textContent?.includes("PITOT_AI_PROVIDER")).toBe(!available);
       if (!available) {
         expect(document.body.textContent).toContain("anthropic");
         expect(document.body.textContent).toContain("ANTHROPIC_API_KEY");
         expect(document.body.textContent).toContain("openai");
         expect(document.body.textContent).toContain("OPENAI_API_KEY");
         expect(document.body.textContent).toContain("Claude, Codex, or ChatGPT");
-        expect(document.querySelector<HTMLAnchorElement>('a[href="https://fanout.run/docs/guides/mcp"]')).not.toBeNull();
+        expect(document.querySelector<HTMLAnchorElement>('a[href="https://pitot.dev/docs/guides/mcp"]')).not.toBeNull();
       }
     } finally { await act(async () => root.unmount()); }
   });
@@ -142,26 +142,26 @@ describe("connect telemetry", () => {
   });
 
   it("lets the operator use a different collector route without server configuration", async () => {
-    fetchMock.mockImplementation(async () => json({ ...connection, suggested_endpoint: "https://fanout.example.com" }));
+    fetchMock.mockImplementation(async () => json({ ...connection, suggested_endpoint: "https://pitot.example.com" }));
     const root = await mount();
-    await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>('input[aria-label="Endpoint"]')?.value).toBe("https://fanout.example.com"));
+    await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>('input[aria-label="Endpoint"]')?.value).toBe("https://pitot.example.com"));
     const endpoint = document.querySelector<HTMLInputElement>('input[aria-label="Endpoint"]');
     if (!endpoint) throw new Error("endpoint input not found");
-    await act(async () => setValue(endpoint, "https://fanout.internal.example.com"));
-    expect(document.body.textContent).toContain('endpoint: "https://fanout.internal.example.com:443"');
-    expect(document.body.textContent).not.toContain('endpoint: "https://fanout.example.com:443"');
+    await act(async () => setValue(endpoint, "https://pitot.internal.example.com"));
+    expect(document.body.textContent).toContain('endpoint: "https://pitot.internal.example.com:443"');
+    expect(document.body.textContent).not.toContain('endpoint: "https://pitot.example.com:443"');
     await act(async () => root.unmount());
   });
 
   it("keeps generated configuration valid while the endpoint field is empty", async () => {
-    fetchMock.mockImplementation(async () => json({ ...connection, suggested_endpoint: "https://fanout.example.com" }));
+    fetchMock.mockImplementation(async () => json({ ...connection, suggested_endpoint: "https://pitot.example.com" }));
     const root = await mount();
     await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>('input[aria-label="Endpoint"]')).not.toBeNull());
     const endpoint = document.querySelector<HTMLInputElement>('input[aria-label="Endpoint"]');
     if (!endpoint) throw new Error("endpoint input not found");
     await act(async () => setValue(endpoint, "   "));
     expect(endpoint.value).toBe("   ");
-    expect(document.body.textContent).toContain('endpoint: "https://fanout.example.com:443"');
+    expect(document.body.textContent).toContain('endpoint: "https://pitot.example.com:443"');
     await act(async () => root.unmount());
   });
 
@@ -404,7 +404,7 @@ describe("connected agents", () => {
     agentsFetchMock.mockImplementation(async () => json({ connections: [] }));
     const root = await mount();
     await vi.waitFor(() => expect(document.body.textContent).toContain("No agents connected"));
-    expect(document.querySelector<HTMLAnchorElement>('a[href="https://fanout.run/docs/guides/mcp"]')?.textContent).toBe("Connect an agent over MCP");
+    expect(document.querySelector<HTMLAnchorElement>('a[href="https://pitot.dev/docs/guides/mcp"]')?.textContent).toBe("Connect an agent over MCP");
     await act(async () => root.unmount());
   });
 

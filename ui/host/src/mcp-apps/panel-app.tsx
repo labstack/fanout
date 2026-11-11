@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { Box, MantineProvider } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fanoutTheme, fanoutCssVariables } from "../../../theme";
+import { pitotTheme, pitotCssVariables } from "../../../theme";
 import { FragmentView } from "../dashboards/fragment-view";
 import { appTransport } from "./transport";
 import { usePanelApp } from "./use-panel-app";
@@ -20,8 +20,8 @@ export function PanelApp() {
   const systemDark = useMediaQuery("(prefers-color-scheme: dark)", undefined, { getInitialValueInEffect: false });
   const dark = host?.theme ? host.theme === "dark" : systemDark;
   const failure = toolError ?? (error ? "This view could not be loaded. Please try again." : null);
-  return <MantineProvider theme={fanoutTheme} cssVariablesResolver={fanoutCssVariables} forceColorScheme={dark ? "dark" : "light"}>
-    <QueryClientProvider client={queryClient}><div ref={wrapper} role="main" aria-label="Fanout analysis view" data-app-content>
+  return <MantineProvider theme={pitotTheme} cssVariablesResolver={pitotCssVariables} forceColorScheme={dark ? "dark" : "light"}>
+    <QueryClientProvider client={queryClient}><div ref={wrapper} role="main" aria-label="Pitot analysis view" data-app-content>
       {fragment && transport && host ? <>
         {failure && <Box m="md"><DataState state="error" error={{ message: failure }} /></Box>}
         <FragmentView fragment={fragment} dark={dark} onQuery={transport.query} drillClient={transport.drill} resolveVariables={transport.resolveVariables} hostDisplayMode={host.displayMode ?? "inline"}

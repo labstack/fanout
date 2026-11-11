@@ -6,13 +6,13 @@ Pull requests: #285, #286, #287, #295 (milestones 1 to 4)
 
 ## Goal
 
-Fanout dashboards become the best way to look at a running system. An agent
+Pitot dashboards become the best way to look at a running system. An agent
 builds a correct, professional, interactive dashboard from one sentence, on
 real telemetry, in under a minute. An SRE who knows Grafana should prefer the
 result to a board they would have built by hand, and should be able to keep
 refining it by talking to it.
 
-Grafana is the reference for breadth and interaction quality. Fanout goes past
+Grafana is the reference for breadth and interaction quality. Pitot goes past
 it in four places that follow from its architecture:
 
 1. **Authoring by intent.** The agent writes a typed, validated spec, previews
@@ -30,8 +30,8 @@ it in four places that follow from its architecture:
 
 ## Success criteria
 
-The goal is met when every item below holds on a local Fanout loaded with
-fanout-demo telemetry (the OpenTelemetry Demo: frontend, checkout, cart,
+The goal is met when every item below holds on a local Pitot loaded with
+pitot-demo telemetry (the OpenTelemetry Demo: frontend, checkout, cart,
 payment, shipping, email, recommendation, fraud-detection, accounting, flagd,
 kafka, load-generator). Each criterion names how it is measured.
 
@@ -51,7 +51,7 @@ kafka, load-generator). Each criterion names how it is measured.
 | S12 | Correctness rules from #232 | items 1, 9, 12, 14, 17, 24, 30 resolved | regression tests named per item |
 | S13 | Parity with the capability preview | every in-scope preview capability shipped; the checkout-incident and payments-database boards rebuilt from their prompts | side-by-side screenshot review at milestone 4 |
 
-The benchmark prompts, run against fanout-demo data:
+The benchmark prompts, run against pitot-demo data:
 
 1. Give me a health overview of the shop.
 2. Why is checkout slow right now?
@@ -92,9 +92,9 @@ duplicate fetches.
 
 ## Approaches considered
 
-**A. Semantic panel spec, compiled by Fanout (chosen).** The agent states what
+**A. Semantic panel spec, compiled by Pitot (chosen).** The agent states what
 each panel means: a signal, filters, measures, grouping, unit, thresholds and
-interactions. Fanout compiles the query to DuckDB SQL and the visualization to
+interactions. Pitot compiles the query to DuckDB SQL and the visualization to
 ECharts options. SQL remains available as an escape hatch for data, never for
 styling.
 
@@ -449,19 +449,19 @@ panels when no service filter applies.
   `~ latency.thresholds`) and links to the new version. The rail shows the
   request each dashboard was built from.
 - **Accessibility.** Every chart has the Inspect data table, an `aria-label`
-  summary, keyboard-reachable menus, and status conveyed by Fanout's health
+  summary, keyboard-reachable menus, and status conveyed by Pitot's health
   shapes as well as color. Categorical colors use the first four series slots,
   which pass the CVD validator; panels with more series rely on the legend and
   direct labels.
 
 ## Data for development and tests
 
-- **fanout-demo snapshot.** Copy `data/telemetry/batches/` from the demo host
-  into a scratch data directory and boot a local Fanout on it with a fresh
+- **pitot-demo snapshot.** Copy `data/telemetry/batches/` from the demo host
+  into a scratch data directory and boot a local Pitot on it with a fresh
   control database. Never copy `data/control/` or secrets. Refresh the
   snapshot when the demo's services change. When the demo runs a release
   that writes an older batch format, replay the copied batches into the
-  local instance through OTLP with a throwaway converter instead; Fanout
+  local instance through OTLP with a throwaway converter instead; Pitot
   itself keeps no legacy reader.
 - **Fixtures.** Go tests use small deterministic Parquet fixtures written by
   test helpers, so CI never depends on the snapshot.

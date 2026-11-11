@@ -11,14 +11,14 @@ and metric query speed) is deferred to a later milestone.
 
 ## Goal
 
-Fanout shows what is happening in a whole system, not only in its traced
+Pitot shows what is happening in a whole system, not only in its traced
 services, and its numbers are right at a realistic scale.
 
 A system is everything whose behaviour decides whether the software works:
 the services, what they depend on, where they run, how people reach them, and
 what changes. Everything arrives over OTLP through the OpenTelemetry
 Collector, using its standard receivers (`hostmetrics`, `docker_stats`,
-`httpcheck`) and semantic conventions. Fanout adds no per-source integrations.
+`httpcheck`) and semantic conventions. Pitot adds no per-source integrations.
 It recognises the standard names and presents them.
 
 The front page answers, in this order:
@@ -256,8 +256,8 @@ The documentation gains a guide to watching a system: a Collector
 configuration with `hostmetrics`, `docker_stats`, `httpcheck` and OTLP
 forwarding, and what each section needs. It recommends running `httpcheck`
 from a second Collector on a machine outside the observed stack, and states
-the limit plainly: if the machine running Fanout fails, nothing on the page
-can report it, so Fanout itself still needs an outside monitor.
+the limit plainly: if the machine running Pitot fails, nothing on the page
+can report it, so Pitot itself still needs an outside monitor.
 
 ### The self-observation test
 
@@ -290,7 +290,7 @@ repository.
 ## Out of scope
 
 Alert rules created from system-page sections, incidents and notifications,
-reachability checks run by Fanout itself (a Collector with `httpcheck` on an
+reachability checks run by Pitot itself (a Collector with `httpcheck` on an
 outside machine covers them), cost and usage tracking, vulnerability matching for runtime
 versions. Each is designed separately if the page shows it is needed.
 

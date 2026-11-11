@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
 )
 
 // HealthHandler handles health check endpoints
@@ -64,7 +64,7 @@ type HealthResponse struct {
 const livenessPingTimeout = time.Second
 
 // Liveness returns 200 while the process can serve (Kubernetes liveness
-// probe). It fails only for a stall in Fanout's own work that a restart would
+// probe). It fails only for a stall in Pitot's own work that a restart would
 // free: a Parquet publication holding reads out past its bound, or an idle
 // engine that cannot answer a ping. An overloaded engine, however saturated,
 // is alive, and so is one running a costly query past its deadline: a

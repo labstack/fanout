@@ -18,12 +18,12 @@ import { docsSchema } from "@astrojs/starlight/schema";
 //
 //   shipped      the binary on the current tag does this.
 //   preview      it runs, and its shape may still change without a migration.
-//                Fanout is pre-release and breaks things deliberately, so this
+//                Pitot is pre-release and breaks things deliberately, so this
 //                is a real state here rather than a hedge.
 //   planned      designed and written down, but nothing executes it yet.
 //
 // A page that claims more than the binary delivers is the failure these exist
-// to prevent. `generated` marks a page written by cmd/fanout-docgen, which the
+// to prevent. `generated` marks a page written by cmd/pitot-docgen, which the
 // gate regenerates and compares — edit the generator, never the page.
 export const collections = {
   docs: defineCollection({

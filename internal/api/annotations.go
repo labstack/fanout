@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/annotations"
+	"github.com/labstack/pitot/internal/annotations"
 )
 
 type AnnotationReader interface {

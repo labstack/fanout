@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a broadly useful Fanout OSS improvement
+description: Propose a broadly useful Pitot OSS improvement
 title: "feat: "
 labels: [enhancement]
 body:
@@ -14,7 +14,7 @@ body:
     id: users
     attributes:
       label: Who benefits?
-      description: Explain why this is useful to typical self-hosted Fanout users.
+      description: Explain why this is useful to typical self-hosted Pitot users.
     validations:
       required: true
   - type: textarea

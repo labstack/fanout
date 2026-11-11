@@ -1,7 +1,7 @@
 package query
 
 import (
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 	"math"
 	"reflect"
 	"strings"

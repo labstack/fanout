@@ -1,4 +1,4 @@
-# Contributing to Fanout
+# Contributing to Pitot
 
 Thanks for your interest. Issues and pull requests are both welcome.
 
@@ -35,7 +35,7 @@ Xcode Command Line Tools and `libc++`. Cross-compilation is unsupported.
 Use `just` recipes or prefix Go commands with the wrapper:
 
 ```sh
-bash scripts/with-duckdb.sh go build ./cmd/fanout
+bash scripts/with-duckdb.sh go build ./cmd/pitot
 bash scripts/with-duckdb.sh go test ./internal/ingest
 ```
 
@@ -91,20 +91,20 @@ SVG export. Archify is never installed through npm. Committed SVGs serve the
 README and docs site, so only diagram editors need the rendering environment.
 The evidence checkout defaults to this repository. If your `origin` points to
 a fork, use `DIAGRAMS_EVIDENCE_ROOT=/path/to/upstream-clone just diagrams`, where
-the clone is labstack/fanout and contains the pinned revision. Archify normalizes
+the clone is labstack/pitot and contains the pinned revision. Archify normalizes
 and verifies repository identity and the pinned revision during `finalize`.
 JSON inputs, SVG outputs, and the site copy still use your contributor checkout.
 
 **The social preview card is generated.** `just social-card` renders
 `docs/media/social-card.typ` into `site/public/social-card.png`. Set
-`FANOUT_FONT_PATH` to a directory containing Inter; the recipe requires Typst
+`PITOT_FONT_PATH` to a directory containing Inter; the recipe requires Typst
 0.15.1 and fails if the font is missing. Commit the source and PNG together.
 The site build checks the committed image’s dimensions; CI does not rerender it.
 
 **Runtime configuration is strict.** `internal/config/config.go` owns the
 schema. New settings need an environment name, a documentation `group` tag,
 a purpose comment, a test, and matching documentation. Custom settings use
-`FANOUT_` plus a clear name, adding the area only when it clarifies; vendor
+`PITOT_` plus a clear name, adding the area only when it clarifies; vendor
 credentials and endpoints keep the vendor's documented names. Unknown owned
 names fail startup, while unrelated shared-vendor/tool variables are ignored.
 Secrets use `secret:"true"` and automatically accept an `_FILE` form; do not
@@ -122,7 +122,7 @@ are immutable: add a migration rather than editing one already applied.
 The checksum ledger in `internal/db/migrations_test.go` makes the local and CI
 test gates reject edits, renames, and deletions. Extend it for new migrations;
 do not update checksums of published migrations.
-Fanout embeds and applies them at startup; `just db-migrate-apply DB` applies
+Pitot embeds and applies them at startup; `just db-migrate-apply DB` applies
 them manually with the same database guard used at startup. A version table
 without a positive applied version does not make an existing schema managed.
 DuckDB maintains its own query schema.
@@ -130,7 +130,7 @@ DuckDB maintains its own query schema.
 ## Project layout
 
 ```text
-cmd/fanout/        process composition and the single entry point
+cmd/pitot/        process composition and the single entry point
 internal/          ingest, storage, query, agent, MCP, auth, alerts
 ui/host/           React browser host and shared MCP app renderer (build-time)
 docs/diagrams/     archify JSON sources and exported dual-theme SVGs
@@ -167,7 +167,7 @@ as scanning the runtime container.
 
 ## Reporting bugs
 
-Include the version (`fanout --version`), how Fanout is configured, and what
+Include the version (`pitot --version`), how Pitot is configured, and what
 you expected instead of what happened. For anything security-related, follow
 [SECURITY.md](SECURITY.md) rather than opening an issue.
 
@@ -182,5 +182,5 @@ agreement before contributing.
 
 ## License
 
-Fanout is [Apache-2.0](LICENSE). Contributions are accepted under the same
+Pitot is [Apache-2.0](LICENSE). Contributions are accepted under the same
 license, subject to the CLA above.

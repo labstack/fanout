@@ -5,7 +5,7 @@ import { receiptForTurn, type BuildReceipt } from "./dashboard-receipt";
 
 export type TurnOptions = { answer_only?: boolean; context?: { description: string; value: string }[] };
 
-export type FanoutAppContextValue = {
+export type PitotAppContextValue = {
   agentAvailable: boolean;
   threadID: string;
   threadMissing: boolean;
@@ -30,11 +30,11 @@ export type FanoutAppContextValue = {
   selectThread: (threadID: string) => void;
 };
 
-export const FanoutAppContext = createContext<FanoutAppContextValue | null>(null);
+export const PitotAppContext = createContext<PitotAppContextValue | null>(null);
 
-export function useFanoutApp(): FanoutAppContextValue {
-  const context = useContext(FanoutAppContext);
-  if (!context) throw new Error("Fanout app context is unavailable");
+export function usePitotApp(): PitotAppContextValue {
+  const context = useContext(PitotAppContext);
+  if (!context) throw new Error("Pitot app context is unavailable");
   return context;
 }
 
@@ -76,10 +76,10 @@ export function toolFailureLabel(toolName: string): string {
 
 export function runErrorMessage(code?: string): string {
   switch (code) {
-    case "provider_unavailable": return "Fanout could not reach the model provider. Please try again.";
-    case "step_limit": return "Fanout reached its step limit before finishing. Try a narrower question.";
-    case "time_limit": return "Fanout reached its 5-minute time limit. Try a smaller request.";
-    default: return "Fanout could not complete this analysis. Please try again.";
+    case "provider_unavailable": return "Pitot could not reach the model provider. Please try again.";
+    case "step_limit": return "Pitot reached its step limit before finishing. Try a narrower question.";
+    case "time_limit": return "Pitot reached its 5-minute time limit. Try a smaller request.";
+    default: return "Pitot could not complete this analysis. Please try again.";
   }
 }
 

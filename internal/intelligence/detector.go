@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/fanout/internal/annotations"
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/annotations"
+	"github.com/labstack/pitot/internal/queryrows"
 )
 
 // Engine is the read and annotation surface the detector uses; *engine.Duck

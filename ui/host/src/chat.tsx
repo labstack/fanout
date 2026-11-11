@@ -5,7 +5,7 @@ import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight, ArrowDown } f
 import { lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { toolFailureLabel, useFanoutApp, useDashboardReceipts } from "./app-context";
+import { toolFailureLabel, usePitotApp, useDashboardReceipts } from "./app-context";
 import { useTurnAnchor } from "./chat-scroll";
 import { BrandMark } from "./brand";
 import { useCopy } from "./copy";
@@ -140,7 +140,7 @@ const suggestions = [
 ];
 
 export function ChatPage() {
-  const { agentAvailable, messages, messageTimes, ready, running, activity, stopped, error, threadMissing, send, retry, reloadThread, newThread } = useFanoutApp();
+  const { agentAvailable, messages, messageTimes, ready, running, activity, stopped, error, threadMissing, send, retry, reloadThread, newThread } = usePitotApp();
   const receipts = useDashboardReceipts(messages);
   const lastSent = messages.filter((message) => message.role === "user").at(-1)?.id;
   const { scrollRef, contentRef, turnRef, showJump, jumpToLatest } = useTurnAnchor<HTMLDivElement, HTMLDivElement>(lastSent);
@@ -174,7 +174,7 @@ export function ChatPage() {
       {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} running={running && message.id === lastSent} awaitingAnswer={!hasFinalText} activity={activity} /></Box>}
     </Box>;
   return <Box className="chat-pane">
-    <Container size={880} w="100%" px={{ base: "md", sm: "xl" }} py="md"><PageHeader title="Chat" description="Investigate your telemetry with Fanout." /></Container>
+    <Container size={880} w="100%" px={{ base: "md", sm: "xl" }} py="md"><PageHeader title="Chat" description="Investigate your telemetry with Pitot." /></Container>
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
         scroller focusable only when it holds no focusable children, and this
         one holds copy buttons and links, so it says so itself. */}
@@ -225,12 +225,12 @@ function RunError({ message, onRetry, onNewThread }: { message: string; onRetry:
 }
 
 function Composer() {
-  const { input, setInput, inputRef, submit, send, stop, ready, running } = useFanoutApp();
+  const { input, setInput, inputRef, submit, send, stop, ready, running } = usePitotApp();
   return <Box className="chat-composer">
     <Container size={880} px={{ base: "md", sm: "xl" }}>
       <Paper component="form" onSubmit={submit} className="chat-composer-field" style={{ borderColor: "var(--composer-border, var(--labstack-control-border))" }} withBorder radius="sm" py={6} pl="lg" pr={6}>
         <Group align="flex-end" gap="xs" wrap="nowrap">
-          <Textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is working…" : "Ask about health, errors, or latency…"} disabled={!ready} autosize minRows={1} maxRows={8} variant="unstyled" flex={1} />
+          <Textarea ref={inputRef} aria-label="Message Pitot" value={input} onChange={(event) => setInput(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Pitot is working…" : "Ask about health, errors, or latency…"} disabled={!ready} autosize minRows={1} maxRows={8} variant="unstyled" flex={1} />
           {running
             ? <Tooltip label="Stop"><ActionIcon type="button" variant="default" size={40} aria-label="Stop" onClick={stop}><Stop size={16} weight="fill" /></ActionIcon></Tooltip>
             : <ActionIcon type="submit" variant="filled" size={40} disabled={!input.trim() || !ready} aria-label="Send message"><PaperPlaneTilt size={17} weight="fill" /></ActionIcon>}

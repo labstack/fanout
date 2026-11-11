@@ -1,9 +1,9 @@
 ---
 title: CLI
-description: Commands and flags accepted by the Fanout binary.
+description: Commands and flags accepted by the Pitot binary.
 summary: Server startup, version output, login links, health probes and offline repair.
 read_when:
-  - You need to run or script a Fanout command.
+  - You need to run or script a Pitot command.
 status: preview
 ---
 
@@ -11,15 +11,15 @@ status: preview
 
 | Invocation | Behavior |
 |---|---|
-| `fanout` | Validate environment settings and start the server. |
-| `fanout version` | Print the build version to stdout and exit. |
-| `fanout --version`, `fanout -v` | Print the build version to stdout and exit. |
-| `fanout -h`, `fanout --help` | Print usage to stderr and exit successfully. |
-| `fanout login-link <email>` | Mint a login URL for an existing active local user. |
-| `fanout login-link --break-glass <email>` | Mint a one-time login URL for an active administrator in OIDC mode. |
-| `fanout healthcheck [url]` | Probe an explicit URL, or derive `/healthz` from listener settings. |
-| `fanout repair verify` | Validate every authoritative telemetry batch without changing it. |
-| `fanout repair quarantine --batch <id>` | Move one confirmed corrupt batch aside. `--batch` is required. |
+| `pitot` | Validate environment settings and start the server. |
+| `pitot version` | Print the build version to stdout and exit. |
+| `pitot --version`, `pitot -v` | Print the build version to stdout and exit. |
+| `pitot -h`, `pitot --help` | Print usage to stderr and exit successfully. |
+| `pitot login-link <email>` | Mint a login URL for an existing active local user. |
+| `pitot login-link --break-glass <email>` | Mint a one-time login URL for an active administrator in OIDC mode. |
+| `pitot healthcheck [url]` | Probe an explicit URL, or derive `/healthz` from listener settings. |
+| `pitot repair verify` | Validate every authoritative telemetry batch without changing it. |
+| `pitot repair quarantine --batch <id>` | Move one confirmed corrupt batch aside. `--batch` is required. |
 
 These are the complete subcommands and flags. Configuration comes from the
 environment, not CLI configuration flags. See [configuration](/docs/reference/configuration).
@@ -31,9 +31,9 @@ no version was embedded.
 Run with the server's environment and data directory:
 
 ```sh
-fanout login-link admin@example.com
+pitot login-link admin@example.com
 # For Docker:
-docker exec fanout fanout login-link admin@example.com
+docker exec pitot pitot login-link admin@example.com
 ```
 
 The command requires local auth mode, an existing control database and an
@@ -46,10 +46,10 @@ works once. It can run while the server is online. See
 Use `--break-glass` when an OIDC installation's identity provider is unavailable:
 
 ```sh
-fanout login-link --break-glass admin@example.com
+pitot login-link --break-glass admin@example.com
 ```
 
-The flag requires OIDC auth mode, `FANOUT_AUTH_CODE_SECRET` with at least 32
+The flag requires OIDC auth mode, `PITOT_AUTH_CODE_SECRET` with at least 32
 characters, and an active administrator. Other roles are refused. The URL
 expires in 15 minutes and works once. Without the flag the command refuses OIDC
 mode. See
@@ -57,9 +57,9 @@ mode. See
 
 ## Health probes
 
-With no URL, `healthcheck` reads only `FANOUT_ADDR`,
-`FANOUT_TLS_CERT_FILE`, `FANOUT_HEALTHCHECK_CERT_FILE` and
-`FANOUT_HEALTHCHECK_KEY_FILE`. Unspecified bind hosts become `127.0.0.1`.
+With no URL, `healthcheck` reads only `PITOT_ADDR`,
+`PITOT_TLS_CERT_FILE`, `PITOT_HEALTHCHECK_CERT_FILE` and
+`PITOT_HEALTHCHECK_KEY_FILE`. Unspecified bind hosts become `127.0.0.1`.
 A certificate selects HTTPS. Derived probes bypass environment proxies;
 HTTPS IP probes trust the configured certificate and verify its first DNS or
 IP SAN. Hostname probes use normal verification. Derived HTTPS probes present
@@ -71,7 +71,7 @@ a three-second timeout and succeeds only on HTTP 200. No auth secret is needed.
 
 ## Offline repair
 
-Stop Fanout and back up telemetry before running repair. Both commands load and
+Stop Pitot and back up telemetry before running repair. Both commands load and
 validate the normal environment configuration. Verification reports each
 confirmed unreadable batch on stdout. An unsupported format or operational
 failure stops verification and does not authorize quarantine.

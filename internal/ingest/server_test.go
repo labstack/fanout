@@ -15,8 +15,8 @@ import (
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 func TestBodyString(t *testing.T) {

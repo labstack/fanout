@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/db/generated"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/db/generated"
 )
 
 // Rule email statuses, reported on Rule.EmailStatus. Delivery rows use sent,
@@ -29,7 +29,7 @@ const (
 )
 
 // EmailUnavailableMessage explains why email cannot be chosen or delivered.
-const EmailUnavailableMessage = "Email delivery is unavailable because SMTP is not configured. Set FANOUT_SMTP_HOST, FANOUT_SMTP_USERNAME, FANOUT_SMTP_PASSWORD and FANOUT_SMTP_FROM."
+const EmailUnavailableMessage = "Email delivery is unavailable because SMTP is not configured. Set PITOT_SMTP_HOST, PITOT_SMTP_USERNAME, PITOT_SMTP_PASSWORD and PITOT_SMTP_FROM."
 
 const (
 	emailBatchSize    = 50
@@ -423,7 +423,7 @@ func (e *Engine) deliverEmail(ctx context.Context, row generated.AlertEmailDeliv
 		Time:        content.Time,
 	}
 	if int(sent) == limit-1 {
-		mail.LimitNotice = fmt.Sprintf("This address has reached the limit of %d alert emails per hour. Further alerts are recorded on their rules in Fanout and not emailed until the count falls.", limit)
+		mail.LimitNotice = fmt.Sprintf("This address has reached the limit of %d alert emails per hour. Further alerts are recorded on their rules in Pitot and not emailed until the count falls.", limit)
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, emailSendTimeout)
 	err = e.email.Send(sendCtx, mail)

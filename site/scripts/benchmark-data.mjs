@@ -23,7 +23,7 @@ const signals = ["traces", "logs", "metrics", "mixed"];
 const RATE_WINDOW_SECONDS = 5;
 
 export function deriveBenchmark(report, samples, evidence, phase = "mixed-sustained") {
-  if (report.schema_version !== "fanout-bench/v1") throw new Error("Unsupported report schema_version");
+  if (report.schema_version !== "pitot-bench/v1") throw new Error("Unsupported report schema_version");
   const url = new URL(evidence);
   if (!['https:', 'http:'].includes(url.protocol)) throw new Error("Evidence must be an HTTP(S) URL");
   const build = report.build ?? {}, host = report.host ?? {}, settings = report.settings ?? {};
@@ -48,13 +48,13 @@ export function deriveBenchmark(report, samples, evidence, phase = "mixed-sustai
     if (!groups.size) throw new Error(`Missing required ${signal} sweeps`);
     return [signal, [...groups.entries()].sort(([a], [b]) => a - b).map(([processes, repetitions]) => {
       const rates = repetitions.map(t => number(t.accepted_items_per_second, `${t.settings.name}.accepted_items_per_second`));
-      const fanout = repetitions.map(t => number(t.resources?.average_cpu_cores, `${t.settings.name}.resources.average_cpu_cores`));
+      const pitot = repetitions.map(t => number(t.resources?.average_cpu_cores, `${t.settings.name}.resources.average_cpu_cores`));
       const generator = repetitions.map(t => number(t.generator_cpu?.average_cpu_cores, `${t.settings.name}.generator_cpu.average_cpu_cores`));
       if (!preview && repetitions.length !== repeat) throw new Error(`Incomplete ${signal} p${processes}: expected ${repeat} repetitions`);
       const ids = repetitions.map(t => number(t.settings.repetition, `${t.settings.name}.repetition`));
       if (new Set(ids).size !== ids.length) throw new Error(`Duplicate ${signal} p${processes} repetition`);
       return { processes_per_signal: processes, median: rounded(median(rates)), min: rounded(Math.min(...rates)),
-        max: rounded(Math.max(...rates)), fanout_cpu_median: rounded(median(fanout), 2),
+        max: rounded(Math.max(...rates)), pitot_cpu_median: rounded(median(pitot), 2),
         generator_cpu_median: rounded(median(generator), 2), repetitions: repetitions.length };
     })];
   }));
@@ -100,11 +100,11 @@ export function deriveBenchmark(report, samples, evidence, phase = "mixed-sustai
     passed: required(gate.passed, `quality_gates[${i}].passed`, "boolean") }));
   const passed = required(report.summary.passed, "summary.passed", "boolean");
   if (passed !== quality_gates.every(gate => gate.passed)) throw new Error("summary.passed disagrees with quality_gates");
-  const artifact = string(build.fanout_artifact, "build.fanout_artifact");
+  const artifact = string(build.pitot_artifact, "build.pitot_artifact");
   const checksum = artifact.match(/#sha256=([a-f0-9]{64})$/)?.[1];
-  if (!checksum) throw new Error("build.fanout_artifact requires a SHA-256 checksum");
+  if (!checksum) throw new Error("build.pitot_artifact requires a SHA-256 checksum");
   return {
-    release: string(build.fanout_version, "build.fanout_version"), evidence: url.href, artifact, artifact_sha256: checksum,
+    release: string(build.pitot_version, "build.pitot_version"), evidence: url.href, artifact, artifact_sha256: checksum,
     harness_commit: string(build.harness_commit, "build.harness_commit"),
     telemetrygen: string(build.telemetrygen_version, "build.telemetrygen_version"),
     host: { description: string(host.description, "host.description"),
@@ -117,7 +117,7 @@ export function deriveBenchmark(report, samples, evidence, phase = "mixed-sustai
       seconds: rounded(seconds, 1), accepted_per_second: rounded(rate),
       spans_per_second: rounded(accepted.spans / window), log_records_per_second: rounded(accepted.log_records / window),
       metric_points_per_second: rounded(accepted.metric_points / window),
-      fanout_cpu: rounded(number(sustained.resources?.average_cpu_cores, "sustained.resources.average_cpu_cores"), 2),
+      pitot_cpu: rounded(number(sustained.resources?.average_cpu_cores, "sustained.resources.average_cpu_cores"), 2),
       peak_rss_gib: rounded(number(sustained.resources?.peak_rss_bytes, "sustained.resources.peak_rss_bytes") / 2 ** 30, 1),
       generator_cpu: rounded(number(sustained.generator_cpu?.average_cpu_cores, "sustained.generator_cpu.average_cpu_cores"), 2),
       classification: string(sustained.classification, "sustained.classification") },

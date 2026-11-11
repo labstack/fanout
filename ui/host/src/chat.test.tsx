@@ -3,7 +3,7 @@ import type { Message } from "@ag-ui/client";
 import { act, createRef, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FanoutAppContext, useFanoutApp, type FanoutAppContextValue } from "./app-context";
+import { PitotAppContext, usePitotApp, type PitotAppContextValue } from "./app-context";
 import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import App from "./app";
 import { ChatPage } from "./chat";
@@ -20,7 +20,7 @@ vi.mock("./auth", () => ({
 }));
 
 function StreamChat() {
-  const { send } = useFanoutApp();
+  const { send } = usePitotApp();
   return <><ChatPage /><button onClick={() => void send("Sort latency")}>Begin stream</button></>;
 }
 
@@ -28,7 +28,7 @@ async function mountStreamChat(stored: Message[] = [{ id: "old-answer", role: "a
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
   const requests: Array<{ messages: Message[]; forwardedProps: { answer_only?: boolean } }> = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(String(input), "https://fanout.example.test").pathname;
+    const path = new URL(String(input), "https://pitot.example.test").pathname;
     if (path === "/api/agent/runs") {
       requests.push(JSON.parse(String(init?.body)));
       return new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; init?.signal?.addEventListener("abort", () => c.error(new DOMException("Aborted", "AbortError")), { once: true }); } }), { headers: { "Content-Type": "text/event-stream" } });
@@ -37,7 +37,7 @@ async function mountStreamChat(stored: Message[] = [{ id: "old-answer", role: "a
     return Response.json(body);
   });
   vi.stubGlobal("fetch", fetchMock);
-  (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL("https://fanout.example.test/chat/thread-stream");
+  (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL("https://pitot.example.test/chat/thread-stream");
   const rootRoute = createRootRoute({ component: App });
   const chat = createRoute({ getParentRoute: () => rootRoute, path: "/chat/$threadId", component: StreamChat });
   const dashboard = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards/$dashboardId", component: () => <div>Dashboard</div> });
@@ -116,7 +116,7 @@ describe("final answer stream", () => {
       }
       await vi.waitFor(() => expect(document.querySelector('button[aria-label="Stop"]')).toBeNull());
       expect(document.body.textContent).not.toContain("Analyzing your system");
-      if (outcome === "error") expect(document.querySelector('[role="alert"]')?.textContent).toContain("Fanout could not reach the model provider. Please try again.");
+      if (outcome === "error") expect(document.querySelector('[role="alert"]')?.textContent).toContain("Pitot could not reach the model provider. Please try again.");
       if (outcome === "cancel") {expect(document.querySelector('[role="alert"]')).toBeNull();expect(document.body.textContent).toContain("Stopped");}
     } finally { log.mockRestore(); await act(async () => root.unmount()); }
   });
@@ -175,11 +175,11 @@ describe("final answer stream", () => {
     } finally {warn.mockRestore();log.mockRestore();await act(async()=>root.unmount());}
   });
   it.each([
-    ['provider_unavailable','Fanout could not reach the model provider. Please try again.'],
-    ['step_limit','Fanout reached its step limit before finishing. Try a narrower question.'],
-    ['time_limit','Fanout reached its 5-minute time limit. Try a smaller request.'],
-    ['run_failed','Fanout could not complete this analysis. Please try again.'],
-    ['unknown_secret_code','Fanout could not complete this analysis. Please try again.'],
+    ['provider_unavailable','Pitot could not reach the model provider. Please try again.'],
+    ['step_limit','Pitot reached its step limit before finishing. Try a narrower question.'],
+    ['time_limit','Pitot reached its 5-minute time limit. Try a smaller request.'],
+    ['run_failed','Pitot could not complete this analysis. Please try again.'],
+    ['unknown_secret_code','Pitot could not complete this analysis. Please try again.'],
   ])("maps %s to a plain error and shows the same outcome on reload", async (code, message) => {
     const {root,emit,close}=await mountStreamChat();
     try {await emit({type:'RUN_STARTED',threadId:'thread-stream',runId:'run'});await emit({type:'RUN_ERROR',code,message:'raw_server_code'});await close();await vi.waitFor(()=>expect(document.querySelector('[role="alert"]')?.textContent).toContain(message));expect(document.body.textContent).not.toContain('raw_server_code');expect(document.body.textContent).not.toContain(code);}finally{await act(async()=>root.unmount());}
@@ -188,7 +188,7 @@ describe("final answer stream", () => {
   });
 });
 
-function value(overrides: Partial<FanoutAppContextValue> = {}): FanoutAppContextValue {
+function value(overrides: Partial<PitotAppContextValue> = {}): PitotAppContextValue {
   return {
     agentAvailable: true, threadID: "thread-1", threadMissing: false, messages: [], messageTimes: {}, ready: true, running: false, activity: "",  stopped: false,
     input: "", setInput: vi.fn(), error: "", inputRef: createRef<HTMLTextAreaElement>(),
@@ -198,11 +198,11 @@ function value(overrides: Partial<FanoutAppContextValue> = {}): FanoutAppContext
   };
 }
 
-async function mount(context: FanoutAppContextValue) {
+async function mount(context: PitotAppContextValue) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () => root.render(<MantineProvider><FanoutAppContext.Provider value={context}><ChatPage /></FanoutAppContext.Provider></MantineProvider>));
+  await act(async () => root.render(<MantineProvider><PitotAppContext.Provider value={context}><ChatPage /></PitotAppContext.Provider></MantineProvider>));
   return root;
 }
 
@@ -225,13 +225,13 @@ describe("chat turn layout", () => {
       expect(turn.textContent).not.toContain("Earlier question");
       expect(turn.textContent).not.toContain("Earlier answer");
       expect(document.querySelectorAll("[data-chat-turn]")).toHaveLength(1);
-      await act(async () => root.render(<MantineProvider><FanoutAppContext.Provider value={value({ messages: [...messages, { id: "last-answer", role: "assistant", content: "Latest answer" }] })}><ChatPage /></FanoutAppContext.Provider></MantineProvider>));
+      await act(async () => root.render(<MantineProvider><PitotAppContext.Provider value={value({ messages: [...messages, { id: "last-answer", role: "assistant", content: "Latest answer" }] })}><ChatPage /></PitotAppContext.Provider></MantineProvider>));
       expect(document.querySelector('[data-chat-turn="last-question"]')).toBe(turn);
       expect(turn.querySelector("[data-answer-position]")?.textContent).toContain("Latest answer");
       expect(turn.querySelector('[role="status"]')).toBeNull();
       const evidence = turn.querySelector("[data-chat-app]");
       (turn as HTMLElement).style.minHeight = "500px";
-      await act(async () => root.render(<MantineProvider><FanoutAppContext.Provider value={value({ messages: [...messages, { id: "last-answer", role: "assistant", content: "Latest answer" }, { id: "next-question", role: "user", content: "Next question" }], running: true })}><ChatPage /></FanoutAppContext.Provider></MantineProvider>));
+      await act(async () => root.render(<MantineProvider><PitotAppContext.Provider value={value({ messages: [...messages, { id: "last-answer", role: "assistant", content: "Latest answer" }, { id: "next-question", role: "user", content: "Next question" }], running: true })}><ChatPage /></PitotAppContext.Provider></MantineProvider>));
       expect(turn.isConnected).toBe(true);
       expect(turn.querySelector("[data-chat-app]")).toBe(evidence);
       expect((turn as HTMLElement).style.minHeight).toBe("");
@@ -316,7 +316,7 @@ function appMessage(id: string, tool: string, title: string, rows = 1): Message 
   fragment.view = {kind:tool === "query_telemetry" ? "query" : "preset", key:(id === "one" ? "1" : "2").repeat(64)};
   fragment.results[0] = { id: "p", status: "ok", elapsed_ms: 0, frame: { columns: [{ name: "body", type: "string", role: "dimension" }], values: [Array.from({ length: rows }, () => title)], rows } };
   fragment.dashboard.time = { from: `2026-10-07T${id === "one" ? "18" : "19"}:00:00Z`, to: "2026-10-07T20:00:00Z", refresh: "off" };
-  return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: tool, tool_input: {}, tool_result: fragment, is_error: false } } as Message;
+  return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://pitot/panels.html", tool_name: tool, tool_input: {}, tool_result: fragment, is_error: false } } as Message;
 }
 it("aligns collapsed and expanded summaries with a leading chevron and singular/plural row counts", async () => {
   const root = await mount(value({ messages: [appMessage("one", "query_telemetry", "Discovery"), appMessage("two", "query_telemetry", "Answer", 2)] }));
@@ -333,7 +333,7 @@ it("summarizes multi-panel views by what they show and only non-ok status counts
   const fragment=fixture();const base=fragment.dashboard.panels[0];
   fragment.dashboard.panels=Array.from({length:4},(_,i)=>({...base,id:`p${i}`,title:"Performance"}));
   fragment.results=fragment.dashboard.panels.map((p,i)=>({id:p.id,status:i===3?"empty":"ok",elapsed_ms:0}));
-  const message={id:"one",role:"activity",activityType:"mcp-app",content:{resource_uri:"ui://fanout/panels.html",tool_name:"get_service_performance",tool_input:{},tool_result:fragment,is_error:false}} as Message;
+  const message={id:"one",role:"activity",activityType:"mcp-app",content:{resource_uri:"ui://pitot/panels.html",tool_name:"get_service_performance",tool_input:{},tool_result:fragment,is_error:false}} as Message;
   for(const status of ["empty","error","ok"] as const) {
     fragment.results[3].status=status;
     const root=await mount(value({messages:[JSON.parse(JSON.stringify(message))]}));
@@ -366,7 +366,7 @@ it("collapses earlier views, dedupes within a turn, expands accessibly and resto
     const f = fixture(); f.results[0].status = "ok"; f.dashboard.name = title; f.dashboard.panels[0].title = title;
     f.view.key=(changed?"1":"0").repeat(64);
     if (changed) f.dashboard.time = { from: "2026-10-07T18:45:00Z", to: "2026-10-07T19:45:00Z", refresh: "off" };
-    return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: f, is_error: false } } as Message;
+    return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://pitot/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: f, is_error: false } } as Message;
   };
   const messages = [{ id: "u", role: "user", content: "Show" } as Message, app("first", "Discovery"), app("duplicate", "Discovery"), app("last", "Answer", true)];
   let root = await mount(value({ messages }));
@@ -385,7 +385,7 @@ it("collapses earlier views, dedupes within a turn, expands accessibly and resto
 });
 
 it("shows app tool errors and old string activities without throwing", async () => {
-  const messages = [toolError('call','invalid_window'), { id: "old", role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: "old response", is_error: false } }] as Message[];
+  const messages = [toolError('call','invalid_window'), { id: "old", role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://pitot/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: "old response", is_error: false } }] as Message[];
   const root = await mount(value({ messages }));
   await act(async()=>button("1 step failed")!.click());
   expect(document.body.textContent).toContain("Invalid telemetry window");
@@ -396,7 +396,7 @@ it("shows app tool errors and old string activities without throwing", async () 
 it("keeps distinct captured windows and variables, and resets dedupe at the next user turn", async () => {
   const app = (id: string, from: number, vars?: Record<string, string>): Message => {
     const fragment = fixture(); fragment.results[0].status = "ok"; fragment.results[0].from_ms = from; fragment.vars = vars; fragment.view.key=(vars?"3":String(from)).repeat(64);
-    return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: fragment, is_error: false } } as Message;
+    return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://pitot/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: fragment, is_error: false } } as Message;
   };
   const root = await mount(value({ messages: [{ id: "u1", role: "user", content: "Show" } as Message, app("one", 0), app("two", 1), app("three", 0, { service: "checkout" }), { id: "u2", role: "user", content: "Again" } as Message, app("four", 0)] }));
   try {
@@ -409,7 +409,7 @@ it("dedupes a complete custom map and topology preset with different row limits"
   const map = fixture("service_map"); map.dashboard.panels[0].query = { from: "spans", limit: 20 };
   map.results[0].status = "ok"; map.results[0].frame = { columns: [{ name: "service", type: "string", role: "dimension" }], values: [["checkout"]], rows: 1 };
   const preset = structuredClone(map); preset.dashboard.name = "Telemetry"; preset.dashboard.panels[0].id = "services"; preset.dashboard.panels[0].title = "Service dependencies"; preset.dashboard.panels[0].query!.limit = 400; preset.results[0].id = "services"; preset.view.kind="preset";
-  const messages = [map, preset].map((fragment, i) => ({ id: String(i), role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: i ? "get_service_topology" : "query_telemetry", tool_input: {}, tool_result: fragment, is_error: false } } as Message));
+  const messages = [map, preset].map((fragment, i) => ({ id: String(i), role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://pitot/panels.html", tool_name: i ? "get_service_topology" : "query_telemetry", tool_input: {}, tool_result: fragment, is_error: false } } as Message));
   const root = await mount(value({ messages }));
   try { expect(document.querySelectorAll("[data-chat-app]")).toHaveLength(1); }
   finally { await act(async () => root.unmount()); }
@@ -460,7 +460,7 @@ describe("ChatPage", () => {
   });
 
   it("offers retry after a failed run and a new chat for a missing thread", async () => {
-    const failed = value({ error: "Fanout could not complete this analysis.", messages: [{ id: "u1", role: "user", content: "hi" } as Message] });
+    const failed = value({ error: "Pitot could not complete this analysis.", messages: [{ id: "u1", role: "user", content: "hi" } as Message] });
     let root = await mount(failed);
     await act(async () => button("Retry")?.click());
     expect(failed.retry).toHaveBeenCalled();
@@ -574,7 +574,7 @@ async function clickCopy() {
   });
 }
 
-it.each([null,{}, {resourceUri:"ui://fanout/panels.html",toolName:"query_telemetry"}, {resource_uri:"ui://fanout/trace-detail.html",tool_name:"inspect_trace",tool_input:{},tool_result:{},is_error:false}])("shows an Alert for incompatible persisted mcp-app content (%s)",async content=>{
+it.each([null,{}, {resourceUri:"ui://pitot/panels.html",toolName:"query_telemetry"}, {resource_uri:"ui://pitot/trace-detail.html",tool_name:"inspect_trace",tool_input:{},tool_result:{},is_error:false}])("shows an Alert for incompatible persisted mcp-app content (%s)",async content=>{
  const root=await mount(value({messages:[{id:"activity",role:"activity",activityType:"mcp-app",content} as unknown as Message]}));
  expect(document.body.textContent).toContain("This view could not be loaded. Please try again.");
  expect(document.querySelector("iframe")).toBeNull();await act(async()=>root.unmount());document.body.innerHTML="";

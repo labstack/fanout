@@ -2,8 +2,8 @@
 // --phase selects development series explicitly; development_preview must stay visible.
 export const benchmark = {
   "release": "v2026.11.0-alpha",
-  "evidence": "https://github.com/labstack/fanout-bench/tree/main/published/2026-11-06-ccx33x2-v2026.11.0-alpha",
-  "artifact": "https://github.com/labstack/fanout/releases/download/v2026.11.0-alpha/fanout_v2026.11.0-alpha_linux_amd64.tar.gz#sha256=1e83657b9eb0ff7e7ad406bd5162642badf087c380448deebd1f88b183656ddc",
+  "evidence": "https://github.com/labstack/pitot-bench/tree/main/published/2026-11-06-ccx33x2-v2026.11.0-alpha",
+  "artifact": "https://github.com/labstack/pitot/releases/download/v2026.11.0-alpha/pitot_v2026.11.0-alpha_linux_amd64.tar.gz#sha256=1e83657b9eb0ff7e7ad406bd5162642badf087c380448deebd1f88b183656ddc",
   "artifact_sha256": "1e83657b9eb0ff7e7ad406bd5162642badf087c380448deebd1f88b183656ddc",
   "harness_commit": "5462cbbcde9c49521c918c45f45312493aa4bb24",
   "telemetrygen": "v0.157.0",
@@ -29,7 +29,7 @@ export const benchmark = {
     "spans_per_second": 61571,
     "log_records_per_second": 224112,
     "metric_points_per_second": 221628,
-    "fanout_cpu": 7.73,
+    "pitot_cpu": 7.73,
     "peak_rss_gib": 10.6,
     "generator_cpu": 7.93,
     "classification": "generator-limited"
@@ -41,7 +41,7 @@ export const benchmark = {
         "median": 13705,
         "min": 13633,
         "max": 13709,
-        "fanout_cpu_median": 5.71,
+        "pitot_cpu_median": 5.71,
         "generator_cpu_median": 0.33,
         "repetitions": 3
       },
@@ -50,7 +50,7 @@ export const benchmark = {
         "median": 27283,
         "min": 27227,
         "max": 27295,
-        "fanout_cpu_median": 5.37,
+        "pitot_cpu_median": 5.37,
         "generator_cpu_median": 0.71,
         "repetitions": 3
       },
@@ -59,7 +59,7 @@ export const benchmark = {
         "median": 54584,
         "min": 54462,
         "max": 54716,
-        "fanout_cpu_median": 4.38,
+        "pitot_cpu_median": 4.38,
         "generator_cpu_median": 1.56,
         "repetitions": 3
       },
@@ -68,7 +68,7 @@ export const benchmark = {
         "median": 110326,
         "min": 106840,
         "max": 111893,
-        "fanout_cpu_median": 5.65,
+        "pitot_cpu_median": 5.65,
         "generator_cpu_median": 2.25,
         "repetitions": 3
       },
@@ -77,7 +77,7 @@ export const benchmark = {
         "median": 192605,
         "min": 156783,
         "max": 205825,
-        "fanout_cpu_median": 5.64,
+        "pitot_cpu_median": 5.64,
         "generator_cpu_median": 2.55,
         "repetitions": 3
       },
@@ -86,7 +86,7 @@ export const benchmark = {
         "median": 232227,
         "min": 164978,
         "max": 243741,
-        "fanout_cpu_median": 6.75,
+        "pitot_cpu_median": 6.75,
         "generator_cpu_median": 3.95,
         "repetitions": 3
       },
@@ -95,7 +95,7 @@ export const benchmark = {
         "median": 297345,
         "min": 192120,
         "max": 330450,
-        "fanout_cpu_median": 6.97,
+        "pitot_cpu_median": 6.97,
         "generator_cpu_median": 7.24,
         "repetitions": 3
       }
@@ -106,7 +106,7 @@ export const benchmark = {
         "median": 12720,
         "min": 12625,
         "max": 12759,
-        "fanout_cpu_median": 5.82,
+        "pitot_cpu_median": 5.82,
         "generator_cpu_median": 0.22,
         "repetitions": 3
       },
@@ -115,7 +115,7 @@ export const benchmark = {
         "median": 25111,
         "min": 24974,
         "max": 25184,
-        "fanout_cpu_median": 5.92,
+        "pitot_cpu_median": 5.92,
         "generator_cpu_median": 0.47,
         "repetitions": 3
       },
@@ -124,7 +124,7 @@ export const benchmark = {
         "median": 50053,
         "min": 49782,
         "max": 50115,
-        "fanout_cpu_median": 2.07,
+        "pitot_cpu_median": 2.07,
         "generator_cpu_median": 1.02,
         "repetitions": 3
       },
@@ -133,7 +133,7 @@ export const benchmark = {
         "median": 97248,
         "min": 95989,
         "max": 98038,
-        "fanout_cpu_median": 2.17,
+        "pitot_cpu_median": 2.17,
         "generator_cpu_median": 1.79,
         "repetitions": 3
       },
@@ -142,7 +142,7 @@ export const benchmark = {
         "median": 197201,
         "min": 196366,
         "max": 197366,
-        "fanout_cpu_median": 2.11,
+        "pitot_cpu_median": 2.11,
         "generator_cpu_median": 2.18,
         "repetitions": 3
       },
@@ -151,7 +151,7 @@ export const benchmark = {
         "median": 366244,
         "min": 364916,
         "max": 370209,
-        "fanout_cpu_median": 5.24,
+        "pitot_cpu_median": 5.24,
         "generator_cpu_median": 3.66,
         "repetitions": 3
       },
@@ -160,7 +160,7 @@ export const benchmark = {
         "median": 622229,
         "min": 558932,
         "max": 648672,
-        "fanout_cpu_median": 6.02,
+        "pitot_cpu_median": 6.02,
         "generator_cpu_median": 6.38,
         "repetitions": 3
       }
@@ -171,7 +171,7 @@ export const benchmark = {
         "median": 12801,
         "min": 12728,
         "max": 12816,
-        "fanout_cpu_median": 3.46,
+        "pitot_cpu_median": 3.46,
         "generator_cpu_median": 0.17,
         "repetitions": 3
       },
@@ -180,7 +180,7 @@ export const benchmark = {
         "median": 25459,
         "min": 25409,
         "max": 25580,
-        "fanout_cpu_median": 1.23,
+        "pitot_cpu_median": 1.23,
         "generator_cpu_median": 0.37,
         "repetitions": 3
       },
@@ -189,7 +189,7 @@ export const benchmark = {
         "median": 50263,
         "min": 50252,
         "max": 50759,
-        "fanout_cpu_median": 2.49,
+        "pitot_cpu_median": 2.49,
         "generator_cpu_median": 0.79,
         "repetitions": 3
       },
@@ -198,7 +198,7 @@ export const benchmark = {
         "median": 98095,
         "min": 97296,
         "max": 98618,
-        "fanout_cpu_median": 1.69,
+        "pitot_cpu_median": 1.69,
         "generator_cpu_median": 1.42,
         "repetitions": 3
       },
@@ -207,7 +207,7 @@ export const benchmark = {
         "median": 195099,
         "min": 194544,
         "max": 196265,
-        "fanout_cpu_median": 3.07,
+        "pitot_cpu_median": 3.07,
         "generator_cpu_median": 2.09,
         "repetitions": 3
       },
@@ -216,7 +216,7 @@ export const benchmark = {
         "median": 377992,
         "min": 359873,
         "max": 378840,
-        "fanout_cpu_median": 4.37,
+        "pitot_cpu_median": 4.37,
         "generator_cpu_median": 2.98,
         "repetitions": 3
       },
@@ -225,7 +225,7 @@ export const benchmark = {
         "median": 488431,
         "min": 486759,
         "max": 532625,
-        "fanout_cpu_median": 6.35,
+        "pitot_cpu_median": 6.35,
         "generator_cpu_median": 4.71,
         "repetitions": 3
       }
@@ -236,7 +236,7 @@ export const benchmark = {
         "median": 38820,
         "min": 38640,
         "max": 39227,
-        "fanout_cpu_median": 5.47,
+        "pitot_cpu_median": 5.47,
         "generator_cpu_median": 0.82,
         "repetitions": 3
       },
@@ -245,7 +245,7 @@ export const benchmark = {
         "median": 76587,
         "min": 76483,
         "max": 76741,
-        "fanout_cpu_median": 6.15,
+        "pitot_cpu_median": 6.15,
         "generator_cpu_median": 1.71,
         "repetitions": 3
       },
@@ -254,7 +254,7 @@ export const benchmark = {
         "median": 155156,
         "min": 149499,
         "max": 155707,
-        "fanout_cpu_median": 5.91,
+        "pitot_cpu_median": 5.91,
         "generator_cpu_median": 2.16,
         "repetitions": 3
       },
@@ -263,7 +263,7 @@ export const benchmark = {
         "median": 262749,
         "min": 261501,
         "max": 270231,
-        "fanout_cpu_median": 7.01,
+        "pitot_cpu_median": 7.01,
         "generator_cpu_median": 2.93,
         "repetitions": 3
       },
@@ -272,7 +272,7 @@ export const benchmark = {
         "median": 380026,
         "min": 323029,
         "max": 429748,
-        "fanout_cpu_median": 7.33,
+        "pitot_cpu_median": 7.33,
         "generator_cpu_median": 5,
         "repetitions": 3
       },
@@ -281,7 +281,7 @@ export const benchmark = {
         "median": 442361,
         "min": 432734,
         "max": 450588,
-        "fanout_cpu_median": 7.37,
+        "pitot_cpu_median": 7.37,
         "generator_cpu_median": 7.14,
         "repetitions": 3
       },
@@ -290,7 +290,7 @@ export const benchmark = {
         "median": 460640,
         "min": 453181,
         "max": 485193,
-        "fanout_cpu_median": 7.22,
+        "pitot_cpu_median": 7.22,
         "generator_cpu_median": 7.39,
         "repetitions": 3
       }

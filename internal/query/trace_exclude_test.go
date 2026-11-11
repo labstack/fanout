@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // A negated term on the traces viz drops every trace with a span that matches

@@ -5,7 +5,7 @@ import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { MagnifyingGlass, SidebarSimple, PlugsConnected, SignOut } from "@phosphor-icons/react";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
-import { createDashboardPrompt, useFanoutApp } from "./app-context";
+import { createDashboardPrompt, usePitotApp } from "./app-context";
 import { logout, useViewer } from "./auth";
 import { BrandLockup } from "./brand";
 import { useOpener } from "./opener";
@@ -17,7 +17,7 @@ import Rail, { type RailHandle, type RailProps } from "./rail";
 const NewDashboard = lazy(() => import("./dashboards/new-dashboard").then(module => ({ default: module.NewDashboard })));
 
 export default function Shell({ children }: { children: ReactNode }) {
-  const { agentAvailable, threadID, threadMissing, newThread, selectThread, openChat } = useFanoutApp();
+  const { agentAvailable, threadID, threadMissing, newThread, selectThread, openChat } = usePitotApp();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const { dashboardId } = useParams({ strict: false }) as { dashboardId?: string };

@@ -12,8 +12,8 @@ import (
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/auth"
-	controlstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/auth"
+	controlstore "github.com/labstack/pitot/internal/store"
 )
 
 func TestRunContextCapsMarshalledBytesWithoutSplittingRunes(t *testing.T) {

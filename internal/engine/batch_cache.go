@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine/writegate"
-	"github.com/labstack/fanout/internal/metrics"
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/readpressure"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/engine/writegate"
+	"github.com/labstack/pitot/internal/metrics"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/readpressure"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // readCacheVersion covers the schema and semantics of DuckDB's read caches:
@@ -322,8 +322,8 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		}
 		// One Parquet scan binds the pass's files. The virtual filename column
 		// identifies each contribution without a separate UNION branch per file.
-		physical := strings.Replace(d.physicalSource(signal, selected), "SELECT ", "SELECT filename AS __fanout_filename,", 1)
-		return strings.Replace(cleanSource(signal, physical), "SELECT\n", "SELECT "+d.batchIDColumn(signal, "__fanout_filename")+" AS batch_id,\n", 1)
+		physical := strings.Replace(d.physicalSource(signal, selected), "SELECT ", "SELECT filename AS __pitot_filename,", 1)
+		return strings.Replace(cleanSource(signal, physical), "SELECT\n", "SELECT "+d.batchIDColumn(signal, "__pitot_filename")+" AS batch_id,\n", 1)
 	}
 	for _, s := range telemetry.Signals {
 		if rows := source(s.Name); rows != "" {

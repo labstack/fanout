@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/queryrows"
 )
 
 func TestCheckFilterAcceptsSafeExpressions(t *testing.T) {

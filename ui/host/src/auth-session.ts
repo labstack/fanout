@@ -1,6 +1,6 @@
 import { ApiError } from "./api-error";
 
-export const unauthorizedEvent = "fanout:unauthorized";
+export const unauthorizedEvent = "pitot:unauthorized";
 
 const ingestTokensPath = "/settings/ingest";
 
@@ -33,7 +33,7 @@ function clearSession() {
 
 export async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
-  headers.set("Fanout-Request", "1");
+  headers.set("Pitot-Request", "1");
   const response = await fetch(input, { ...init, headers, credentials: "same-origin" });
   if (response.status === 401) clearSession();
   if (response.status === 403) {

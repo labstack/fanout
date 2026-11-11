@@ -14,12 +14,12 @@ import (
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/encoding/sse"
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/auth"
-	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/auth"
+	pitotmcp "github.com/labstack/pitot/internal/mcp"
+	"github.com/labstack/pitot/internal/query"
 
-	"github.com/labstack/fanout/internal/dashboard"
-	controlstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/dashboard"
+	controlstore "github.com/labstack/pitot/internal/store"
 )
 
 type textProvider struct{}
@@ -185,7 +185,7 @@ func TestRuntimeProviderErrorSanitizedAndPersisted(t *testing.T) {
 	}
 	stream := output.String()
 	assertEventOrder(t, stream, "RUN_STARTED", "RUN_ERROR")
-	if !strings.Contains(stream, "Fanout could not reach the model provider. Please try again.") {
+	if !strings.Contains(stream, "Pitot could not reach the model provider. Please try again.") {
 		t.Errorf("RUN_ERROR missing generic message: %s", stream)
 	}
 	if strings.Contains(stream, "secret") {
@@ -269,7 +269,7 @@ func TestRuntimeStepLimitExceeded(t *testing.T) {
 	}
 	stream := output.String()
 	assertEventOrder(t, stream, "RUN_STARTED", "RUN_ERROR")
-	if !strings.Contains(stream, "Fanout reached its step limit before finishing. Try a narrower question.") {
+	if !strings.Contains(stream, "Pitot reached its step limit before finishing. Try a narrower question.") {
 		t.Errorf("RUN_ERROR missing step limit message: %s", stream)
 	}
 }
@@ -370,7 +370,7 @@ func TestRuntimeRunInjectsAuthoritativeOriginIntoDashboardTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := dashboard.New(database.DB, originValidator{})
-	registry, err := NewToolRegistry(t.Context(), fanoutmcp.NewWithIntelligence(registryQueries{}, service, nil, nil, "test").MCP())
+	registry, err := NewToolRegistry(t.Context(), pitotmcp.NewWithIntelligence(registryQueries{}, service, nil, nil, "test").MCP())
 	if err != nil {
 		t.Fatal(err)
 	}

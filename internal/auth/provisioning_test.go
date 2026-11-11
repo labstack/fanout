@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	appstore "github.com/labstack/fanout/internal/store"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 const testIssuer = "https://issuer.example"

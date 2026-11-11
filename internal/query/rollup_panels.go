@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/labstack/fanout/internal/observability"
+	"github.com/labstack/pitot/internal/observability"
 )
 
 type RollupReader interface {

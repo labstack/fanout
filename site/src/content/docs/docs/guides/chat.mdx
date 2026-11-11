@@ -9,19 +9,19 @@ status: preview
 
 ## Enable a provider
 
-Select one provider and supply its key before starting Fanout:
+Select one provider and supply its key before starting Pitot:
 
 ```sh
-export FANOUT_AI_PROVIDER=anthropic
+export PITOT_AI_PROVIDER=anthropic
 export ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key
 ```
 
-For OpenAI, use `FANOUT_AI_PROVIDER=openai` and `OPENAI_API_KEY_FILE` instead.
+For OpenAI, use `PITOT_AI_PROVIDER=openai` and `OPENAI_API_KEY_FILE` instead.
 The selected provider requires its key. An empty provider disables chat.
 Restart after changing settings.
 
 The default models are `claude-sonnet-5-5` for Anthropic and `gpt-6.1-sol` for
-OpenAI. Override with `FANOUT_AI_MODEL`. `ANTHROPIC_BASE_URL` and
+OpenAI. Override with `PITOT_AI_MODEL`. `ANTHROPIC_BASE_URL` and
 `OPENAI_BASE_URL` select a gateway or alternate endpoint. See
 [AI settings](/docs/reference/configuration/ai) for endpoint and model requirements.
 
@@ -47,7 +47,7 @@ dialog. Renaming accepts a nonempty title of up to 120 characters.
 
 ## Explain a panel
 
-Open a dashboard panel's menu and choose **Explain in chat**. Fanout opens chat
+Open a dashboard panel's menu and choose **Explain in chat**. Pitot opens chat
 with the panel context. Explanation requests are answer-only; the agent can
 read evidence and suggest corrections, but cannot save changes during that run.
 

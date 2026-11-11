@@ -2,7 +2,7 @@ package query
 
 import (
 	"fmt"
-	"github.com/labstack/fanout/internal/suggest"
+	"github.com/labstack/pitot/internal/suggest"
 	"slices"
 	"strings"
 )

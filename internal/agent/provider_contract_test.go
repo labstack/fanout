@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
-	controlstore "github.com/labstack/fanout/internal/store"
+	controlstore "github.com/labstack/pitot/internal/store"
 )
 
 func TestOpenAIOutputItemsReplayVerbatim(t *testing.T) {
@@ -140,10 +140,10 @@ func TestOpenAIEncryptedContentConfigurationError(t *testing.T) {
 	}
 	err = p.Stream(context.Background(), StreamParams{}, func(StreamEvent) error { return nil })
 	var apiErr *APIError
-	if err == nil || !strings.Contains(err.Error(), "reasoning model") || !strings.Contains(err.Error(), "FANOUT_AI_MODEL") || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+	if err == nil || !strings.Contains(err.Error(), "reasoning model") || !strings.Contains(err.Error(), "PITOT_AI_MODEL") || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
 		t.Errorf("configuration error = %v", err)
 	}
-	if got := clientErrorMessage(err); got != "Fanout could not reach the model provider. Please try again." {
+	if got := clientErrorMessage(err); got != "Pitot could not reach the model provider. Please try again." {
 		t.Errorf("client error = %q", got)
 	}
 }

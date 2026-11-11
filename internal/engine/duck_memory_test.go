@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/labstack/fanout/internal/config"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -171,9 +171,9 @@ func memoryMetrics(t *testing.T) (memory, timestamp float64) {
 	}
 	for _, family := range families {
 		switch family.GetName() {
-		case "fanout_duckdb_memory_bytes":
+		case "pitot_duckdb_memory_bytes":
 			memory = family.Metric[0].GetGauge().GetValue()
-		case "fanout_duckdb_memory_last_success_timestamp_seconds":
+		case "pitot_duckdb_memory_last_success_timestamp_seconds":
 			timestamp = family.Metric[0].GetGauge().GetValue()
 		}
 	}
@@ -244,10 +244,10 @@ func TestMetricsScrapeDropsStaleMemoryWhileSamplerBlocks(t *testing.T) {
 			t.Fatalf("/metrics status=%d: %s", recorder.Code, recorder.Body.String())
 		}
 		body := recorder.Body.String()
-		if strings.Contains(body, "fanout_duckdb_memory_bytes") {
+		if strings.Contains(body, "pitot_duckdb_memory_bytes") {
 			t.Fatal("blocked sampler still exports stale memory series")
 		}
-		const prefix = "fanout_duckdb_memory_last_success_timestamp_seconds "
+		const prefix = "pitot_duckdb_memory_last_success_timestamp_seconds "
 		for _, line := range strings.Split(body, "\n") {
 			if strings.HasPrefix(line, prefix) {
 				value := strings.TrimPrefix(line, prefix)

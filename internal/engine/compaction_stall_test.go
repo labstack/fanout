@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine/writegate"
+	"github.com/labstack/pitot/internal/engine/writegate"
 )
 
 // Both rollups and read-cache passes hold a pin while using background SQL.

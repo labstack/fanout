@@ -3,8 +3,8 @@ package agent
 import (
 	"bytes"
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/auth"
-	controlstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/auth"
+	controlstore "github.com/labstack/pitot/internal/store"
 	"log/slog"
 	"net/http/httptest"
 	"strings"

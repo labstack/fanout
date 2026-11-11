@@ -1,4 +1,4 @@
-module github.com/labstack/fanout
+module github.com/labstack/pitot
 
 go 1.27.3
 

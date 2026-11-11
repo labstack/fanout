@@ -1,4 +1,4 @@
-// Command notices generates the third-party notices shipped with Fanout.
+// Command notices generates the third-party notices shipped with Pitot.
 package main
 
 import (
@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	engine "github.com/labstack/fanout/internal/duckdb"
+	engine "github.com/labstack/pitot/internal/duckdb"
 )
 
 type component struct {
@@ -141,7 +141,7 @@ func collect(root string) ([]component, error) {
 func collectGo(root string, all map[string]component) error {
 	targets := [][2]string{{"linux", "amd64"}, {"linux", "arm64"}, {"darwin", "amd64"}, {"darwin", "arm64"}}
 	for _, target := range targets {
-		cmd := exec.Command("go", "list", "-deps", "-json", "./cmd/fanout")
+		cmd := exec.Command("go", "list", "-deps", "-json", "./cmd/pitot")
 		cmd.Dir = root
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=1", "GOOS="+target[0], "GOARCH="+target[1])
 		stdout, err := cmd.StdoutPipe()
@@ -412,12 +412,12 @@ func sortedKeys[V any](values map[string]V) []string {
 
 func render(components []component) []byte {
 	var out strings.Builder
-	out.WriteString("FANOUT THIRD-PARTY NOTICES\n\n")
+	out.WriteString("PITOT THIRD-PARTY NOTICES\n\n")
 	out.WriteString("This file is generated from the Go packages linked into the four supported\n")
 	out.WriteString("release targets, the pinned native DuckDB engine, and the production dependency graphs of the two embedded\n")
 	out.WriteString("browser applications. Development-only dependencies are excluded. Regenerate it\n")
 	out.WriteString("with `just notices`; CI verifies it with `just notices-check`.\n\n")
-	out.WriteString("The following components are provided under their own terms. Fanout's Apache-2.0\n")
+	out.WriteString("The following components are provided under their own terms. Pitot's Apache-2.0\n")
 	out.WriteString("license does not replace or alter those terms.\n\n")
 	out.WriteString("COMPONENT INVENTORY\n")
 	out.WriteString("===================\n\n")

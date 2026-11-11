@@ -91,7 +91,7 @@ it('applies cookie expiry, domain, secure and path rules without exposing secret
   expect(cookieHeader(jar,new URL('https://evil.test/api/x'))).toBe('');
 });
 it('refuses collisions, unsafe labels, symlink ancestors and internal sealed-set output',()=>{
-  const root=mkdtempSync(join(realpathSync(tmpdir()),'fanout-eval-'));roots.push(root);mkdirSync(join(root,'.cache/dashboard-eval'),{recursive:true});
+  const root=mkdtempSync(join(realpathSync(tmpdir()),'pitot-eval-'));roots.push(root);mkdirSync(join(root,'.cache/dashboard-eval'),{recursive:true});
   const out=join(root,'.cache/dashboard-eval/run');expect(safeOutput(out,'benchmark',root)).toBe(out);
   expect(()=>safeOutput(out,'benchmark',root)).toThrow();
   symlinkSync(join(root,'.cache/dashboard-eval'),join(root,'link'));expect(()=>safeOutput(join(root,'link/run2'),'benchmark',root)).toThrow();

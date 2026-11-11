@@ -11,8 +11,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
 )
 
 const (
@@ -402,7 +402,7 @@ func validBrowserMutation(r *http.Request) bool {
 	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
 		return false
 	}
-	if r.Header.Get("Fanout-Request") == "1" {
+	if r.Header.Get("Pitot-Request") == "1" {
 		return true
 	}
 	for _, raw := range []string{r.Header.Get("Origin"), r.Header.Get("Referer")} {

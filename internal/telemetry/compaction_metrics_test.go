@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/pitot/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 

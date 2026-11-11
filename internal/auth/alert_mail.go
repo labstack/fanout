@@ -85,7 +85,7 @@ func SendAlert(ctx context.Context, cfg SMTPConfig, alert AlertMail) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidMailAddress, err)
 	}
-	message.SetMessageIDWithValue(alert.ID + "@alerts.fanout")
+	message.SetMessageIDWithValue(alert.ID + "@alerts.pitot")
 	return deliver(ctx, cfg, message)
 }
 
@@ -147,7 +147,7 @@ func renderAlertMail(alert AlertMail) (subject, text, html string, err error) {
 		Time:        alert.Time.UTC().Format(time.RFC1123),
 		LimitNotice: singleLine(alert.LimitNotice, maxAlertDescriptionLength),
 	}
-	subject = fmt.Sprintf("[Fanout] %s: %s on %s", data.Label, data.Rule, data.Service)
+	subject = fmt.Sprintf("[Pitot] %s: %s on %s", data.Label, data.Rule, data.Service)
 	data.Preheader = subject
 
 	var body strings.Builder

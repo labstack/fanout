@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/annotations"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/annotations"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 func TestServiceDetectorsWeightMinutesBySpanCount(t *testing.T) {

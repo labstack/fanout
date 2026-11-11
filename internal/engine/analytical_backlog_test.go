@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/annotations"
-	"github.com/labstack/fanout/internal/engine/writegate"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/annotations"
+	"github.com/labstack/pitot/internal/engine/writegate"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 // Equal-ingest immutable batches cover six edge sub-windows. Channel barriers

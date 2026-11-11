@@ -1,7 +1,7 @@
 ---
 title: Privacy
-description: What fanout.run measures, what it never collects, and how to turn analytics off.
-summary: Website analytics, consent controls, browser storage and hosting; separate from a self-hosted Fanout instance.
+description: What pitot.dev measures, what it never collects, and how to turn analytics off.
+summary: Website analytics, consent controls, browser storage and hosting; separate from a self-hosted Pitot instance.
 read_when:
   - You want to know what this website records about your visit.
   - You allowed or declined analytics and want to change that answer.
@@ -10,7 +10,7 @@ status: shipped
 
 import AnalyticsPreference from "../../components/AnalyticsPreference.astro";
 
-This page describes `fanout.run`. A self-hosted Fanout instance stores telemetry
+This page describes `pitot.dev`. A self-hosted Pitot instance stores telemetry
 on its own machine and sends no usage reports to LabStack. When you enable the
 built-in agent, it sends conversation content and tool results to your configured
 AI provider. External MCP clients receive the results of the tools they call.
@@ -62,7 +62,7 @@ website.
 ### Storage
 
 Declining stores nothing that travels with a request. Your answer is kept in
-your browser's local storage under `fanout.analytics-consent.v1`, which is read
+your browser's local storage under `pitot.analytics-consent.v1`, which is read
 by this site and sent to nobody.
 
 Allowing lets Google Analytics set its `_ga` cookies, which hold a random
@@ -83,6 +83,6 @@ you allow analytics.
 ## Contact
 
 Questions about this page belong in
-[an issue](https://github.com/labstack/fanout/issues). The site's source,
+[an issue](https://github.com/labstack/pitot/issues). The site's source,
 including the analytics code described here, is in
-[the repository](https://github.com/labstack/fanout/tree/main/site).
+[the repository](https://github.com/labstack/pitot/tree/main/site).

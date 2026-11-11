@@ -11,11 +11,11 @@ import (
 	"time"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/queryrows"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/query"
+	"github.com/labstack/pitot/internal/queryrows"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

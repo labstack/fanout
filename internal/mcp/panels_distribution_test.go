@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/pitot/internal/dashboard"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

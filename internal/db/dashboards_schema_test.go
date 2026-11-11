@@ -3,8 +3,8 @@ package db_test
 import (
 	"testing"
 
-	"github.com/labstack/fanout/internal/db/generated"
-	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/db/generated"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 func TestDashboardVersionsCascadeAndOptimisticUpdate(t *testing.T) {

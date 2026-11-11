@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 type exemplarProbeEngine struct {

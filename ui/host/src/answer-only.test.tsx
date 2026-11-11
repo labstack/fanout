@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import App from "./app";
-import { useFanoutApp } from "./app-context";
+import { usePitotApp } from "./app-context";
 
 vi.mock("./auth", () => ({
   default: ({ children }: { children: React.ReactNode }) => children,
@@ -16,7 +16,7 @@ vi.mock("./auth", () => ({
 }));
 
 function Controls() {
-  const app = useFanoutApp();
+  const app = usePitotApp();
   return <div>
     <button disabled={!app.ready || app.running} onClick={() => app.openChat("Explain observed latency", { answer_only: true, context: [{ description: "Observed panel diagnostics", value: "private spec" }] })}>Explain observed panel</button>
     <button disabled={!app.ready || app.running} onClick={app.retry}>Retry observed turn</button>
@@ -29,7 +29,7 @@ it("carries answer-only through openChat and HttpAgent, retains it on retry and 
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const requests: { threadId: string; runId: string; messages: Message[]; forwardedProps: { answer_only?: boolean }; context: {description:string;value:string}[] }[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(String(input), "https://fanout.example.test").pathname;
+    const path = new URL(String(input), "https://pitot.example.test").pathname;
     if (path === "/api/agent/runs") {
       const body = JSON.parse(String(init?.body)); requests.push(body);
       const events = [{ type: "RUN_STARTED", threadId: body.threadId, runId: body.runId }, { type: "RUN_FINISHED", threadId: body.threadId, runId: body.runId }];

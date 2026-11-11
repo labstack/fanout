@@ -183,7 +183,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
             <Menu.Divider />
           </>}
           {refreshError && retryable && onRetry && <Menu.Item disabled={loading} onClick={() => {closeTooltip(); onRetry();}}>Retry</Menu.Item>}
-          {fixable && agentAvailable && onFix && <Menu.Item onClick={onFix}>Ask Fanout to fix it</Menu.Item>}
+          {fixable && agentAvailable && onFix && <Menu.Item onClick={onFix}>Ask Pitot to fix it</Menu.Item>}
           {onView && <Menu.Item leftSection={<ArrowsOut size={14} />} onClick={onView}>View</Menu.Item>}
           {agentAvailable && onExplain && <Menu.Item leftSection={<ChatCircleText size={14} />} onClick={onExplain}>Explain in chat</Menu.Item>}
           {onCopyLink && <Menu.Item leftSection={<Copy size={14} />} onClick={onCopyLink}>Copy link</Menu.Item>}
@@ -205,7 +205,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
             <Text data-panel-error-message={result.reason !== "busy" || undefined} title={result.error} size="xs" style={{overflowWrap: "anywhere"}}>{result.error || "The query could not run."}</Text>
             {result.problems?.map((problem, i) => <Text key={i} size="xs"><code>{problem.path}</code>{problem.message !== result.error && `: ${problem.message}`}{problem.hint && ` — ${problem.hint}`}</Text>)}
           </Notice>
-          {fixable && agentAvailable && onFix && <Button size="compact-xs" variant="light" onClick={onFix}>Ask Fanout to fix it</Button>}
+          {fixable && agentAvailable && onFix && <Button size="compact-xs" variant="light" onClick={onFix}>Ask Pitot to fix it</Button>}
         </Box>
         : result?.status === "empty" ? <DataState state="empty" empty={{title: "No data in this time range", description: <Text size="sm" style={{overflowWrap: "anywhere"}}>{result.diagnosis || (panel.time?.range ? "This panel keeps its own time range; edit the panel to change it." : "Widen the time range to find matching telemetry.")}</Text>, action: zoomed && onZoomReset ? <Button variant="default" size="compact-xs" onClick={onZoomReset}>Reset zoom</Button> : onWiden && !panel.time?.range ? <Button variant="default" size="compact-xs" onClick={onWiden}>Widen time range</Button> : undefined}} />
         : <ChartHintContext.Provider value={chartHint}><Viz traceLinks={traceLinks} controls={controls} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} /></ChartHintContext.Provider>}

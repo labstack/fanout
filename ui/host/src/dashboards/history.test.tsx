@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ApiError, type DashboardRecord, type VersionRecord } from "./api";
 import { HistoryDrawer } from "./history";
-import { fanoutTheme } from "../../../theme";
+import { pitotTheme } from "../../../theme";
 import { panelResultsKey, variableOptionsKey } from "./query-keys";
 
 const api = vi.hoisted(() => ({ listVersions: vi.fn(), getVersion: vi.fn(), restoreVersion: vi.fn() }));
@@ -45,7 +45,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   onRestored = vi.fn(); onClose = vi.fn();
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  render = async (opened = true, ready?: () => void) => { await act(async () => root.render(<MantineProvider theme={fanoutTheme} forceColorScheme={scheme}><QueryClientProvider client={client}><HistoryDrawer id="board" currentVersion={currentVersion} currentSpec={record.spec} opened={opened} onClose={onClose} onRestored={onRestored} /></QueryClientProvider></MantineProvider>)); if (opened) await settle(ready); };
+  render = async (opened = true, ready?: () => void) => { await act(async () => root.render(<MantineProvider theme={pitotTheme} forceColorScheme={scheme}><QueryClientProvider client={client}><HistoryDrawer id="board" currentVersion={currentVersion} currentSpec={record.spec} opened={opened} onClose={onClose} onRestored={onRestored} /></QueryClientProvider></MantineProvider>)); if (opened) await settle(ready); };
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); document.body.innerHTML = ""; vi.unstubAllGlobals(); });
 

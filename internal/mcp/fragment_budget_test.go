@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/observability"
+	"github.com/labstack/pitot/internal/query"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -111,7 +111,7 @@ func TestNullArgumentsRawJSONRPC(t *testing.T) {
 	h := s.HTTPHandler()
 	for _, name := range []string{"get_telemetry_schema", "list_dashboards", "get_overview"} {
 		t.Run(name, func(t *testing.T) {
-			request := httptest.NewRequest("POST", "/api/mcp", strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"_meta":{"io.fanout/owner-id":"owner","io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},"arguments":null}}`, name)))
+			request := httptest.NewRequest("POST", "/api/mcp", strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"_meta":{"io.pitot/owner-id":"owner","io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},"arguments":null}}`, name)))
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Accept", "application/json, text/event-stream")
 			request.Header.Set("MCP-Protocol-Version", ProtocolVersion)

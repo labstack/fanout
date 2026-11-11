@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, extname } from "node:path";
 
-const output = await mkdtemp(join(tmpdir(), "fanout-mcp-host-"));
-process.env.FANOUT_APPS_OUT = join(output, "apps");
+const output = await mkdtemp(join(tmpdir(), "pitot-mcp-host-"));
+process.env.PITOT_APPS_OUT = join(output, "apps");
 try {
   await build({ configFile: "vite.apps.config.ts" });
   await build({ configFile: "e2e/host/vite.config.ts", build: { outDir: join(output, "host") } });

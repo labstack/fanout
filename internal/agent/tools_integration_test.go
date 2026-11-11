@@ -3,16 +3,16 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/pitot/internal/dashboard"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"testing"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
-	"github.com/labstack/fanout/internal/intelligence"
-	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/query"
-	controlstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/intelligence"
+	pitotmcp "github.com/labstack/pitot/internal/mcp"
+	"github.com/labstack/pitot/internal/observability"
+	"github.com/labstack/pitot/internal/query"
+	controlstore "github.com/labstack/pitot/internal/store"
 )
 
 type registryQueries struct{}
@@ -32,7 +32,7 @@ func (registryQueries) Trace(context.Context, observability.Scope, string, strin
 }
 
 func TestToolRegistryNegotiatesMCPApps(t *testing.T) {
-	server := fanoutmcp.NewWithIntelligence(registryQueries{}, nil, nil, registryIntelligence{}, "test")
+	server := pitotmcp.NewWithIntelligence(registryQueries{}, nil, nil, registryIntelligence{}, "test")
 	registry, err := NewToolRegistry(context.Background(), server.MCP())
 	if err != nil {
 		t.Fatalf("NewToolRegistry: %v", err)
@@ -44,12 +44,12 @@ func TestToolRegistryNegotiatesMCPApps(t *testing.T) {
 	})
 
 	want := map[string]string{
-		"query_telemetry":         "ui://fanout/panels.html",
-		"get_overview":            "ui://fanout/panels.html",
-		"get_service_topology":    "ui://fanout/panels.html",
-		"get_service_performance": "ui://fanout/panels.html",
-		"inspect_trace":           "ui://fanout/panels.html",
-		"search_logs":             "ui://fanout/panels.html",
+		"query_telemetry":         "ui://pitot/panels.html",
+		"get_overview":            "ui://pitot/panels.html",
+		"get_service_topology":    "ui://pitot/panels.html",
+		"get_service_performance": "ui://pitot/panels.html",
+		"inspect_trace":           "ui://pitot/panels.html",
+		"search_logs":             "ui://pitot/panels.html",
 	}
 	if len(registry.apps) != len(want) {
 		t.Fatalf("registered MCP apps = %v, want %v", registry.apps, want)
@@ -85,7 +85,7 @@ func TestToolRegistryInjectsAuthenticatedBuildOrigin(t *testing.T) {
 	defer registry.Close()
 	origin := dashboard.BuildOrigin{ThreadID: "server-thread", MessageID: "server-user", RequestExcerpt: "Actual request"}
 	ctx := dashboard.WithBuildOrigin(dashboard.WithOwner(t.Context(), "owner"), origin)
-	_, err = registry.Execute(ctx, ToolCall{Name: "capture", Input: `{"_meta":{"io.fanout/build-origin":{"thread_id":"spoof"}}}`})
+	_, err = registry.Execute(ctx, ToolCall{Name: "capture", Input: `{"_meta":{"io.pitot/build-origin":{"thread_id":"spoof"}}}`})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestRuntimeDashboardHistoryUsesAuthenticatedOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := fanoutmcp.NewWithIntelligence(registryQueries{}, service, executor, nil, "test")
+	server := pitotmcp.NewWithIntelligence(registryQueries{}, service, executor, nil, "test")
 	// Restoring a spec the dashboard already has is rejected, so the save changes it.
 	if _, err := service.Replace(t.Context(), "owner", created.ID, query.Dashboard{Name: "History", Panels: []query.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "second"}}}, 1, dashboard.Author{Kind: "user", ID: "owner"}, "Saved again"); err != nil {
 		t.Fatal(err)

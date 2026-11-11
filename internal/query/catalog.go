@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/labstack/fanout/internal/suggest"
-	"github.com/labstack/fanout/internal/telemetry"
-	"github.com/labstack/fanout/internal/telemetry/semconv"
+	"github.com/labstack/pitot/internal/suggest"
+	"github.com/labstack/pitot/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry/semconv"
 )
 
 type FieldType string

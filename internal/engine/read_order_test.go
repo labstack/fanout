@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 // A reader queued for a pool connection does not yet read Parquet, so it must

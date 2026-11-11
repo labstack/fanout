@@ -1,6 +1,6 @@
 package query
 
-import "github.com/labstack/fanout/internal/observability"
+import "github.com/labstack/pitot/internal/observability"
 
 func redactedLogSource() string {
 	// Qualifying the physical relation also prevents an author's logs CTE from

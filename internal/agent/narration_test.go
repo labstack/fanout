@@ -10,7 +10,7 @@ import (
 	"time"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
-	controlstore "github.com/labstack/fanout/internal/store"
+	controlstore "github.com/labstack/pitot/internal/store"
 )
 
 func TestRuntimeKeepsToolNarrationOutOfTranscript(t *testing.T) {
@@ -296,12 +296,12 @@ func TestRuntimeErrorMessagesArePlain(t *testing.T) {
 		err  error
 		want string
 	}{
-		{errProvider, "Fanout could not reach the model provider. Please try again."},
-		{errStepLimit, "Fanout reached its step limit before finishing. Try a narrower question."},
-		{fmt.Errorf("%w: unrelated wording", errTimeLimit), "Fanout reached its 5-minute time limit. Try a smaller request."},
-		{fmt.Errorf("%w: misleading 5-minute text", errStepLimit), "Fanout reached its step limit before finishing. Try a narrower question."},
+		{errProvider, "Pitot could not reach the model provider. Please try again."},
+		{errStepLimit, "Pitot reached its step limit before finishing. Try a narrower question."},
+		{fmt.Errorf("%w: unrelated wording", errTimeLimit), "Pitot reached its 5-minute time limit. Try a smaller request."},
+		{fmt.Errorf("%w: misleading 5-minute text", errStepLimit), "Pitot reached its step limit before finishing. Try a narrower question."},
 		{context.Canceled, "Stopped"},
-		{errors.New("private unknown error"), "Fanout could not complete this analysis. Please try again."},
+		{errors.New("private unknown error"), "Pitot could not complete this analysis. Please try again."},
 	} {
 		if got := clientErrorMessage(tc.err); got != tc.want {
 			t.Fatalf("got=%q want=%q", got, tc.want)

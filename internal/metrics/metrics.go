@@ -47,52 +47,52 @@ const (
 )
 
 var (
-	ReadCachePendingBatches = promauto.NewGauge(prometheus.GaugeOpts{Name: "fanout_read_cache_pending_batches", Help: "Nonempty active immutable batches across spans, logs and metrics not covered at the start of the last read-cache pass"})
+	ReadCachePendingBatches = promauto.NewGauge(prometheus.GaugeOpts{Name: "pitot_read_cache_pending_batches", Help: "Nonempty active immutable batches across spans, logs and metrics not covered at the start of the last read-cache pass"})
 
 	// QueryCacheRequests counts panel, exemplar and trace-detail lookups in the
 	// query result cache: hit (fresh), stale (served while one refresh runs),
 	// miss (ran the queries) and coalesced (joined an identical run in flight).
 	QueryCacheRequests = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_query_cache_requests_total",
+		Name: "pitot_query_cache_requests_total",
 		Help: "Query result cache lookups by result: hit, stale, miss or coalesced",
 	}, []string{"result"})
 
 	QueryCacheBytes = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "fanout_query_cache_bytes",
+		Name: "pitot_query_cache_bytes",
 		Help: "Estimated bytes of results held in the query result cache",
 	})
 
 	IngestBackpressureSeconds = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_ingest_backpressure_seconds_total", Help: "Total seconds an ingest admission rate cap was active",
+		Name: "pitot_ingest_backpressure_seconds_total", Help: "Total seconds an ingest admission rate cap was active",
 	})
 
 	CompactionPassSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "fanout_compaction_pass_seconds", Help: "Duration of a compaction pass including publication", Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300},
+		Name: "pitot_compaction_pass_seconds", Help: "Duration of a compaction pass including publication", Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300},
 	})
 	CompactionRetiredBatches = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_compaction_retired_batches_total", Help: "Input batches retired from the live catalog by compaction publications",
+		Name: "pitot_compaction_retired_batches_total", Help: "Input batches retired from the live catalog by compaction publications",
 	})
 
 	IngestThrottled = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_ingest_throttled_total", Help: "Whole exports refused by admission reason: debt, reads or budget",
+		Name: "pitot_ingest_throttled_total", Help: "Whole exports refused by admission reason: debt, reads or budget",
 	}, []string{"reason"})
 	IngestAdmissionRate = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "fanout_ingest_admission_rows_per_second", Help: "Current ingest admission rows per second; zero means uncapped",
+		Name: "pitot_ingest_admission_rows_per_second", Help: "Current ingest admission rows per second; zero means uncapped",
 	})
 
 	// Ingest metrics
 	IngestTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_ingest_rows_total",
+		Name: "pitot_ingest_rows_total",
 		Help: "Total rows ingested",
 	}, []string{"signal"})
 
 	IngestQueueDepth = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "fanout_ingest_queue_depth",
+		Name: "pitot_ingest_queue_depth",
 		Help: "Current ingest submission queue depth",
 	}, []string{"signal"})
 
 	FlushTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_flush_total",
+		Name: "pitot_flush_total",
 		Help: "Total flush operations",
 	}, []string{"signal"})
 
@@ -102,7 +102,7 @@ var (
 	// rising one means senders are being asked to retry, which is worth
 	// seeing before it becomes a support question.
 	IngestShedTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_ingest_shed_total",
+		Name: "pitot_ingest_shed_total",
 		Help: "Telemetry requests refused because ingest was over its in-flight byte budget",
 	})
 
@@ -111,137 +111,137 @@ var (
 	// cancelled, or the server cut the request off while shutting down. The
 	// sender resends, so storing the abandoned copy too would duplicate rows.
 	IngestAbandonedTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_ingest_abandoned_total",
+		Name: "pitot_ingest_abandoned_total",
 		Help: "Telemetry requests dropped before commit because the request ended (sender timeout or cancel, or server shutdown)",
 	})
 
 	FlushDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "fanout_flush_duration_seconds",
+		Name:    "pitot_flush_duration_seconds",
 		Help:    "Flush duration in seconds",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"signal"})
 
 	FlushErrors = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_flush_errors_total",
+		Name: "pitot_flush_errors_total",
 		Help: "Total flush write errors",
 	}, []string{"signal"})
 
 	RowsDropped = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_rows_dropped_total",
+		Name: "pitot_rows_dropped_total",
 		Help: "Total rows left uncommitted after a permanent flush failure",
 	}, []string{"signal"})
 
 	WriteGateWait = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "fanout_write_gate_wait_seconds",
+		Name:    "pitot_write_gate_wait_seconds",
 		Help:    "Time spent waiting to enter the Telemetry catalog write critical section",
 		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
 	}, []string{"operation"})
 
 	WriteGateHold = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "fanout_write_gate_hold_seconds",
+		Name:    "pitot_write_gate_hold_seconds",
 		Help:    "Time spent inside the Telemetry catalog write critical section",
 		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
 	}, []string{"operation"})
 
 	// Rollup metrics
 	RollupTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_rollup_total",
+		Name: "pitot_rollup_total",
 		Help: "Total rollup operations",
 	})
 
 	RollupDuration = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "fanout_rollup_duration_seconds",
+		Name:    "pitot_rollup_duration_seconds",
 		Help:    "Rollup duration in seconds",
 		Buckets: []float64{.1, .5, 1, 2, 5, 10, 30, 60},
 	})
 
 	RollupRows = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_rollup_rows_total",
+		Name: "pitot_rollup_rows_total",
 		Help: "Total rows processed by rollups",
 	})
 
 	RollupLastSuccess = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "fanout_rollup_last_success_timestamp",
+		Name: "pitot_rollup_last_success_timestamp",
 		Help: "Timestamp of last successful rollup",
 	})
 
 	RollupComponentTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_rollup_component_total",
+		Name: "pitot_rollup_component_total",
 		Help: "Rollup component executions by bounded outcome",
 	}, []string{"rollup", "result"})
 
 	// Duration is measured end to end and therefore includes time spent waiting
 	// for the catalog write gate. That is deliberate: it is the latency an
-	// operator cares about, and fanout_write_gate_wait_seconds already isolates
+	// operator cares about, and pitot_write_gate_wait_seconds already isolates
 	// the waiting half. Timing only the held section would duplicate
-	// fanout_write_gate_hold_seconds.
+	// pitot_write_gate_hold_seconds.
 	RollupComponentDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "fanout_rollup_component_duration_seconds",
+		Name:    "pitot_rollup_component_duration_seconds",
 		Help:    "Rollup component duration in seconds, including write-gate wait",
 		Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
 	}, []string{"rollup"})
 
 	RollupComponentRows = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_rollup_component_rows_total",
+		Name: "pitot_rollup_component_rows_total",
 		Help: "Rows materialized by each rollup component",
 	}, []string{"rollup"})
 
 	RollupEnabled = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "fanout_rollup_enabled",
+		Name: "pitot_rollup_enabled",
 		Help: "Whether the rollup component is enabled",
 	}, []string{"rollup"})
 
 	RollupWatermark = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "fanout_rollup_watermark_timestamp_seconds",
+		Name: "pitot_rollup_watermark_timestamp_seconds",
 		Help: "Latest completed rollup watermark as a Unix timestamp",
 	}, []string{"rollup"})
 
 	RollupSourceMax = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "fanout_rollup_source_timestamp_seconds",
+		Name: "pitot_rollup_source_timestamp_seconds",
 		Help: "Latest source ingest timestamp visible to the rollup",
 	}, []string{"rollup"})
 
 	RollupLag = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "fanout_rollup_lag_seconds",
+		Name: "pitot_rollup_lag_seconds",
 		Help: "Source ingest time not yet covered by the completed rollup watermark",
 	}, []string{"rollup"})
 
 	RollupBacklogChunks = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "fanout_rollup_backlog_chunks",
+		Name: "pitot_rollup_backlog_chunks",
 		Help: "Estimated bounded catch-up chunks remaining for the rollup",
 	}, []string{"rollup"})
 
 	TelemetryOperationTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_telemetry_operation_total",
+		Name: "pitot_telemetry_operation_total",
 		Help: "Telemetry compaction and maintenance calls by bounded outcome",
 	}, []string{"operation", "result"})
 
 	TelemetryOperationDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "fanout_telemetry_operation_duration_seconds",
+		Name:    "pitot_telemetry_operation_duration_seconds",
 		Help:    "Executed telemetry compaction and maintenance duration in seconds",
 		Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 120, 300},
 	}, []string{"operation"})
 
 	// Storage metrics
 	ParquetSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "fanout_parquet_size_bytes",
+		Name: "pitot_parquet_size_bytes",
 		Help: "Total size of telemetry Parquet files in bytes",
 	}, []string{"signal"})
 
 	ParquetFiles = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "fanout_parquet_files",
+		Name: "pitot_parquet_files",
 		Help: "Number of telemetry Parquet files per signal",
 	}, []string{"signal"})
 
 	// A swap is a rename and an fsync, so the ladder starts in microseconds.
 	ParquetPublishHold = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "fanout_parquet_publish_hold_seconds",
+		Name:    "pitot_parquet_publish_hold_seconds",
 		Help:    "Time one Parquet publication took to swap a new file set into the catalog; readers never wait for it",
 		Buckets: []float64{.000001, .000005, .00002, .0001, .0005, .001, .005, .025, .1, .5, 1, 2.5, 5, 10, 30, 60},
 	})
 
 	ParquetRetiringBatches = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "fanout_parquet_retiring_batches",
+		Name: "pitot_parquet_retiring_batches",
 		Help: "Batches compaction or retention replaced whose files wait for earlier readers to finish",
 	})
 
@@ -251,7 +251,7 @@ var (
 	// The connection is acquired before this timer starts, so the two do not
 	// overlap.
 	DuckDBStatement = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "fanout_duckdb_statement_seconds",
+		Name:    "pitot_duckdb_statement_seconds",
 		Help:    "Time a read statement spent executing in DuckDB, excluding any wait to start it",
 		Buckets: []float64{.0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30},
 	})
@@ -259,7 +259,7 @@ var (
 	// DuckDB checks for interrupts only between chunks, so a costly
 	// expression can run a statement long past its deadline.
 	DuckDBStatementOverruns = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_duckdb_statement_overruns_total",
+		Name: "pitot_duckdb_statement_overruns_total",
 		Help: "Read statements seen running more than 25 seconds past their deadline",
 	})
 
@@ -267,36 +267,36 @@ var (
 	// non-FORCE form refuses while another write transaction is open — so both
 	// how long it takes and how often it does not happen are worth knowing.
 	DuckDBCheckpoint = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "fanout_duckdb_checkpoint_seconds",
+		Name:    "pitot_duckdb_checkpoint_seconds",
 		Help:    "Duration of an explicit DuckDB checkpoint on the rollup cache",
 		Buckets: []float64{.001, .005, .01, .05, .1, .25, .5, 1, 2.5, 5, 10, 30},
 	})
 
 	DuckDBCheckpointFailures = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_duckdb_checkpoint_failures_total",
+		Name: "pitot_duckdb_checkpoint_failures_total",
 		Help: "Explicit DuckDB checkpoints that returned an error",
 	})
 
 	// HTTP metrics
 	HTTPRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_http_requests_total",
+		Name: "pitot_http_requests_total",
 		Help: "Total HTTP requests",
 	}, []string{"method", "path", "status"})
 
 	HTTPRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "fanout_http_request_duration_seconds",
+		Name:    "pitot_http_request_duration_seconds",
 		Help:    "HTTP request duration in seconds",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"method", "path"})
 
 	// Authentication and authorization metrics.
 	BrowserSessions = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "fanout_auth_browser_sessions",
+		Name: "pitot_auth_browser_sessions",
 		Help: "Browser session rows by current lifecycle state",
 	}, []string{"state"})
 
 	AuthAuditWriteFailures = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_auth_audit_write_failures_total",
+		Name: "pitot_auth_audit_write_failures_total",
 		Help: "Security audit events that could not be persisted",
 	})
 )
@@ -344,7 +344,7 @@ type duckDBMemorySource struct {
 // actually predicts an out-of-memory kill is the gap between what the process
 // holds and what DuckDB admits to holding. Exporting the tags makes that gap
 // directly observable: untracked = process_resident_memory_bytes
-// - sum(fanout_duckdb_memory_bytes) - go_memstats_heap_sys_bytes. Without it
+// - sum(pitot_duckdb_memory_bytes) - go_memstats_heap_sys_bytes. Without it
 // every diagnosis of this process is an inference, which is how a whole day
 // got spent optimising a Go heap that was never the problem.
 var duckDBMemoryStats atomic.Pointer[duckDBMemorySource]
@@ -363,13 +363,13 @@ func SetDuckDBMemorySource(interval time.Duration) (record func(map[string]int64
 // Both series come from one immutable sample, so concurrent scrapes never see
 // a partial tag set or a timestamp belonging to a different sample.
 var duckDBMemoryDesc = prometheus.NewDesc(
-	"fanout_duckdb_memory_bytes",
+	"pitot_duckdb_memory_bytes",
 	"Last sampled DuckDB memory usage by tag, as DuckDB itself accounts for it",
 	[]string{"tag"}, nil,
 )
 
 var duckDBMemorySampleDesc = prometheus.NewDesc(
-	"fanout_duckdb_memory_last_success_timestamp_seconds",
+	"pitot_duckdb_memory_last_success_timestamp_seconds",
 	"Unix timestamp of the last successful DuckDB memory sample, or zero before the first success",
 	nil, nil,
 )
@@ -426,27 +426,27 @@ func poolStats() sql.DBStats {
 // nothing exported it.
 var (
 	_ = promauto.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "fanout_duckdb_pool_in_use",
+		Name: "pitot_duckdb_pool_in_use",
 		Help: "DuckDB read connections currently in use",
 	}, func() float64 { return float64(poolStats().InUse) })
 
 	_ = promauto.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "fanout_duckdb_pool_idle",
+		Name: "pitot_duckdb_pool_idle",
 		Help: "DuckDB read connections currently idle",
 	}, func() float64 { return float64(poolStats().Idle) })
 
 	_ = promauto.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "fanout_duckdb_pool_max_open",
+		Name: "pitot_duckdb_pool_max_open",
 		Help: "Configured DuckDB read connection limit",
 	}, func() float64 { return float64(poolStats().MaxOpenConnections) })
 
 	_ = promauto.NewCounterFunc(prometheus.CounterOpts{
-		Name: "fanout_duckdb_pool_waits_total",
+		Name: "pitot_duckdb_pool_waits_total",
 		Help: "Times a caller waited for a free DuckDB read connection",
 	}, func() float64 { return float64(poolStats().WaitCount) })
 
 	_ = promauto.NewCounterFunc(prometheus.CounterOpts{
-		Name: "fanout_duckdb_pool_wait_seconds_total",
+		Name: "pitot_duckdb_pool_wait_seconds_total",
 		Help: "Total time callers spent waiting for a free DuckDB read connection",
 	}, func() float64 { return poolStats().WaitDuration.Seconds() })
 )
@@ -582,7 +582,7 @@ func SetCompactionBacklogSource(count func() int) func() {
 }
 
 var _ = promauto.NewGaugeFunc(prometheus.GaugeOpts{
-	Name: "fanout_compaction_backlog_batches", Help: "Live generation-0 batches, including underfilled groups and oversized terminal batches",
+	Name: "pitot_compaction_backlog_batches", Help: "Live generation-0 batches, including underfilled groups and oversized terminal batches",
 }, func() float64 {
 	if source := compactionBacklog.Load(); source != nil {
 		return float64(source.count())

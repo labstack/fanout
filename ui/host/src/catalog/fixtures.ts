@@ -97,7 +97,7 @@ const frames: Record<string, Frame> = {
 
 export const results: PanelResult[] = panels.map(panel => ({ id: panel.id, status: "ok", frame: frames[panel.id], elapsed_ms: 24, interval: "5m", from_ms: storyNow - 3600000, to_ms: storyNow }));
 export const health: PanelFragment = { view: { kind: "preset", key: "a".repeat(64) }, dashboard: { version: 1, name: "System health", time: { range: "1h", refresh: "off" }, panels: [panels[2]] }, results: [results[2]] };
-export const healthContent: MCPAppContent = { resource_uri: "ui://fanout/panels.html", tool_name: "get_overview", tool_input: { window: "1h" }, tool_result: health, is_error: false };
+export const healthContent: MCPAppContent = { resource_uri: "ui://pitot/panels.html", tool_name: "get_overview", tool_input: { window: "1h" }, tool_result: health, is_error: false };
 // Saved responses carry the server's packed coordinates, not only draft widths.
 const dashboardGrids = [
   { x: 0, y: 0, w: 4, h: 6 }, { x: 4, y: 0, w: 8, h: 6 },

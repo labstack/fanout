@@ -2,8 +2,8 @@ import type { Page } from "@playwright/test";
 
 export async function mountApp(page: Page, html: string, fragment: unknown, theme: "light" | "dark") {
   // A same-origin harness document owns the host-side transport; the iframe has an opaque origin.
-  await page.route("http://fanout-harness.test/**", route => route.fulfill({ contentType: "text/html", body: "<!doctype html><html><body style='margin:0'><iframe title='Fragment smoke' sandbox='allow-scripts' style='display:block;width:100%;height:240px;border:0'></iframe></body></html>" }));
-  await page.goto("http://fanout-harness.test/");
+  await page.route("http://pitot-harness.test/**", route => route.fulfill({ contentType: "text/html", body: "<!doctype html><html><body style='margin:0'><iframe title='Fragment smoke' sandbox='allow-scripts' style='display:block;width:100%;height:240px;border:0'></iframe></body></html>" }));
+  await page.goto("http://pitot-harness.test/");
   await page.evaluate(({ html, fragment, theme }) => {
     const iframe = document.querySelector("iframe")!;
     const host = window as typeof window & { smokeSizes: number[]; smokeDelivered: boolean };
@@ -14,7 +14,7 @@ export async function mountApp(page: Page, html: string, fragment: unknown, them
       const message = event.data;
       if (message.method === "ui/initialize") {
         send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: message.params.protocolVersion,
-          hostInfo: { name: "Fanout smoke", version: "1.0.0" }, hostCapabilities: { serverTools: {}, logging: {} },
+          hostInfo: { name: "Pitot smoke", version: "1.0.0" }, hostCapabilities: { serverTools: {}, logging: {} },
           hostContext: { theme, displayMode: "inline", availableDisplayModes: ["inline", "fullscreen"] } } });
       } else if (message.method === "ui/notifications/initialized") {
         send({ jsonrpc: "2.0", method: "ui/notifications/tool-input", params: { arguments: {} } });

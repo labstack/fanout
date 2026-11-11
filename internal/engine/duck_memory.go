@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/pitot/internal/metrics"
 )
 
 const duckDBMemorySampleInterval = 5 * time.Second

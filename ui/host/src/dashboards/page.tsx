@@ -6,7 +6,7 @@ import { Copy } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
-import { createDashboardPrompt, useFanoutApp, type TurnOptions } from "../app-context";
+import { createDashboardPrompt, usePitotApp, type TurnOptions } from "../app-context";
 import { ApiError, dashboardsKey, getDashboard, listDashboards, queryExemplars, getTrace, resolveVariables } from "./api";
 import { PanelGrid } from "./grid";
 import { DrillDrawer } from "./drill";
@@ -38,7 +38,7 @@ const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace, s
 const zoomOut: Record<string, string> = { "5m": "15m", "15m": "1h", "1h": "3h", "3h": "6h", "6h": "12h", "12h": "24h", "24h": "2d", "2d": "7d", "7d": "30d", "30d": "30d" };
 
 export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashboardId?: string; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; onOpen(id: string, replace?: boolean): void }) {
-  const { agentAvailable, openChat } = useFanoutApp();
+  const { agentAvailable, openChat } = usePitotApp();
   const [creating, setCreating] = useState(false);
   const list = useQuery({ queryKey: dashboardsKey, queryFn: listDashboards, staleTime: 15_000 });
   useEffect(() => {

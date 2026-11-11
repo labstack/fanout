@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })));
 function check(files: Record<string, string>) {
-  const root = mkdtempSync(join(tmpdir(), "fanout-test-names-")); roots.push(root);
+  const root = mkdtempSync(join(tmpdir(), "pitot-test-names-")); roots.push(root);
   for (const [file, text] of Object.entries(files)) { mkdirSync(dirname(join(root, file)), { recursive: true }); writeFileSync(join(root, file), text); }
   return Bun.spawnSync(["node", join(import.meta.dir, "test-names.mjs"), root]);
 }

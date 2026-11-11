@@ -3,9 +3,9 @@ package api
 import (
 	"context"
 	"errors"
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/observability"
+	"github.com/labstack/pitot/internal/query"
 	"net/http"
 	"net/http/httptest"
 	"testing"

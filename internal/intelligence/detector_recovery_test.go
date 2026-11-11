@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/annotations"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/engine/writegate"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/annotations"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/engine/writegate"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 func seedDetectorRecoveryRollup(t *testing.T, db *sql.DB, end time.Time) {

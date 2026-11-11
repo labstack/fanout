@@ -7,13 +7,13 @@ for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
     await expect(frame.getByRole("status").filter({ hasText: "Loading panel view" })).toBeVisible();
     await page.evaluate(() => (window as typeof window & { deliver(): Promise<void> }).deliver());
     await expect(frame.getByRole("status").filter({ hasText: "Loading panel view" })).toHaveCount(0);
-    await expect(frame.getByRole("main", { name: "Fanout analysis view" })).toContainText("System health");
+    await expect(frame.getByRole("main", { name: "Pitot analysis view" })).toContainText("System health");
   });
 
   for (const scenario of ["overview", "topology", "performance", "trace", "logs", "custom"] as const) {
     test(`${scenario} renders recorded content with accessible controls`, async ({ mcpHost, scanApp, tabTo }) => {
       const frame = await mcpHost(scenario, theme);
-      const main = frame.getByRole("main", { name: "Fanout analysis view" });
+      const main = frame.getByRole("main", { name: "Pitot analysis view" });
       await expect(main).toBeVisible();
       await expect(frame.locator("html")).toHaveAttribute("data-mantine-color-scheme", theme);
       await expect(frame.getByRole("status").filter({ hasText: "Loading panel view" })).toHaveCount(0);

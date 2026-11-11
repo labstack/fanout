@@ -17,11 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress/zstd"
 	"github.com/zeebo/xxh3"
@@ -578,7 +578,7 @@ func panelBenchEngine(tb testing.TB, data panelBenchData) (*engine.Duck, config.
 	tb.Helper()
 	// Load validates authentication even though this harness never serves HTTP.
 	// Only a dummy test auth value is supplied; storage sizing stays automatic.
-	cfg, err := config.Load(config.LoadOptions{Environ: []string{"FANOUT_DATA_DIR=" + data.Dir, "FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("benchmark-only-", 3)}})
+	cfg, err := config.Load(config.LoadOptions{Environ: []string{"PITOT_DATA_DIR=" + data.Dir, "PITOT_AUTH_CODE_SECRET=" + strings.Repeat("benchmark-only-", 3)}})
 	if err != nil {
 		tb.Fatal(err)
 	}

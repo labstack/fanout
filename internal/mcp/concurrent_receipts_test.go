@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/query"
-	controlstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/dashboard"
+	"github.com/labstack/pitot/internal/query"
+	controlstore "github.com/labstack/pitot/internal/store"
 )
 
 func newConcurrentFileServer(t *testing.T) *Server {

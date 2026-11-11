@@ -83,7 +83,7 @@ describe("smoke geometry", () => {
 
 describe("failure HTML report", () => {
   it("writes escaped failures only after a failing run", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "fanout-report-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "pitot-report-test-"));
     try {
       const report = new FailureReport({ outputFolder: dir });
       await report.onEnd({ status: "passed", startTime: new Date(), duration: 0 });

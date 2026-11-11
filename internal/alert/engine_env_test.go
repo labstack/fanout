@@ -8,7 +8,7 @@ import (
 
 	_ "github.com/duckdb/duckdb-go/v2"
 
-	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/pitot/internal/engine"
 )
 
 // buildEnvs feeds CEL rules from a SQL aggregate over service_rollup. DuckDB

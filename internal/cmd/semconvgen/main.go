@@ -16,7 +16,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/labstack/fanout/internal/telemetry/semconv"
+	"github.com/labstack/pitot/internal/telemetry/semconv"
 )
 
 // Rule A: the Stable duration metrics whose non-Opt-In attributes are span keys.

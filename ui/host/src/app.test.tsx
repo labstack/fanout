@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./app";
 import { ChatPage } from "./chat";
-import { createDashboardPrompt, useFanoutApp } from "./app-context";
+import { createDashboardPrompt, usePitotApp } from "./app-context";
 import { parseSearch, toSearchParams } from "./dashboards/search";
 import { Route as indexRoute } from "./routes/index";
 import { DashboardPage } from "./dashboards/page";
@@ -62,7 +62,7 @@ function setValue(input: HTMLTextAreaElement, value: string) {
 }
 
 function SessionProbe() {
-  const {send}=useFanoutApp();
+  const {send}=usePitotApp();
   return <><ChatPage/><button onClick={()=>void send("Hello")}>Start probe</button></>;
 }
 
@@ -80,7 +80,7 @@ describe("Session", () => {
       if (url.pathname.startsWith("/api/agent/threads/")) return json({ message: "not found" }, 404);
       throw new Error(`unexpected request: ${url.pathname}`);
     });
-    window.happyDOM.setURL("https://fanout.example.com/chat");
+    window.happyDOM.setURL("https://pitot.example.com/chat");
   });
 
   afterEach(() => {
@@ -197,7 +197,7 @@ describe("Session", () => {
   });
 
   it("opens a rail dashboard and clears the previous dashboard variable state", async () => {
-    window.happyDOM.setURL("https://fanout.example.com/dashboards/dash-main?var-service=checkout&window=6h");
+    window.happyDOM.setURL("https://pitot.example.com/dashboards/dash-main?var-service=checkout&window=6h");
     fetchMock.mockImplementation(async (input) => {
       if (String(input) === "/api/dashboards") return json({ dashboards: [
         { id: "dash-main", name: "System overview", description: "", is_default: true, version: 1, panel_count: 4, updated_at: "2026-07-22 03:00:00" },
@@ -249,10 +249,10 @@ describe("Session", () => {
     const root = createRoot(container);
 
     await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
-    await vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Message Fanout"]')).not.toBeNull());
+    await vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Message Pitot"]')).not.toBeNull());
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/agent/threads/"))).toBe(false);
 
-    const composer = document.querySelector('textarea[aria-label="Message Fanout"]') as HTMLTextAreaElement;
+    const composer = document.querySelector('textarea[aria-label="Message Pitot"]') as HTMLTextAreaElement;
     await act(async () => setValue(composer, "Summarize system health"));
     await act(async () => composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
 
@@ -272,10 +272,10 @@ describe("Session", () => {
     let rejectRun:(reason:Error)=>void=()=>{};
     if(terminal==='run_throw')agentMocks.runAgent.mockImplementationOnce(()=>new Promise<undefined>((_resolve,reject)=>{rejectRun=reject;}));
     fetchMock.mockImplementation(async input=>{
-      const path=new URL(String(input),"https://fanout.example.com").pathname;
+      const path=new URL(String(input),"https://pitot.example.com").pathname;
       return json(path==='/api/dashboards'?{dashboards:[]}:path==='/api/agent/threads'?{items:[],next_cursor:null}:{messages:[]});
     });
-    window.happyDOM.setURL("https://fanout.example.com/chat/thread");
+    window.happyDOM.setURL("https://pitot.example.com/chat/thread");
     const rootRoute=createRootRoute({component:App});
     const chat=createRoute({getParentRoute:()=>rootRoute,path:"/chat/$threadId",component:SessionProbe});
     const router=createRouter({routeTree:rootRoute.addChildren([chat])});
@@ -306,13 +306,13 @@ describe("Session", () => {
     const root = createRoot(container);
 
     await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
-    await vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Message Fanout"]')).not.toBeNull());
+    await vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Message Pitot"]')).not.toBeNull());
 
-    const composer = document.querySelector('textarea[aria-label="Message Fanout"]') as HTMLTextAreaElement;
+    const composer = document.querySelector('textarea[aria-label="Message Pitot"]') as HTMLTextAreaElement;
     await act(async () => setValue(composer, "Summarize system health"));
     await act(async () => composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
 
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout could not complete this analysis"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Pitot could not complete this analysis"));
     const threadID = window.location.pathname.slice("/chat/".length);
     expect(threadID).toMatch(/^[0-9a-f-]{36}$/);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes(`/api/agent/threads/${threadID}`))).toBe(false);
@@ -335,7 +335,7 @@ describe("Session", () => {
   // failure was momentary or the thread is gone.
   it("asks for the thread again when the restore is retried", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    window.happyDOM.setURL("https://fanout.example.com/chat/broken-thread");
+    window.happyDOM.setURL("https://pitot.example.com/chat/broken-thread");
     let threadRequests = 0;
     fetchMock.mockImplementation(async (input) => {
       const url = new URL(String(input), "http://localhost");
@@ -367,7 +367,7 @@ describe("Session", () => {
   });
 
   it("explains a thread that no longer exists", async () => {
-    window.happyDOM.setURL("https://fanout.example.com/chat/deleted-thread");
+    window.happyDOM.setURL("https://pitot.example.com/chat/deleted-thread");
     const rootRoute = createRootRoute({ component: App });
     const chatThread = createRoute({ getParentRoute: () => rootRoute, path: "/chat/$threadId", component: ChatPage });
     const router = createRouter({ routeTree: rootRoute.addChildren([chatThread]) });

@@ -26,7 +26,7 @@
   column-gutter: 16pt,
   align: horizon,
   image("../../ui/host/public/favicon.svg", width: 84pt),
-  text(size: 56pt, weight: 700, "Fanout"),
+  text(size: 56pt, weight: 700, "Pitot"),
 )
 
 #v(30pt)
@@ -51,5 +51,5 @@
 #v(12pt)
 #grid(columns: (1fr, auto),
   text(size: 19pt, fill: rgb("#8a94a6"))[No collector fleet. No object store. One data directory.],
-  text(size: 19pt, fill: rgb("#8a94a6"))[github.com/labstack/fanout],
+  text(size: 19pt, fill: rgb("#8a94a6"))[github.com/labstack/pitot],
 )

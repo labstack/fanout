@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	appstore "github.com/labstack/fanout/internal/store"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 func newSessionTestStore(t *testing.T) (*appstore.SQLite, *BrowserSessions) {

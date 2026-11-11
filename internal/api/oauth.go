@@ -20,17 +20,17 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/pitot/internal/dashboard"
 
-	appauth "github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/brand"
-	appmcp "github.com/labstack/fanout/internal/mcp"
+	appauth "github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/brand"
+	appmcp "github.com/labstack/pitot/internal/mcp"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 const mcpReadScope = appauth.MCPScopeTelemetryRead
 
-const browserMCPSessionBearer = "fanout-browser-session"
+const browserMCPSessionBearer = "pitot-browser-session"
 
 type browserMCPUserContextKey struct{}
 
@@ -67,8 +67,8 @@ func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, re
 		// Registration is unauthenticated by design (RFC 7591 dynamic
 		// registration). Bound how many clients one source can create before
 		// the janitor collects the abandoned ones. The budget is per client
-		// IP, which collapses to one bucket when Fanout sits behind a proxy
-		// and FANOUT_TRUSTED_PROXY_CIDRS is unset, so it is set well above a
+		// IP, which collapses to one bucket when Pitot sits behind a proxy
+		// and PITOT_TRUSTED_PROXY_CIDRS is unset, so it is set well above a
 		// plausible team rollout rather than at the tightest defensible value.
 		registerLimiter: appauth.NewKeyedLimiter(60, 15*time.Minute),
 	}, nil
@@ -267,7 +267,7 @@ func (h *MCPAuthorization) ProtectedResourceMetadata(c *echo.Context) error {
 	setDiscoveryHeaders(c)
 	return c.JSON(http.StatusOK, map[string]any{
 		"resource":                 h.resource,
-		"resource_name":            "Fanout Observability",
+		"resource_name":            "Pitot Observability",
 		"authorization_servers":    []string{h.issuer},
 		"scopes_supported":         mcpSupportedScopes,
 		"bearer_methods_supported": []string{"header"},
@@ -754,7 +754,7 @@ func oauthJSONError(c *echo.Context, status int, code, description string) error
 
 var oauthConsentTemplate = template.Must(template.New("oauth-consent").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Authorize access · Fanout</title><style>
+<title>Authorize access · Pitot</title><style>
 :root{color-scheme:light dark;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#fff;color:#1f2923}
 *{box-sizing:border-box}html,body{width:100%}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;overflow-x:hidden;background:radial-gradient(circle at 50% -12%,rgba(70,192,142,.12),transparent 38%),linear-gradient(180deg,#f8faf9,#fff 62%)}
 .card{width:100%;max-width:520px;min-width:0;padding:40px;border:1px solid rgba(31,41,55,.08);border-radius:28px;background:rgba(255,255,255,.92);box-shadow:0 28px 70px rgba(31,41,55,.10),0 3px 10px rgba(31,41,55,.04);backdrop-filter:blur(18px)}
@@ -765,7 +765,7 @@ var oauthConsentTemplate = template.Must(template.New("oauth-consent").Parse(`<!
 .actions{display:grid;grid-template-columns:1fr 1.5fr;gap:12px;margin-top:28px}button{border:1px solid #d7ddd9;border-radius:12px;padding:13px 16px;background:#fff;color:#26322b;font:inherit;font-weight:700;cursor:pointer}button.primary{border-color:#0ca678;background:#0ca678;color:#fff}button:hover{filter:brightness(.97)}button:focus-visible{outline:3px solid rgba(12,166,120,.25);outline-offset:2px}
 @media(prefers-color-scheme:dark){:root{background:#101512;color:#eef4f0}body{background:radial-gradient(circle at 50% -12%,rgba(70,192,142,.14),transparent 38%),#101512}.card{border-color:#303a35;background:rgba(27,33,30,.94);box-shadow:0 28px 70px #0007}.eyebrow{color:#63e6be}.lede,.access p{color:#aab5af}.detail{border-color:#38443e;background:#151b18}.detail span,.signed{color:#8c9892}.detail .warn{color:#f0a868}.check{background:#153b2e;color:#63e6be}button{border-color:#3b4741;background:#232b27;color:#eef4f0}button.primary{border-color:#20c997;background:#20c997;color:#07140f}}
 @media(max-width:520px){body{display:flex;align-items:center;justify-content:center;padding:16px}.card{width:calc(100vw - 32px);max-width:calc(100vw - 32px);padding:28px 24px}.actions{grid-template-columns:1fr}h1{font-size:30px}}
-</style></head><body><main class="card"><div class="brand"><span class="brand-mark">` + brand.MarkSVG + `</span><span class="brand-name">Fanout</span></div><p class="eyebrow">Secure connection</p><h1>Allow {{.ClientName}} to access Fanout?</h1>
+</style></head><body><main class="card"><div class="brand"><span class="brand-mark">` + brand.MarkSVG + `</span><span class="brand-name">Pitot</span></div><p class="eyebrow">Secure connection</p><h1>Allow {{.ClientName}} to access Pitot?</h1>
 <p class="lede">{{if .ReadOnly}}This application is requesting read-only access to your observability data through MCP. It cannot change settings, alerts, or dashboards.{{else}}This application is requesting the access listed below through MCP.{{end}}</p>
 <div class="detail"><b>{{.ClientName}}</b><span class="warn">Unverified client — this name was chosen by whoever registered it</span><span>Returns to <b>{{.Redirect}}</b></span><span>Scopes: {{.Scope}}</span></div>
 {{range .Grants}}<div class="access"><span class="check">✓</span><div><b>{{.Title}}</b><p>{{.Detail}}</p></div></div>

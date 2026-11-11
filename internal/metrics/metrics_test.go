@@ -130,10 +130,10 @@ func TestRecordTelemetryOperationOutcomes(t *testing.T) {
 			t.Errorf("TelemetryOperationTotal[%s,%s] = %f, want 1", tc.operation, tc.result, got)
 		}
 	}
-	if got := histogramSampleCount(t, "fanout_telemetry_operation_duration_seconds", "operation", "compaction"); got != 1 {
+	if got := histogramSampleCount(t, "pitot_telemetry_operation_duration_seconds", "operation", "compaction"); got != 1 {
 		t.Errorf("merge duration samples = %d, want 1 (skipped outcomes must not distort duration)", got)
 	}
-	if got := histogramSampleCount(t, "fanout_telemetry_operation_duration_seconds", "operation", "maintenance"); got != 1 {
+	if got := histogramSampleCount(t, "pitot_telemetry_operation_duration_seconds", "operation", "maintenance"); got != 1 {
 		t.Errorf("maintenance duration samples = %d, want 1", got)
 	}
 }
@@ -242,7 +242,7 @@ func TestCompactionBacklogSourceTracksCountAndOwner(t *testing.T) {
 	}
 	found := false
 	for _, family := range families {
-		if family.GetName() == "fanout_compaction_backlog_batches" {
+		if family.GetName() == "pitot_compaction_backlog_batches" {
 			found = true
 			if got := family.Metric[0].GetGauge().GetValue(); got != 13 {
 				t.Fatalf("count=%g", got)
@@ -258,7 +258,7 @@ func TestCompactionBacklogSourceTracksCountAndOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, family := range families {
-		if family.GetName() == "fanout_compaction_backlog_batches" && family.Metric[0].GetGauge().GetValue() != 0 {
+		if family.GetName() == "pitot_compaction_backlog_batches" && family.Metric[0].GetGauge().GetValue() != 0 {
 			t.Fatal("closed source retained")
 		}
 	}

@@ -1,14 +1,14 @@
 ---
-title: What Fanout is
+title: What Pitot is
 description: Investigate OpenTelemetry with a built-in agent or your own MCP client, using one self-hosted binary.
 summary: Agent investigations, dashboards and telemetry storage in one process, with one data directory.
 read_when:
-  - You are deciding whether Fanout fits before installing anything.
-  - You want to know what Fanout replaces in an existing observability stack.
+  - You are deciding whether Pitot fits before installing anything.
+  - You want to know what Pitot replaces in an existing observability stack.
 status: preview
 ---
 
-Fanout is a self-hosted OpenTelemetry backend for agent investigations. Ask its
+Pitot is a self-hosted OpenTelemetry backend for agent investigations. Ask its
 built-in agent a question about traces, logs or metrics, or connect your own
 agent over MCP. Both use the same typed tools to inspect telemetry and build
 dashboards.
@@ -21,10 +21,10 @@ their own model provider.
 [Explore and FanQL](/docs/guides/explore) let you query telemetry without an AI provider.
 
 <figure class="docs-diagram">
-  <a href="/diagrams/architecture.svg" class="docs-diagram__asset" aria-label="Open the Fanout architecture diagram at full size">
+  <a href="/diagrams/architecture.svg" class="docs-diagram__asset" aria-label="Open the Pitot architecture diagram at full size">
     <img
       src="/diagrams/architecture.svg"
-      alt="Fanout runtime architecture: OTLP ingest and commit workers publish Parquet; the browser API, agent runtime, and MCP server share queries and dashboards, with DuckDB query state, SQLite control state, anomaly detection, and webhook alerts."
+      alt="Pitot runtime architecture: OTLP ingest and commit workers publish Parquet; the browser API, agent runtime, and MCP server share queries and dashboards, with DuckDB query state, SQLite control state, anomaly detection, and webhook alerts."
       loading="lazy"
       decoding="async"
     />
@@ -50,7 +50,7 @@ operating tradeoffs.
 
 ## Deployment boundaries
 
-SDKs and Collectors export to Fanout as their telemetry backend. Fanout runs on
+SDKs and Collectors export to Pitot as their telemetry backend. Pitot runs on
 one machine with local storage. It has no clustering, replication or object tier.
 
 See [namespace access limits](/docs/reference/capabilities#operating-limits).
@@ -63,5 +63,5 @@ The reference deployment target is a single small VM.
 
 ## Stability
 
-Fanout is alpha. User-facing contracts can change without migration paths.
+Pitot is alpha. User-facing contracts can change without migration paths.
 The [capabilities page](/docs/reference/capabilities) lists each feature's stability.

@@ -1,6 +1,6 @@
 package fanql
 
-import "github.com/labstack/fanout/internal/query"
+import "github.com/labstack/pitot/internal/query"
 
 type queryTree struct {
 	Source     string

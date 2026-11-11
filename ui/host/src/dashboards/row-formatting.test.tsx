@@ -2,7 +2,7 @@ import { MantineProvider, defaultCssVariablesResolver, DEFAULT_THEME, mergeManti
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fanoutTheme, fanoutCssVariables } from "../../../theme";
+import { pitotTheme, pitotCssVariables } from "../../../theme";
 import { chartThemeFor } from "../../../panels/compile";
 import { relativeLuminance } from "@labstack/ui";
 import type { Frame, Panel, PanelResult } from "../../../panels/types";
@@ -23,8 +23,8 @@ function composite(color:string,surface:string) {
  return "#"+[1,3,5].map((at,i)=>Math.round(values[i]*alpha+parseInt(surface.slice(at,at+2),16)*(1-alpha)).toString(16).padStart(2,"0")).join("");
 }
 function badgeColors(badge: HTMLElement, dark: boolean) {
- const theme=mergeMantineTheme(DEFAULT_THEME,fanoutTheme),scheme=dark?"dark":"light",defaults=defaultCssVariablesResolver(theme);
- const vars: Record<string,string>={...defaults.variables,...defaults[scheme],...fanoutCssVariables(theme)[scheme]};
+ const theme=mergeMantineTheme(DEFAULT_THEME,pitotTheme),scheme=dark?"dark":"light",defaults=defaultCssVariablesResolver(theme);
+ const vars: Record<string,string>={...defaults.variables,...defaults[scheme],...pitotCssVariables(theme)[scheme]};
  const resolve=(value:string):string=>value.startsWith("var(")?resolve(vars[value.slice(4,-1)]):value;
  return {ink:resolve(badge.style.getPropertyValue("--badge-color")), background:resolve(badge.style.getPropertyValue("--badge-bg"))};
 }
@@ -32,7 +32,7 @@ vi.mock("./echart-canvas",()=>({EChartCanvas:()=>null}));
 let host: HTMLDivElement, root: Root;
 beforeEach(()=>{vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);host=document.createElement("div");document.body.append(host);root=createRoot(host);});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();});
-const mount = async (child:React.ReactNode,dark:boolean) => act(async()=>root.render(<MantineProvider theme={fanoutTheme} forceColorScheme={dark?"dark":"light"}>{child}</MantineProvider>));
+const mount = async (child:React.ReactNode,dark:boolean) => act(async()=>root.render(<MantineProvider theme={pitotTheme} forceColorScheme={dark?"dark":"light"}>{child}</MantineProvider>));
 const panel:Panel={id:"logs",title:"Recent logs",viz:"logs",query:{from:"logs"},options:{highlight:"error"}};
 const id="0123456789abcdef0123456789abcdef";
 const body="Connection ERROR <*> <str> <num> <ip> <time> token=[REDACTED] "+"very long message ".repeat(25);

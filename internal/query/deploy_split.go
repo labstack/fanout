@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/labstack/fanout/internal/annotations"
+	"github.com/labstack/pitot/internal/annotations"
 )
 
 func (e *Executor) runDeploySplit(ctx context.Context, p *Panel, checked *Checked, scope Scope) (*Frame, string, error) {

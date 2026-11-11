@@ -1,0 +1,295 @@
+package main
+
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/labstack/pitot/internal/api"
+)
+
+// routeCount is set by collectRoutes so the summary line can report it.
+var routeCount []api.RouteDoc
+
+// collectRoutes finds every route the server registers and asks the middleware
+// how it classifies each one.
+//
+// The two halves use deliberately different techniques, and the reason matters.
+// The paths can only come from the source, because a route is an `e.GET("...")`
+// call and nothing at runtime enumerates them. The authorization requirement
+// must NOT come from the source: classifyRoute is a switch of prefix matches and
+// method conditions, and a generator that re-implemented that reading would be a
+// second authorization model, free to drift from the one that runs. So the path
+// is parsed and the policy is asked.
+//
+// It scans several directories because the surface is registered in several
+// places: the application handlers in internal/api, the agent runtime, and the
+// operational, protocol and SPA routes wired up in cmd/pitot. Scanning only
+// internal/api published a table that omitted /metrics, /debug/pprof/*, /mcp
+// and every /api/agent route, while the page invited an operator to audit what
+// an instance exposes (#188).
+func collectRoutes(dirs []string) ([]api.RouteDoc, error) {
+	type reg struct{ method, path string }
+	var found []reg
+	seen := map[reg]bool{}
+
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, err
+		}
+
+		// Counted per directory rather than as growth of `found`, because a
+		// route registered in two places would dedupe to nothing new and read
+		// as a directory that registers none.
+		registrations := 0
+
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") ||
+				strings.HasSuffix(entry.Name(), "_test.go") {
+				continue
+			}
+
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, filepath.Join(dir, entry.Name()), nil, 0)
+			if err != nil {
+				return nil, fmt.Errorf("parsing %s: %w", entry.Name(), err)
+			}
+
+			// Identifiers that are an *echo.Group parameter, mapped to the prefix
+			// that group is mounted at, so a relative path can be completed.
+			groupReceivers, err := groupParams(file, entry.Name())
+			if err != nil {
+				return nil, err
+			}
+
+			ast.Inspect(file, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok || len(call.Args) == 0 {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				switch sel.Sel.Name {
+				case "GET", "POST", "PUT", "PATCH", "DELETE", "Any":
+				default:
+					return true
+				}
+				lit, ok := call.Args[0].(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					return true
+				}
+				path, err := strconv.Unquote(lit.Value)
+				if err != nil {
+					return true
+				}
+
+				// Complete a group-relative path. groupParams has already refused
+				// any group this generator cannot name, so an unresolved receiver
+				// here is the root Echo and the path is already absolute.
+				prefix, onGroup := "", false
+				if recv, ok := sel.X.(*ast.Ident); ok {
+					prefix, onGroup = groupReceivers[recv.Name]
+				}
+				switch {
+				case onGroup:
+					// `group.POST("", ...)` registers the group's own root.
+					// Requiring a leading slash would silently drop that route.
+					path = prefix + path
+				case !strings.HasPrefix(path, "/"):
+					return true
+				}
+
+				registrations++
+				r := reg{method: sel.Sel.Name, path: path}
+				if !seen[r] {
+					seen[r] = true
+					found = append(found, r)
+				}
+				return true
+			})
+		}
+
+		if registrations == 0 {
+			return nil, fmt.Errorf(
+				"found no route registrations under %s; has the registration style "+
+					"changed, or did those routes move? A directory in the scan list "+
+					"that registers nothing silently shrinks the published surface",
+				dir,
+			)
+		}
+	}
+
+	docs := make([]api.RouteDoc, 0, len(found))
+	for _, r := range found {
+		doc, err := describe(r.method, r.path)
+		if err != nil {
+			return nil, err
+		}
+		docs = append(docs, doc)
+	}
+
+	sort.Slice(docs, func(i, j int) bool {
+		if docs[i].Path != docs[j].Path {
+			return docs[i].Path < docs[j].Path
+		}
+		return docs[i].Method < docs[j].Method
+	})
+	routeCount = docs
+	return docs, nil
+}
+
+// anyMethods are the methods checked before an `e.Any(...)` route is published
+// as a single row.
+//
+// Echo v5 registers Any as a RouteAny sentinel that matches any method at all,
+// so this is deliberately a subset: the six classifyRoute actually
+// distinguishes. Checking those is what decides whether one row can state the
+// requirement honestly, because a method the middleware does not distinguish
+// cannot disagree with its neighbours.
+var anyMethods = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
+
+// describe asks the middleware to classify one registration.
+//
+// A registered route the middleware does not classify is either unreachable or
+// unprotected by accident. Neither is something to document quietly, so it is
+// an error rather than an omitted row.
+//
+// `Any` needs every method to reach the same answer before the table can carry
+// a single row for it. Both current Any routes, /mcp and /api/mcp, classify
+// identically for every method by construction. If that stops being true,
+// collapsing them into one row would state a requirement that is wrong for some
+// verb, so this refuses rather than picking one.
+func describe(method, path string) (api.RouteDoc, error) {
+	if method != "Any" {
+		doc, ok := api.DescribeRoute(method, path)
+		if !ok {
+			return api.RouteDoc{}, fmt.Errorf(
+				"route %s %s is registered but the auth middleware does not classify it; "+
+					"add a case to classifyRoute or remove the route",
+				method, path,
+			)
+		}
+		return doc, nil
+	}
+
+	var first api.RouteDoc
+	for i, m := range anyMethods {
+		doc, ok := api.DescribeRoute(m, path)
+		if !ok {
+			return api.RouteDoc{}, fmt.Errorf(
+				"route Any %s is registered, so it answers %s as well, but the auth "+
+					"middleware does not classify that pair; add a case to classifyRoute",
+				path, m,
+			)
+		}
+		if i == 0 {
+			first = doc
+			continue
+		}
+		if doc.Policy != first.Policy || doc.Capability != first.Capability {
+			return api.RouteDoc{}, fmt.Errorf(
+				"route Any %s classifies as %q for %s but %q for %s; it cannot be "+
+					"published as one row without stating a requirement that is wrong "+
+					"for one of them",
+				path, first.Policy, anyMethods[0], doc.Policy, m,
+			)
+		}
+	}
+	first.Method = "Any"
+	first.Path = path
+	return first, nil
+}
+
+// requirement renders what a caller has to present, in a reader's terms rather
+// than the middleware's.
+func requirement(doc api.RouteDoc) string {
+	switch doc.Policy {
+	case api.RoutePolicyPublic:
+		return "none"
+	case api.RoutePolicyAuthenticated:
+		return "any signed-in user"
+	case api.RoutePolicyProtocol:
+		return "protocol handshake"
+	case api.RoutePolicySCIM:
+		return "SCIM bearer token, when `PITOT_SCIM_TOKEN` is set"
+	case api.RoutePolicyServiceCredential:
+		return fmt.Sprintf("`%s`, or a service credential", doc.Capability)
+	case api.RoutePolicyCapability:
+		return fmt.Sprintf("`%s`", doc.Capability)
+	default:
+		return doc.Policy
+	}
+}
+
+func renderRoutes(routes []api.RouteDoc) []byte {
+	var b strings.Builder
+
+	b.WriteString("---\n")
+	b.WriteString("title: \"HTTP routes\"\n")
+	b.WriteString("description: \"Every HTTP route the server registers and what guards each one. Mostly the browser client's backend rather than a public API.\"\n")
+	b.WriteString("summary: \"Application, operational and protocol routes and the SPA catch-all, with the authorization requirement for each.\"\n")
+	b.WriteString("read_when:\n")
+	b.WriteString("  - \"You are auditing what an instance exposes and what guards each route.\"\n")
+	b.WriteString("  - \"A request came back 401 or 403 and you want to know which capability it wanted.\"\n")
+	b.WriteString("status: preview\n")
+	b.WriteString("generated: true\n")
+	b.WriteString("---\n\n")
+
+	b.WriteString("{/* Generated by cmd/pitot-docgen from internal/api, internal/agent and cmd/pitot. Edit the generator, not this page. */}\n\n")
+
+	b.WriteString("Every route below is served on `PITOT_ADDR` (`127.0.0.1:7520` by default;\n")
+	b.WriteString("the image sets `:7520`).\n")
+	b.WriteString("OTLP shares this listener but uses its own handlers and ingest credential; see\n")
+	b.WriteString("[send your first telemetry](/docs/get-started/send-telemetry).\n\n")
+
+	b.WriteString("## Conditional routes\n\nThe table includes every route the binary can register. These routes depend on\nconfiguration:\n\n")
+
+	b.WriteString("- `/debug/pprof/*`: only when `PITOT_PPROF_ENABLED` is true, which is\n")
+	b.WriteString("  **not** the default. Enabling it also turns on mutex and block sampling.\n")
+	b.WriteString("- `/mcp`, `/api/mcp`, `/api/auth/oauth/*`, `/oauth/*` and `/.well-known/*`: only when\n")
+	b.WriteString("  `PITOT_MCP_ENABLED` is true, which **is** the default.\n")
+	b.WriteString("- `/api/agent/*`: only when `PITOT_AI_PROVIDER` selects `anthropic` or\n")
+	b.WriteString("  `openai`, with that provider's required key. An empty provider disables chat.\n")
+	b.WriteString("- `/api/auth/oidc/start` and `/api/auth/oidc/callback`: only in\n")
+	b.WriteString("  `PITOT_AUTH_MODE=oidc`. They return 503 `unavailable` with `Retry-After`\n")
+	b.WriteString("  until provider discovery succeeds.\n\n")
+	b.WriteString("Everything else is always registered. A path shown with `:name` or `*` is the\n")
+	b.WriteString("pattern Echo matches on, not a literal URL.\n")
+	b.WriteString("\n")
+
+	b.WriteString("## Interface stability\n\nThe `/api/*` routes serve the browser client and can change without migration\npaths. [MCP](/docs/guides/mcp) is the agent interface. OTLP ingest and\n[operational endpoints](/docs/reference/endpoints) have their own contracts.\n\nManage alert rules on the [Alerts page](/docs/guides/alerts) or through the HTTP API.\nAdministrators manage ingest tokens on **Connect telemetry** or with\n`/api/settings/ingest/tokens`.\n\n")
+
+	b.WriteString("## Errors\n\nApplication API errors, including unknown routes and wrong methods, return objects shaped like\n`{\"code\":\"bad_request\",\"message\":\"Safe explanation\"}`. Codes are stable\nsnake_case identifiers; clients branch on `code` rather than message text.\nInvalid dashboard or panel specs also include `problems` with field paths,\nmessages and optional hints. Every error response uses `Cache-Control: no-store`;\nHEAD errors have no body. Server failures return a short, safe message; the\nunderlying error is logged and never returned.\n\nDefault codes by HTTP status:\n\n| Status | Code |\n|---|---|\n| 400 | `bad_request` |\n| 401 | `unauthorized` |\n| 403 | `forbidden` |\n| 404 | `not_found` |\n| 405 | `method_not_allowed` |\n| 409 | `conflict` |\n| 413 | `payload_too_large` |\n| 415 | `unsupported_media_type` |\n| 422 | `unprocessable` |\n| 429 | `rate_limited` |\n| 500 | `internal` |\n| 502 | `bad_gateway` |\n| 503 | `unavailable` |\n| 504 | `timeout` |\n\nOther 4xx statuses use `bad_request`; other 5xx statuses use `internal`.\nSpecific conditions use `already_current`, `dashboard_version_not_found`,\n`dashboard_version_conflict`, `invalid_spec` and `last_active_administrator`.\n`GET /api/telemetry/schema` returns 503 `schema_busy` with `Retry-After` when a\nnew window and namespace cannot start a discovery yet, or when the discovery is\nstill running after 15 seconds; it keeps running, so a retry finds it cached.\nCached ones are always served. An unknown window is 400 `bad_request`.\nTool failures carry `error: {code, message}` inside the tool result.\nPanel execution results keep their own status and error fields.\nOAuth, OTLP/gRPC, MCP JSON-RPC and AG-UI run errors keep their protocol spelling.\nOperational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.\n\n")
+
+	b.WriteString("[Roles](/docs/reference/roles) maps capabilities to roles.\n\n")
+
+	b.WriteString("| Method | Path | Requires |\n")
+	b.WriteString("|---|---|---|\n")
+	for _, r := range routes {
+		fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", r.Method, r.Path, requirement(r))
+	}
+
+	b.WriteString("\n## What the requirements mean\n\n")
+	b.WriteString("- **none**: reachable without a credential.\n")
+
+	b.WriteString("- **any signed-in user**: a session, but no particular capability.\n")
+	b.WriteString("- **protocol handshake**: the OAuth and MCP endpoints, which authenticate\n")
+	b.WriteString("  as part of their own protocol rather than through the middleware.\n")
+	b.WriteString("- **a named capability**: the caller's role must carry it.\n")
+	b.WriteString("- **or a service credential**: additionally reachable without a browser\n")
+	b.WriteString("  session, which is how a scraper reaches the metrics endpoint.\n\n")
+	b.WriteString("`Any` registers every HTTP method with the same authorization requirement.\n`GET /*` serves the single-page application for browser paths. Unknown `/api/*`\nand OTLP paths return errors.\n")
+
+	b.WriteString("\n## OTLP overload responses\n\nOTLP admission counts protobuf spans, log records or metric points before\nconverting them into storage rows. Under compaction debt, interactive starvation\n(refusals or queue-wait timeouts), or the decoded-byte budget, the entire export\nis refused retryably. Panel queueing alone does not trigger ingest throttling.\ngRPC responds with `RESOURCE_EXHAUSTED` and `google.rpc.RetryInfo`; HTTP responds\nwith 429 and `Retry-After` in whole seconds rounded up. The message identifies\nthe pressure reason. Rate refusals request a one-to-five-second delay; the hard\ndebt limit requests two seconds. Byte-budget refusals retain their existing\nretry delay. Enable exporter retries and honor these delays; clients with\nretries disabled can drop refused telemetry. An acknowledgement still means\nthe accepted export was durably published.\n\nExemplars and trace detail use a priority read lane with reserved capacity.\nPanels and interactive reads have separate bounded queues; a refused read\nretains the existing 503 busy response with `Retry-After`.\n")
+
+	return []byte(b.String())
+}

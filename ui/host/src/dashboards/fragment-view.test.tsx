@@ -63,7 +63,7 @@ it.each([{ ...fixture(), trace: {} }, { ...fixture(), trace: { data: { spans: nu
 it.each(["empty", "error", "ok"] as const)("hides chat mutations and unsaved Copy link in %s menus and full-screen", async status => {
   const raw = fixture(); raw.results[0] = { ...raw.results[0], status, error: "Panel query failed", frame: { columns: [], values: [], rows: 0, truncated: true } };
   const view = await mount(raw);
-  const forbidden = /Explain|Ask Fanout to fix it|Duplicate|Remove panel|Copy link/;
+  const forbidden = /Explain|Ask Pitot to fix it|Duplicate|Remove panel|Copy link/;
   try {
     await act(async () => within(view.el).getByRole("button", {name: /^Checkout logs menu/}).click());
     expect(document.body.textContent).not.toMatch(forbidden);

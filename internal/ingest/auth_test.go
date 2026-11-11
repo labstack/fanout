@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/labstack/fanout/internal/settings"
-	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/settings"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 func TestGRPCServerOptions(t *testing.T) {
@@ -87,7 +87,7 @@ func TestAuthorize_AcceptsCaseInsensitiveBearerScheme(t *testing.T) {
 	}
 }
 
-func TestAuthorize_RejectsLegacyFanoutHeader(t *testing.T) {
+func TestAuthorize_RejectsLegacyPitotHeader(t *testing.T) {
 	store := newRuntimeStore(t)
 	token, _, err := settings.GenerateIngestToken()
 	if err != nil {
@@ -98,7 +98,7 @@ func TestAuthorize_RejectsLegacyFanoutHeader(t *testing.T) {
 	}
 
 	authorizer := newIngestAuthorizer(store)
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-fanout-ingest-token", token))
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-pitot-ingest-token", token))
 
 	err = authorizer.authorize(ctx)
 	if status.Code(err) != codes.Unauthenticated {

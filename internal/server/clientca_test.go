@@ -67,7 +67,7 @@ func TestLoadClientCAs(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || !strings.HasPrefix(err.Error(), "FANOUT_TLS_CLIENT_CA_FILE:") || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), contents) {
+			if err == nil || !strings.HasPrefix(err.Error(), "PITOT_TLS_CLIENT_CA_FILE:") || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), contents) {
 				t.Fatalf("error must name the variable and path without contents, got %v", err)
 			}
 		})

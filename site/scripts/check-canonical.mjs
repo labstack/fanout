@@ -38,7 +38,7 @@ function ogUrlOf(html) {
   return html.match(/<meta[^>]+property="og:url"[^>]+content="([^"]+)"/i)?.[1] ?? null;
 }
 
-// `https://fanout.run` and `https://fanout.run/` are the same address, and the
+// `https://pitot.dev` and `https://pitot.dev/` are the same address, and the
 // sitemap writes the first while the canonical writes the second. Comparing
 // them literally would fail the site's own landing page.
 function key(url) {

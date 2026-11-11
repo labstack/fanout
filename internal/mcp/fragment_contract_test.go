@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/labstack/fanout/internal/observability"
+	"github.com/labstack/pitot/internal/observability"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

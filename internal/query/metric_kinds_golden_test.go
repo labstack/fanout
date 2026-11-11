@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 var updateMetricKindGolden = flag.Bool("update-metric-kinds", false, "rewrite testdata/metric_kinds.golden.json")

@@ -1,5 +1,5 @@
 package observability
 
-import "github.com/labstack/fanout/internal/queryrows"
+import "github.com/labstack/pitot/internal/queryrows"
 
 func SQLDB(db queryrows.SQLQueryer) DB { return queryrows.SQLAdapter{DB: db} }

@@ -12,11 +12,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/db/generated"
-	appid "github.com/labstack/fanout/internal/id"
-	"github.com/labstack/fanout/internal/secret"
-	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/db/generated"
+	appid "github.com/labstack/pitot/internal/id"
+	"github.com/labstack/pitot/internal/secret"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 const (

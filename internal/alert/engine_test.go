@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	appstore "github.com/labstack/fanout/internal/store"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 // newTestEngine creates an Engine and Store backed by an in-memory SQLite DB.

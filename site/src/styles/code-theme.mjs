@@ -104,5 +104,5 @@ function theme(name, type, c) {
   };
 }
 
-export const fanoutCodeDark = theme("fanout-ayu-dark", "dark", dark);
-export const fanoutCodeLight = theme("fanout-ayu-light", "light", light);
+export const pitotCodeDark = theme("pitot-ayu-dark", "dark", dark);
+export const pitotCodeLight = theme("pitot-ayu-light", "light", light);

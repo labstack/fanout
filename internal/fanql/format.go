@@ -3,8 +3,8 @@ package fanql
 import (
 	"context"
 	"fmt"
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/sqlscan"
+	"github.com/labstack/pitot/internal/query"
+	"github.com/labstack/pitot/internal/sqlscan"
 	"strconv"
 	"strings"
 	"unicode/utf8"

@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/db/generated"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/db/generated"
 )
 
 type Store struct {

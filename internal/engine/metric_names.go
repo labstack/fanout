@@ -3,7 +3,7 @@ package engine
 import (
 	"context"
 
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // Recognize a single direct metrics scan with a literal name predicate. No

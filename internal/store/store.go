@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	appdb "github.com/labstack/fanout/internal/db"
+	appdb "github.com/labstack/pitot/internal/db"
 
 	_ "modernc.org/sqlite"
 )

@@ -5,15 +5,15 @@ import { cardSelector, readyCard, settle } from "../../support/accessibility-sup
 import { recordingTimeline, revealRecording, waitForConversation } from "../../support/landing-recording-support";
 import type { DashboardSpec, PanelResult } from "../../../../panels/types";
 
-const baseURL = process.env.FANOUT_LANDING_BASE_URL;
+const baseURL = process.env.PITOT_LANDING_BASE_URL;
 const directory = fileURLToPath(new URL("../../../test-results/landing-recordings/", import.meta.url));
-test.skip(process.env.FANOUT_LANDING_RECORDINGS !== "1", "set FANOUT_LANDING_RECORDINGS=1 to record real landing clips");
+test.skip(process.env.PITOT_LANDING_RECORDINGS !== "1", "set PITOT_LANDING_RECORDINGS=1 to record real landing clips");
 test.setTimeout(8 * 60_000);
 test.use({
   storageState: async ({}, use) => {
-    if (!baseURL) throw new Error("Landing recordings require FANOUT_LANDING_BASE_URL for an external instance");
-    const match = /^([!#$%&'*+.^_`|~\w-]+)=([^;\s]+)$/.exec(process.env.FANOUT_LANDING_SESSION_COOKIE ?? "");
-    if (!match) throw new Error("FANOUT_LANDING_SESSION_COOKIE must be a nonempty name=value session cookie");
+    if (!baseURL) throw new Error("Landing recordings require PITOT_LANDING_BASE_URL for an external instance");
+    const match = /^([!#$%&'*+.^_`|~\w-]+)=([^;\s]+)$/.exec(process.env.PITOT_LANDING_SESSION_COOKIE ?? "");
+    if (!match) throw new Error("PITOT_LANDING_SESSION_COOKIE must be a nonempty name=value session cookie");
     const url = new URL(baseURL);
     await use({ cookies: [{ name: match[1], value: match[2], domain: url.hostname, path: "/", expires: -1,
       httpOnly: true, secure: url.protocol === "https:", sameSite: "Lax" }], origins: [] });
@@ -48,7 +48,7 @@ for (const view of ["chat", "dashboard"] as const) {
       await page.evaluate(async () => {
         const request = async (path: string, method = "GET", headers: Record<string, string> = {}) => {
           const response = await fetch(path, { method, credentials: "same-origin", redirect: "error",
-            headers: { "Fanout-Request": "1", ...headers } }).catch(() => {
+            headers: { "Pitot-Request": "1", ...headers } }).catch(() => {
             throw new Error(`Landing recording cleanup failed: ${method} ${path} (request could not complete)`);
           });
           if (!response.ok) throw new Error(`Landing recording cleanup failed: ${method} ${path} (HTTP ${response.status})`);
@@ -73,7 +73,7 @@ for (const view of ["chat", "dashboard"] as const) {
           // Only an explicit non-default flag permits deletion; never touch the default.
           if (dashboard.is_default !== false) continue;
           await request(`/api/dashboards/${encodeURIComponent(dashboard.id)}`, "DELETE",
-            { "Fanout-Confirm-Delete": dashboard.id });
+            { "Pitot-Confirm-Delete": dashboard.id });
         }
       });
       await page.reload();
@@ -82,7 +82,7 @@ for (const view of ["chat", "dashboard"] as const) {
       await expect(navigation.locator('a[href^="/dashboards/"]')).toHaveCount(1);
       await expect(navigation.locator('a[href^="/dashboards/"]').getByText("System overview", { exact: true })).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute("data-mantine-color-scheme", theme);
-      const input = page.getByRole("textbox", { name: "Message Fanout", exact: true });
+      const input = page.getByRole("textbox", { name: "Message Pitot", exact: true });
       await expect(input, "Chat must be enabled and the session must allow agent runs").toBeEnabled();
       // The clip starts on the settled empty chat, not on page load and cleanup.
       const start = (Date.now() - startedAt) / 1000;
@@ -117,7 +117,7 @@ for (const view of ["chat", "dashboard"] as const) {
       await expect(page.locator(".chat-pane").getByRole("alert")).toHaveCount(0);
       await expect(page.locator(".chat-pane").getByText(/^\d+ steps? failed$/), "The run must not show failed steps").toHaveCount(0);
       await expect(page.locator('[data-answer-position] [data-role="assistant"]')).toBeVisible();
-      const views = page.locator('iframe[title="Fanout analysis view"]');
+      const views = page.locator('iframe[title="Pitot analysis view"]');
       for (let index = 0; index < await views.count(); index++) {
         const frame = views.nth(index).contentFrame();
         await expect.poll(() => frame.locator("html").evaluate(element => element.ownerDocument.readyState)).toBe("complete");
@@ -139,7 +139,7 @@ for (const view of ["chat", "dashboard"] as const) {
         const { spec } = await saved.json() as { spec: DashboardSpec };
         expect(spec.panels.length, "The created dashboard must contain at least six panels").toBeGreaterThanOrEqual(6);
         const preview = await context.request.post("/api/queries/run", {
-          headers: { "Fanout-Request": "1" }, data: { dashboard: spec },
+          headers: { "Pitot-Request": "1" }, data: { dashboard: spec },
         });
         expect(preview.ok()).toBe(true);
         const { results } = await preview.json() as { results: PanelResult[] };

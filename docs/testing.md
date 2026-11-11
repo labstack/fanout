@@ -7,7 +7,7 @@ before running MCP tests on a clean Ubuntu runner. Linux may request sudo for OS
 packages. From `ui/host`, run `bun run e2e --help` for the pinned Playwright CLI.
 The app matrix uses system Google Chrome. No AI provider key is
 needed. Run `just e2e` from the repository root to rebuild the embedded SPA,
-MCP App and `bin/fanout`, then run every surface. `just check` remains browser-free.
+MCP App and `bin/pitot`, then run every surface. `just check` remains browser-free.
 
 One config owns `ui/host/e2e/specs/`: `app/` contains the existing seeded-server
 specs, `mcp/` checks the built MCP App through the official AppBridge, and
@@ -32,7 +32,7 @@ Run ownership regressions without a browser using
 `bun test e2e/support/app-lifecycle.test.ts` from `ui/host`;
 `bun run test -- e2e/support` runs all support tests with the configured Vitest
 environment.
-MCP and visual projects have no setup dependency and never boot Fanout.
+MCP and visual projects have no setup dependency and never boot Pitot.
 
 ```sh
 just e2e-browsers                # locked Chromium and its OS dependencies
@@ -61,12 +61,12 @@ artifact for review and acceptance; CI never silently accepts changed pixels.
 
 The existing `app/screenshots.spec.ts` stays in app: it captures opt-in review
 images and manifests, but has no screenshot assertions. Its
-`FANOUT_E2E_SCREENSHOTS` gate is unchanged.
+`PITOT_E2E_SCREENSHOTS` gate is unchanged.
 
 ## Recorded MCP host
 
 `e2e/host/server.mjs` builds current `panels.html` with `vite.apps.config.ts`,
-setting `FANOUT_APPS_OUT` to a temporary directory, then builds the test host.
+setting `PITOT_APPS_OUT` to a temporary directory, then builds the test host.
 It serves only those production files on `127.0.0.1` port zero with
 `Cache-Control: no-store`; Playwright captures `listening on <port>` into
 `E2E_PORT`. SIGTERM closes the listener and removes build output. It never
@@ -110,8 +110,8 @@ fragment coverage below.
 
 Setup creates a disposable loopback server, first administrator and near-now
 deterministic OTLP protobuf traces and logs. Teardown stops the server and removes
-its data and temporary credentials. `FANOUT_E2E_BINARY` can select another built
-server; `FANOUT_E2E_SEED_BINARY` can select a prebuilt seed command. Both paths are
+its data and temporary credentials. `PITOT_E2E_BINARY` can select another built
+server; `PITOT_E2E_SEED_BINARY` can select a prebuilt seed command. Both paths are
 runtime values; otherwise the seed runs through `scripts/with-duckdb.sh`.
 Setup polls `/readyz` before creating the administrator within its 30-second
 start budget, then retries data readiness for 90 seconds, requiring span and log
@@ -223,8 +223,8 @@ Check all six ordered categorical colours plus Other under colour-vision
 deficiency simulation. Browser accessibility scans cannot read canvas text, so
 supplement any scan with compiler/token assertions and screenshots.
 CI runs the performance spec (`just e2e e2e/specs/app/performance.spec.ts`) in its own job and
-the rest with `FANOUT_E2E_SKIP_PERFORMANCE=1`. `just e2e` runs the axe-core AA scan of dashboards and chat panels in both
-themes; `FANOUT_E2E_SCREENSHOTS=1 just e2e` also captures every panel type in
+the rest with `PITOT_E2E_SKIP_PERFORMANCE=1`. `just e2e` runs the axe-core AA scan of dashboards and chat panels in both
+themes; `PITOT_E2E_SCREENSHOTS=1 just e2e` also captures every panel type in
 both themes and states for review under `ui/host/test-results/`. Record the
 scanner or simulation method and version, findings and manual review results;
 an unrun or inconclusive check is not an accessibility pass.
@@ -270,7 +270,7 @@ then regenerate and check:
 ```sh
 just docs-generate
 just docs-generate-check
-just test ./cmd/fanout-docgen
+just test ./cmd/pitot-docgen
 ```
 
 With site dependencies installed, run `npm run build` from `site/`
@@ -279,9 +279,9 @@ and benchmark guards. `just site-build` also installs site
 dependencies; use the installed build directly when dependency installation is
 outside the verification environment's scope. Neither command publishes the site.
 
-Refresh the README's light and dark System overview captures with `just landing-captures` (real seeded server and local Chrome). To capture an existing instance, set `FANOUT_LANDING_BASE_URL` to its URL and `FANOUT_LANDING_SESSION_COOKIE` to a `name=value` session cookie before running the same command; no server starts and no data is seeded.
+Refresh the README's light and dark System overview captures with `just landing-captures` (real seeded server and local Chrome). To capture an existing instance, set `PITOT_LANDING_BASE_URL` to its URL and `PITOT_LANDING_SESSION_COOKIE` to a `name=value` session cookie before running the same command; no server starts and no data is seeded.
 
-To record chat and dashboard clips, set `FANOUT_LANDING_RECORDINGS=1` and the external-instance variables above, then run `bun run e2e e2e/specs/app/landing-recordings.spec.ts --project=app-1440-light --project=app-1440-dark` from `ui/host`. Follow [landing-recordings.md](../site/scripts/landing-recordings.md) to encode and upload them.
+To record chat and dashboard clips, set `PITOT_LANDING_RECORDINGS=1` and the external-instance variables above, then run `bun run e2e e2e/specs/app/landing-recordings.spec.ts --project=app-1440-light --project=app-1440-dark` from `ui/host`. Follow [landing-recordings.md](../site/scripts/landing-recordings.md) to encode and upload them.
 
 ## Local product catalog
 
@@ -351,6 +351,6 @@ that permits the browser's Mach port registration.
 
 The FanQL tests always enforce allocation ceilings and bounded parser/renderer
 work. Wall-clock acceptance is opt-in: run `just fanql-perf`, or set
-`FANOUT_TEST_LATENCY=1` when running the FanQL tests through
+`PITOT_TEST_LATENCY=1` when running the FanQL tests through
 `scripts/with-duckdb.sh`. Use an uninstrumented build for timing; race builds
 still check deterministic work bounds but skip wall-clock assertions.

@@ -73,7 +73,7 @@ func TestWatchExitsOnAStalledPublication(t *testing.T) {
 	}
 }
 
-// A costly query running far past its deadline is the user's, not Fanout's:
+// A costly query running far past its deadline is the user's, not Pitot's:
 // the watchdog reports it but never exits.
 func TestWatchNeverExitsOnAQueryOverrun(t *testing.T) {
 	d, _ := mockDuck(t)
@@ -102,7 +102,7 @@ func TestWatchIgnoresReadsWithinTheirDeadlines(t *testing.T) {
 }
 
 // An idle engine that cannot answer a ping while nothing holds the pool is
-// Fanout's stall.
+// Pitot's stall.
 func TestWatchExitsWhenAnIdleEngineCannotAnswer(t *testing.T) {
 	d, _ := mockDuck(t)
 	d.progress.Store(time.Now().Add(-idleLimit - time.Second).UnixNano())

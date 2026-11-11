@@ -14,7 +14,7 @@ duckdb_build_tags go test ./... -tags 'integration transportbench' -args -tags=r
 [[ "${duckdb_go_args[6]}" == '-tags=runtime' ]]
 
 GOFLAGS=''
-duckdb_build_tags go run -ldflags '-s -w' -tags=custom ./cmd/fanout -tags=runtime
+duckdb_build_tags go run -ldflags '-s -w' -tags=custom ./cmd/pitot -tags=runtime
 [[ "${duckdb_go_args[4]}" == '-tags=duckdb_use_static_lib,custom' ]]
 [[ "${duckdb_go_args[6]}" == '-tags=runtime' ]]
 

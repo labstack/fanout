@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/toolerror"
+	"github.com/labstack/pitot/internal/dashboard"
+	"github.com/labstack/pitot/internal/query"
+	"github.com/labstack/pitot/internal/toolerror"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

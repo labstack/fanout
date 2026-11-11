@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 type snapshotSQL interface {
@@ -247,7 +247,7 @@ func compileRelations(ctx context.Context, db snapshotSQL, query string, sources
 	}
 	ctes(root)
 	for name := range shadowed {
-		if strings.HasPrefix(name, "__fanout_snapshot_") {
+		if strings.HasPrefix(name, "__pitot_snapshot_") {
 			return "", fmt.Errorf("reserved snapshot CTE name %s", name)
 		}
 	}
@@ -369,7 +369,7 @@ func (d *Duck) compileSnapshot(ctx context.Context, db snapshotSQL, query string
 			names = append(names, "telemetry."+s.Name, s.Name)
 		}
 		for _, name := range names {
-			alias := "__fanout_snapshot_" + strings.ReplaceAll(name, ".", "_")
+			alias := "__pitot_snapshot_" + strings.ReplaceAll(name, ".", "_")
 			aliases[name] = "SELECT * FROM " + alias
 		}
 		used := map[string]string{}

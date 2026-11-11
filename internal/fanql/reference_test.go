@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/query"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 func TestReferenceCoversEveryRegistryEntry(t *testing.T) {

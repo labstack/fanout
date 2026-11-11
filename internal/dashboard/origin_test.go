@@ -1,7 +1,7 @@
 package dashboard
 
 import (
-	appstore "github.com/labstack/fanout/internal/store"
+	appstore "github.com/labstack/pitot/internal/store"
 	"path/filepath"
 	"strings"
 	"testing"

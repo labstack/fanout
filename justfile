@@ -1,4 +1,4 @@
-# Fanout — task runner. Run `just` with no arguments to list every recipe.
+# Pitot — task runner. Run `just` with no arguments to list every recipe.
 #
 # Naming: recipes are named <subsystem>-<action>, so `just --list` (which sorts
 # alphabetically) groups them. Unprefixed recipes act on the Go module, which
@@ -34,7 +34,7 @@ default:
 
 # Load optional ignored .env, then inherited values. Build with `just build` first.
 run *ARGS='':
-    node scripts/run-fanout.mjs -- ./bin/fanout {{ARGS}}
+    node scripts/run-pitot.mjs -- ./bin/pitot {{ARGS}}
 
 # Split out so CI installs exactly what a contributor does, without also
 # writing git hooks into the runner.
@@ -70,7 +70,7 @@ ui: ui-lint ui-host ui-apps
 
 # Browser assets, then the binary that embeds them.
 build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`: ui
-    bash scripts/with-duckdb.sh go build -ldflags "-s -w -X main.version={{VERSION}}" -o bin/fanout ./cmd/fanout
+    bash scripts/with-duckdb.sh go build -ldflags "-s -w -X main.version={{VERSION}}" -o bin/pitot ./cmd/pitot
 
 # Install Chromium from the locked Playwright package, plus Linux OS libraries.
 e2e-browsers:
@@ -109,14 +109,14 @@ e2e-linux-baselines:
 
 # Refresh the README's light and dark System overview captures.
 landing-captures:
-    FANOUT_LANDING_BASE_URL="${FANOUT_LANDING_BASE_URL:-}" FANOUT_LANDING_SESSION_COOKIE="${FANOUT_LANDING_SESSION_COOKIE:-}" FANOUT_LANDING_CAPTURES=1 just e2e e2e/specs/app/landing-captures.spec.ts
+    PITOT_LANDING_BASE_URL="${PITOT_LANDING_BASE_URL:-}" PITOT_LANDING_SESSION_COOKIE="${PITOT_LANDING_SESSION_COOKIE:-}" PITOT_LANDING_CAPTURES=1 just e2e e2e/specs/app/landing-captures.spec.ts
 
-# CI publishes ghcr.io/labstack/fanout; this is for trying the image locally
+# CI publishes ghcr.io/labstack/pitot; this is for trying the image locally
 # without pushing anything.
 
 # Build the container image.
 docker TAG="local":
-    docker build --build-arg VERSION={{TAG}} -t fanout:{{TAG}} .
+    docker build --build-arg VERSION={{TAG}} -t pitot:{{TAG}} .
 
 # ── Release ──────────────────────────────────────────────────────────────────
 
@@ -196,7 +196,7 @@ test-race *ARGS='./...':
 
 # Opt-in wall-clock acceptance; deterministic work bounds remain in test.
 fanql-perf:
-    FANOUT_TEST_LATENCY=1 bash scripts/with-duckdb.sh go test ./internal/fanql -run TestLatencyBudgets -count=1
+    PITOT_TEST_LATENCY=1 bash scripts/with-duckdb.sh go test ./internal/fanql -run TestLatencyBudgets -count=1
 
 # ── Browser quality ──────────────────────────────────────────────────────────
 
@@ -220,7 +220,7 @@ ui-boundaries-check:
 # Drop this exception when a patched braces release is available.
 # GHSA-mrhx-c7xc-m3w5 remains only in the zod 3 copy that @ag-ui/client and
 # @ag-ui/proto require; zod 3 has no patched release. In the browser it parses
-# events from Fanout's own authenticated /api/agent/runs, so the worst case is
+# events from Pitot's own authenticated /api/agent/runs, so the worst case is
 # the user's own tab running out of memory. Drop this exception when AG-UI
 # moves to zod 4.6.6 or later.
 ui-audit:
@@ -232,7 +232,7 @@ ui-check:
     set -euo pipefail
     staged=$(mktemp -d)
     trap 'rm -rf "$staged"' EXIT
-    FANOUT_UI_OUT="$staged/ui" FANOUT_APPS_OUT="$staged/apps" just ui
+    PITOT_UI_OUT="$staged/ui" PITOT_APPS_OUT="$staged/apps" just ui
     bun scripts/ui-compare.mjs internal/ui/dist "$staged/ui"
     bun scripts/ui-compare.mjs internal/mcp/apps "$staged/apps" --apps
 
@@ -268,11 +268,11 @@ diagrams-check:
 
 # Rewrite the generated settings reference from internal/config.
 docs-generate:
-    bash scripts/with-duckdb.sh go run ./cmd/fanout-docgen
+    bash scripts/with-duckdb.sh go run ./cmd/pitot-docgen
 
 # Fail when a committed settings page is behind the configuration type.
 docs-generate-check:
-    bash scripts/with-duckdb.sh go run ./cmd/fanout-docgen --check
+    bash scripts/with-duckdb.sh go run ./cmd/pitot-docgen --check
 
 # Install the documentation site's dependencies from the lockfile.
 #
@@ -334,8 +334,8 @@ social-card:
       echo "another version re-lays out every glyph, so the diff would not be a real change" >&2
       exit 1
     fi
-    if [ -z "${FANOUT_FONT_PATH:-}" ]; then
-      echo "set FANOUT_FONT_PATH to a directory holding Inter" >&2
+    if [ -z "${PITOT_FONT_PATH:-}" ]; then
+      echo "set PITOT_FONT_PATH to a directory holding Inter" >&2
       echo "the OFL original is at https://github.com/google/fonts/tree/main/ofl/inter" >&2
       exit 1
     fi
@@ -347,7 +347,7 @@ social-card:
     staged_dir=$(mktemp -d)
     trap 'rm -rf "$staged_dir"' EXIT
     staged="$staged_dir/social-card.png"
-    render=$(typst compile --root . --font-path "$FANOUT_FONT_PATH" --ppi 96 --format png \
+    render=$(typst compile --root . --font-path "$PITOT_FONT_PATH" --ppi 96 --format png \
       docs/media/social-card.typ "$staged" 2>&1)
     if [ -n "$render" ]; then echo "$render"; fi
     if echo "$render" | grep -qi "unknown font family"; then
@@ -392,7 +392,7 @@ test-names-check:
 
 # Regenerate the eval response fixtures through the native server implementation.
 dashboard-eval-generate:
-    FANOUT_EVAL_UPDATE_GOLDENS=1 just test ./internal/agent -run TestDashboardEvalGoldensCurrent
+    PITOT_EVAL_UPDATE_GOLDENS=1 just test ./internal/agent -run TestDashboardEvalGoldensCurrent
 
 # Force fresh server execution so test caching cannot hide response-shape drift.
 dashboard-eval-generate-check:

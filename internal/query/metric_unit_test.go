@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // A metric panel's value columns carry the unit the metric reports, mapped

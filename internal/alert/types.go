@@ -49,7 +49,7 @@ type Alert struct {
 // Env holds the metric values available to alert expressions.
 //
 // The `expr` tag is the name a rule author writes, and each field's doc comment
-// is published as that variable's description by cmd/fanout-docgen. Adding a
+// is published as that variable's description by cmd/pitot-docgen. Adding a
 // field here adds a row to the reference; describe it in a sentence a rule
 // author would find useful, not in terms of how it is computed.
 type Env struct {

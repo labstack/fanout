@@ -126,16 +126,16 @@ func TestGateObservesOutsideTheCriticalSection(t *testing.T) {
 // whether ingest is stalling behind rollups, which is the question this
 // instrumentation exists to answer.
 func TestGateRecordsBothWaitAndHoldHistograms(t *testing.T) {
-	beforeWait := histogramCount(t, "fanout_write_gate_wait_seconds", Maintenance)
-	beforeHold := histogramCount(t, "fanout_write_gate_hold_seconds", Maintenance)
+	beforeWait := histogramCount(t, "pitot_write_gate_wait_seconds", Maintenance)
+	beforeHold := histogramCount(t, "pitot_write_gate_hold_seconds", Maintenance)
 
 	var gate Gate
 	gate.Lock(Maintenance)()
 
-	if after := histogramCount(t, "fanout_write_gate_wait_seconds", Maintenance); after != beforeWait+1 {
+	if after := histogramCount(t, "pitot_write_gate_wait_seconds", Maintenance); after != beforeWait+1 {
 		t.Errorf("wait sample count = %d, want %d", after, beforeWait+1)
 	}
-	if after := histogramCount(t, "fanout_write_gate_hold_seconds", Maintenance); after != beforeHold+1 {
+	if after := histogramCount(t, "pitot_write_gate_hold_seconds", Maintenance); after != beforeHold+1 {
 		t.Errorf("hold sample count = %d, want %d", after, beforeHold+1)
 	}
 }

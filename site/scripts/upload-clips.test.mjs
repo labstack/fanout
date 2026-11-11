@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { clipObject, uploadClips } from "./upload-clips.mjs";
 
 function setup(t) {
-  const directory = mkdtempSync(join(tmpdir(), "fanout-upload-test-"));
+  const directory = mkdtempSync(join(tmpdir(), "pitot-upload-test-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const input = join(directory, "encoded clips");
   const manifestPath = join(directory, "site/src/data/landing-media.json");
@@ -20,7 +20,7 @@ test("object keys and public URLs use the first 12 hex digits of SHA-256", () =>
   for (const format of ["webm", "mp4"]) {
     assert.deepEqual(clipObject("chat-light", format, Buffer.from("abc")), {
       key: `videos/chat-light-ba7816bf8f01.${format}`,
-      url: `https://assets.fanout.run/videos/chat-light-ba7816bf8f01.${format}`,
+      url: `https://assets.pitot.dev/videos/chat-light-ba7816bf8f01.${format}`,
     });
     assert.notEqual(clipObject("chat-light", format, Buffer.from("abcd")).key,
       clipObject("chat-light", format, Buffer.from("abc")).key);
@@ -59,7 +59,7 @@ require("node:fs").appendFileSync(process.env.CLIP_UPLOAD_LOG, JSON.stringify(pr
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   for (const [index, [name, format]] of names.flatMap(name => ["mp4", "webm"].map(format => [name, format])).entries()) {
     const { key, url } = clipObject(name, format, Buffer.from("abc"));
-    assert.deepEqual(uploads[index], ["r2", "object", "put", `fanout/${key}`, "--file", join(input, `${name}.${format}`),
+    assert.deepEqual(uploads[index], ["r2", "object", "put", `pitot/${key}`, "--file", join(input, `${name}.${format}`),
       "--content-type", `video/${format}`, "--cache-control", "public, max-age=31536000, immutable", "--remote"]);
     assert.equal(manifest[name][format], url);
   }

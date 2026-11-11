@@ -12,7 +12,7 @@ change query results.
 
 ## Decision
 
-Fanout builds against one pinned DuckDB 2 engine (`internal/duckdb`, built with
+Pitot builds against one pinned DuckDB 2 engine (`internal/duckdb`, built with
 `scripts/with-duckdb.sh`) with statically linked extensions and no dynamic
 extension downloads. Telemetry is stored only as batch format 4 Parquet with
 typed attribute maps. A schema change requires a new format version; there is

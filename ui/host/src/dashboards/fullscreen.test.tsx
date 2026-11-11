@@ -10,7 +10,7 @@ import { PanelGrid } from "./grid";
 import { DashboardPage } from "./page";
 import { parseSearch, toSearchParams } from "./search";
 
-vi.mock("../app-context", async (importOriginal) => ({ ...await importOriginal<typeof import("../app-context")>(), useFanoutApp: () => ({ agentAvailable: true, openChat: vi.fn() }) }));
+vi.mock("../app-context", async (importOriginal) => ({ ...await importOriginal<typeof import("../app-context")>(), usePitotApp: () => ({ agentAvailable: true, openChat: vi.fn() }) }));
 vi.mock("../auth", () => ({ useViewer: () => ({ role: "viewer" }), authorizedFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init) }));
 
 const viz = vi.hoisted(() => ({ props: vi.fn() }));
@@ -82,7 +82,7 @@ it.each(["empty", "error"] as const)("preserves %s state and separate answer/edi
   expect(onOpenChat.mock.calls[0][1]).toMatchObject({ answer_only: true, context: [{description:"Observed panel diagnostics",value:expect.any(String)}] });
   expect(onOpenChat.mock.calls[0][0]).not.toContain("Please fix");
   if (status === "error") {
-    await act(async () => [...dialog.querySelectorAll<HTMLButtonElement>("button")].find(el => el.textContent === "Ask Fanout to fix it")!.click());
+    await act(async () => [...dialog.querySelectorAll<HTMLButtonElement>("button")].find(el => el.textContent === "Ask Pitot to fix it")!.click());
     expect(onOpenChat.mock.calls[1][0]).toBe("Fix the panel “Latency”");
     expect(JSON.parse(onOpenChat.mock.calls[1][1].context[0].value)).toMatchObject({error:"Invalid measure"});
   }

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Fanout runtime architecture",
+    "title": "Pitot runtime architecture",
     "output": "architecture.html",
     "quality_profile": "showcase",
     "locale": "en",
@@ -279,17 +279,17 @@
       ],
       "sources": [
         {
-          "path": "internal/engine/duck.go",
+          "path": "internal/query/duck.go",
           "line": 240,
           "end_line": 244
         },
         {
-          "path": "internal/engine/duck.go",
+          "path": "internal/query/duck.go",
           "line": 505,
           "end_line": 522
         },
         {
-          "path": "internal/engine/duck.go",
+          "path": "internal/query/duck.go",
           "line": 627,
           "end_line": 653
         }
@@ -455,7 +455,7 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "fanout: one Go process, one listener :7520",
+      "label": "pitot: one Go process, one listener :7520",
       "wraps": [
         "ingest",
         "api",
@@ -470,7 +470,7 @@
     },
     {
       "kind": "region",
-      "label": "FANOUT_DATA_DIR",
+      "label": "PITOT_DATA_DIR",
       "wraps": [
         "parquet",
         "qstate",
@@ -619,7 +619,7 @@
       "dot": "amber",
       "title": "Optional",
       "items": [
-        "Chat only when FANOUT_AI_PROVIDER is set",
+        "Chat only when PITOT_AI_PROVIDER is set",
         "OIDC sign-in and SMTP email codes when configured",
         "/metrics for Prometheus"
       ]

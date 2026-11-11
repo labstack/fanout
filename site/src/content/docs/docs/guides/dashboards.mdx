@@ -26,14 +26,14 @@ These controls work without an AI provider. See
 [Explore](/docs/guides/explore) for the query tabs.
 
 Delete an owned dashboard through `DELETE /api/dashboards/:id` with the
-`Fanout-Confirm-Delete` header set to its ID. A script also needs the request
+`Pitot-Confirm-Delete` header set to its ID. A script also needs the request
 headers in [Call account APIs from a script](/docs/concepts/authentication#call-account-apis-from-a-script).
 The browser has no dashboard delete control.
 
 ## Build from chat
 
 Open chat and describe the system view you need. For example: "Build a dashboard
-of checkout latency and errors by service." Fanout reads the telemetry schema,
+of checkout latency and errors by service." Pitot reads the telemetry schema,
 previews the panels and saves a dashboard. The save receipt records the saved
 version and reports panels that need attention. **Open dashboard** opens the
 current dashboard.
@@ -46,7 +46,7 @@ history to inspect what changed.
 
 Chat needs a configured AI provider. When it is available, you can start in chat
 or use **Create with AI** on the empty dashboards page. Describe the question,
-services and time window you care about. Fanout discovers the available fields
+services and time window you care about. Pitot discovers the available fields
 and values, previews its draft, and corrects invalid panels before saving.
 Missing telemetry should have an explanation in the panel description; an empty
 panel is not evidence that the system is healthy.
@@ -62,9 +62,9 @@ You can also ask to add a variable, change the default time range or remove a
 panel.
 
 The panel menu's **Explain in chat** asks for an answer about the observed window,
-resolved variables and panel state. It cannot save dashboard changes. **Ask Fanout
+resolved variables and panel state. It cannot save dashboard changes. **Ask Pitot
 to fix it** is a separate edit request for a failed panel, available to the
-dashboard's manager when chat is enabled. It asks Fanout to correct only that
+dashboard's manager when chat is enabled. It asks Pitot to correct only that
 panel. All current account roles can manage their own dashboards; see
 [roles](/docs/reference/roles).
 
@@ -257,7 +257,7 @@ time series with `"by": ["name"]` to keep different metrics in separate groups.
 ### Understand series, increases and elapsed time
 
 A series combines namespace, service, name, unit, instrumentation scope name
-and version, attributes and resource. Fanout computes measures per series
+and version, attributes and resource. Pitot computes measures per series
 before combining series within a group. For gauges and updown metrics,
 `sum(value)` sums the series' bucket averages and `avg(value)` averages those
 averages, so a series that exports more often does not get extra weight. If a
@@ -286,7 +286,7 @@ is not a reset, because observations can be negative.
 
 Each cumulative increase covers the interval from its previous point to its
 current point. A delta uses its usable start time, or its preceding point's
-time. For intervals of at most 10 minutes, Fanout spreads each increase across
+time. For intervals of at most 10 minutes, Pitot spreads each increase across
 the buckets that interval overlaps, in proportion to the overlap, clipping
 buckets to the selected window. Longer intervals are gaps: the whole increase
 belongs to the current point's bucket, with covered time equal to the full
@@ -294,7 +294,7 @@ elapsed interval. Histogram count, sum and every bound's increase follow the
 same rule.
 
 `rate()` is per-second increase over **covered elapsed time**, not bucket width.
-For each series, Fanout divides the sum of its overlap shares by their covered
+For each series, Pitot divides the sum of its overlap shares by their covered
 seconds, then sums the series' rates. Histogram rates use count increases.
 A counter exported every 60 seconds therefore contributes to all six 10-second
 buckets, and totals across machines with staggered or five-minute exports
@@ -506,7 +506,7 @@ An external agent can use the same workflow after
 All remote calls require `telemetry:read`. The dashboard tools, including their
 reads and version list, also require `dashboard:manage`, bound to your account's
 own dashboards. These are delegated scopes, separate from the capability that
-allows Fanout's built-in chat to run.
+allows Pitot's built-in chat to run.
 
 Apps-enabled clients additionally use `query_panel_fragment`,
 `resolve_panel_variables` and `list_panel_exemplars` to refresh complete views,

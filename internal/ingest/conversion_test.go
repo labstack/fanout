@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/labstack/fanout/internal/config"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
@@ -141,7 +141,7 @@ func TestExportConversionRowsMatchBaseline(t *testing.T) {
 	}
 }
 
-// Fanout stores keys exactly as sent: current and deprecated spellings both
+// Pitot stores keys exactly as sent: current and deprecated spellings both
 // stay in the maps, and neither fills a column for the other.
 func TestTraceKeepsAttributeSpellingsAsSent(t *testing.T) {
 	text := func(k, v string) *common.KeyValue {

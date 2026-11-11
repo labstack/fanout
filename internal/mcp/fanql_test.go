@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/fanql"
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/toolerror"
+	"github.com/labstack/pitot/internal/fanql"
+	"github.com/labstack/pitot/internal/query"
+	"github.com/labstack/pitot/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -91,7 +91,7 @@ func TestFanQLReferenceResource(t *testing.T) {
 	}
 	found := false
 	for _, r := range listed.Resources {
-		if r.URI == "fanout://fanql/reference" {
+		if r.URI == "pitot://fanql/reference" {
 			found = true
 			if r.Name != "FanQL reference" || r.MIMEType != "text/markdown" {
 				t.Fatal(r)
@@ -101,7 +101,7 @@ func TestFanQLReferenceResource(t *testing.T) {
 	if !found {
 		t.Fatal("FanQL reference missing from resources/list")
 	}
-	r, err := client.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: "fanout://fanql/reference"})
+	r, err := client.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: "pitot://fanql/reference"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestQueryTelemetryDescriptionPrefersStructuredInput(t *testing.T) {
 			continue
 		}
 		d := tool.Description
-		if !strings.Contains(d, "panel.query") || strings.Index(d, "text") < strings.Index(d, "panel.query") || !strings.Contains(d, "fanout://fanql/reference") {
+		if !strings.Contains(d, "panel.query") || strings.Index(d, "text") < strings.Index(d, "panel.query") || !strings.Contains(d, "pitot://fanql/reference") {
 			t.Fatal(d)
 		}
 		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {

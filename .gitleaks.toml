@@ -33,7 +33,7 @@ regex = '''(/Users|/home)/[A-Za-z0-9_.-]+/'''
 keywords = ["/users/", "/home/"]
 
 [[rules]]
-id = "fanout-bearer-secret"
-description = "Fanout opaque bearer secret"
+id = "pitot-bearer-secret"
+description = "Pitot opaque bearer secret"
 regex = '''fo[iacr]_[A-Za-z0-9_-]{43}\b'''
 keywords = ["foi_", "foa_", "for_", "foc_"]

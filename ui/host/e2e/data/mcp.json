@@ -10,8 +10,8 @@
     "result": {
       "_meta": {
         "io.modelcontextprotocol/serverInfo": {
-          "name": "fanout",
-          "title": "Fanout Observability",
+          "name": "pitot",
+          "title": "Pitot Observability",
           "version": "dev"
         }
       },
@@ -424,8 +424,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -838,8 +838,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -867,8 +867,8 @@
     "result": {
       "_meta": {
         "io.modelcontextprotocol/serverInfo": {
-          "name": "fanout",
-          "title": "Fanout Observability",
+          "name": "pitot",
+          "title": "Pitot Observability",
           "version": "dev"
         }
       },
@@ -1198,8 +1198,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -1529,8 +1529,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -1559,8 +1559,8 @@
     "result": {
       "_meta": {
         "io.modelcontextprotocol/serverInfo": {
-          "name": "fanout",
-          "title": "Fanout Observability",
+          "name": "pitot",
+          "title": "Pitot Observability",
           "version": "dev"
         }
       },
@@ -2800,8 +2800,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -4041,8 +4041,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -4173,8 +4173,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -4384,8 +4384,8 @@
     "result": {
       "_meta": {
         "io.modelcontextprotocol/serverInfo": {
-          "name": "fanout",
-          "title": "Fanout Observability",
+          "name": "pitot",
+          "title": "Pitot Observability",
           "version": "dev"
         }
       },
@@ -4679,8 +4679,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -4839,8 +4839,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -4901,8 +4901,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -4941,8 +4941,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -5210,8 +5210,8 @@
     "result": {
       "_meta": {
         "io.modelcontextprotocol/serverInfo": {
-          "name": "fanout",
-          "title": "Fanout Observability",
+          "name": "pitot",
+          "title": "Pitot Observability",
           "version": "dev"
         }
       },
@@ -7273,8 +7273,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -9336,8 +9336,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -9379,8 +9379,8 @@
     "result": {
       "_meta": {
         "io.modelcontextprotocol/serverInfo": {
-          "name": "fanout",
-          "title": "Fanout Observability",
+          "name": "pitot",
+          "title": "Pitot Observability",
           "version": "dev"
         }
       },
@@ -9599,8 +9599,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -9819,8 +9819,8 @@
         "result": {
           "_meta": {
             "io.modelcontextprotocol/serverInfo": {
-              "name": "fanout",
-              "title": "Fanout Observability",
+              "name": "pitot",
+              "title": "Pitot Observability",
               "version": "v2026.10.18-alpha-1-g94b03c94-dirty"
             }
           },
@@ -9849,8 +9849,8 @@
     "result": {
       "_meta": {
         "io.modelcontextprotocol/serverInfo": {
-          "name": "fanout",
-          "title": "Fanout Observability",
+          "name": "pitot",
+          "title": "Pitot Observability",
           "version": "dev"
         }
       },
@@ -9876,8 +9876,8 @@
     "result": {
       "_meta": {
         "io.modelcontextprotocol/serverInfo": {
-          "name": "fanout",
-          "title": "Fanout Observability",
+          "name": "pitot",
+          "title": "Pitot Observability",
           "version": "dev"
         }
       },
