@@ -2,18 +2,18 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { readFile, writeFile } from "node:fs/promises";
 import setup from "../support/global-setup";
 
-if (process.env.FANOUT_LANDING_BASE_URL) throw new Error("Recordings require the disposable synthetic seed");
+if (process.env.PITOT_LANDING_BASE_URL) throw new Error("Recordings require the disposable synthetic seed");
 const cleanup = await setup();
-const client = new Client({ name: "fanout-e2e-recorder", version: "1.0.0" }, {
+const client = new Client({ name: "pitot-e2e-recorder", version: "1.0.0" }, {
   supportedProtocolVersions: ["2026-07-28"], versionNegotiation: { mode: { pin: "2026-07-28" } },
 });
 try {
-  const state = JSON.parse(await readFile(process.env.FANOUT_E2E_STORAGE_STATE!, "utf8"));
+  const state = JSON.parse(await readFile(process.env.PITOT_E2E_STORAGE_STATE!, "utf8"));
   const cookie = state.cookies.map((c: { name: string; value: string }) => `${c.name}=${c.value}`).join("; ");
-  await client.connect(new StreamableHTTPClientTransport(new URL("/api/mcp", process.env.FANOUT_E2E_BASE_URL), {
-    fetch: (url, init) => fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), Cookie: cookie, "Fanout-Request": "1" } }),
+  await client.connect(new StreamableHTTPClientTransport(new URL("/api/mcp", process.env.PITOT_E2E_BASE_URL), {
+    fetch: (url, init) => fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), Cookie: cookie, "Pitot-Request": "1" } }),
   }));
-  const time = JSON.parse(process.env.FANOUT_E2E_PERFORMANCE_WINDOW!);
+  const time = JSON.parse(process.env.PITOT_E2E_PERFORMANCE_WINDOW!);
   const window = { from: time.from, to: time.to };
   const panel = { id: "custom", title: "Seeded span count", viz: "stat", query: { from: "spans", measures: ["count()"] } };
   const inputs: Record<string, { name: string; arguments: Record<string, unknown> }> = {

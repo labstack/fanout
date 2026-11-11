@@ -9,8 +9,8 @@ import (
 	"time"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
-	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	controlstore "github.com/labstack/fanout/internal/store"
+	pitotmcp "github.com/labstack/pitot/internal/mcp"
+	controlstore "github.com/labstack/pitot/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -52,7 +52,7 @@ func TestRuntimeToolErrorsAreStructuredLiveAndPersisted(t *testing.T) {
 				}
 			}}
 			if path == "refused_app_only" || path == "mcp_panic" {
-				server := fanoutmcp.NewWithIntelligence(registryQueries{}, nil, nil, nil, "test")
+				server := pitotmcp.NewWithIntelligence(registryQueries{}, nil, nil, nil, "test")
 				name = "query_panel_fragment"
 				if path == "mcp_panic" {
 					name = "panic_tool"

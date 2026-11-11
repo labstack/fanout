@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/query"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // Reference is the shared API, MCP resource and generated-site reference.
@@ -108,7 +108,7 @@ func Reference() string {
 		b.WriteString(example)
 		b.WriteByte('\n')
 	}
-	b.WriteString("```\n\n## Transport\n\nMachine text inputs carry visualization, time, comparison, declarations, resolved values, namespace and options as needed. The structured query is required when editable is false. Panels keep storing queries, never text.\n\nCompletion accepts a relative `window` duration or absolute `from` and `to` timestamps. Absolute windows and durations over 24h use recent 24h schema, disclosed by `schema.recent` and `schema.notice`. With no selected window, the same recent fallback applies.\n\nHTTP exposes `/api/fanql/parse`, `/api/fanql/format`, `/api/fanql/complete` and `/api/fanql/reference`, requiring telemetry:read. MCP query_telemetry accepts optional text beside panel; agents should prefer panel.query, or panel.sql for complex work. This reference is also `fanout://fanql/reference`.\n")
+	b.WriteString("```\n\n## Transport\n\nMachine text inputs carry visualization, time, comparison, declarations, resolved values, namespace and options as needed. The structured query is required when editable is false. Panels keep storing queries, never text.\n\nCompletion accepts a relative `window` duration or absolute `from` and `to` timestamps. Absolute windows and durations over 24h use recent 24h schema, disclosed by `schema.recent` and `schema.notice`. With no selected window, the same recent fallback applies.\n\nHTTP exposes `/api/fanql/parse`, `/api/fanql/format`, `/api/fanql/complete` and `/api/fanql/reference`, requiring telemetry:read. MCP query_telemetry accepts optional text beside panel; agents should prefer panel.query, or panel.sql for complex work. This reference is also `pitot://fanql/reference`.\n")
 	return b.String()
 }
 

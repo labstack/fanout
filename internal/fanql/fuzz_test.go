@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 func FuzzCompileFormatCompile(f *testing.F) {

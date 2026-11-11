@@ -1,39 +1,39 @@
-# Fanout trademark policy
+# Pitot trademark policy
 
-The Fanout source code is licensed under the Apache License, Version 2.0. That
+The Pitot source code is licensed under the Apache License, Version 2.0. That
 license covers copyright and patents. It does **not** grant rights to the
-Fanout name, logo, or related marks — Apache-2.0 section 6 says so explicitly.
+Pitot name, logo, or related marks — Apache-2.0 section 6 says so explicitly.
 This document states what LabStack LLC permits and does not permit, so that
 everyone knows where the line is.
 
 ## What this covers
 
-- The name "Fanout" and the mark "fanout".
-- The Fanout logo and wordmark.
-- The container image name `ghcr.io/labstack/fanout`.
+- The name "Pitot" and the mark "pitot".
+- The Pitot logo and wordmark.
+- The container image name `ghcr.io/labstack/pitot`.
 
 ## You do not need permission to
 
 - Say truthfully that your project, product, or service works with, integrates
-  with, is built on, or is compatible with Fanout.
-- Redistribute unmodified Fanout releases under the name Fanout.
-- Write about Fanout — articles, talks, tutorials, comparisons, reviews,
+  with, is built on, or is compatible with Pitot.
+- Redistribute unmodified Pitot releases under the name Pitot.
+- Write about Pitot — articles, talks, tutorials, comparisons, reviews,
   including critical ones.
 - Use the name in a user group, meetup, conference talk title, or community
   channel that is clearly not operated by LabStack.
 - Fork the source and build on it, as Apache-2.0 permits, provided the result
-  is not distributed **under the Fanout name**.
+  is not distributed **under the Pitot name**.
 
 Nothing in this policy restricts any right Apache-2.0 grants you over the code.
 
 ## You need written permission to
 
-- Distribute a **modified** version of Fanout under the name Fanout.
-- Offer a hosted or managed service named Fanout, or named in a way that leads a
+- Distribute a **modified** version of Pitot under the name Pitot.
+- Offer a hosted or managed service named Pitot, or named in a way that leads a
   reasonable person to think LabStack operates it.
-- Use Fanout, or a confusingly similar term, in your company name, product name,
+- Use Pitot, or a confusingly similar term, in your company name, product name,
   domain name, app-store listing, or social account handle.
-- Use the Fanout logo or wordmark as your own branding, or in a modified form.
+- Use the Pitot logo or wordmark as your own branding, or in a modified form.
 - Sell merchandise bearing the marks.
 
 ## Never permitted
@@ -41,7 +41,7 @@ Nothing in this policy restricts any right Apache-2.0 grants you over the code.
 - Implying sponsorship, endorsement, affiliation, or partnership with LabStack
   where none exists.
 - Using the marks in a way that suggests your modified build is the official
-  Fanout distribution.
+  Pitot distribution.
 - Registering the marks, or confusingly similar marks, as trademarks or domain
   names.
 

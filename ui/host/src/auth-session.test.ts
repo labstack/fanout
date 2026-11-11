@@ -6,7 +6,7 @@ declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
 }
 
-const tokenKey = "fanout.access-token";
+const tokenKey = "pitot.access-token";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -106,7 +106,7 @@ describe("authorizedFetch", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
     expect(headers.get("Authorization")).toBeNull();
-    expect(headers.get("Fanout-Request")).toBe("1");
+    expect(headers.get("Pitot-Request")).toBe("1");
     expect(fetchMock.mock.calls[0][1]?.credentials).toBe("same-origin");
   });
 

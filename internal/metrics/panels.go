@@ -6,13 +6,13 @@ import (
 )
 
 var panelQueryDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-	Name:    "fanout_panel_query_duration_seconds",
+	Name:    "pitot_panel_query_duration_seconds",
 	Help:    "Executed panel duration and outcome; panel is a built-in System overview ID or custom. Excludes result-cache hits and admission wait.",
 	Buckets: []float64{.005, .01, .025, .05, .1, .2, .5, 1, 2, 5, 10},
 }, []string{"panel", "status"})
 
 var panelAdmissionDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-	Name:    "fanout_panel_admission_duration_seconds",
+	Name:    "pitot_panel_admission_duration_seconds",
 	Help:    "Panel admission wait by bounded panel ID and outcome. Excludes result-cache hits.",
 	Buckets: []float64{.005, .01, .025, .05, .1, .2, .5, 1, 2, 5, 10},
 }, []string{"panel", "status"})

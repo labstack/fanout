@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/labstack/fanout/internal/telemetry/semconv"
+	"github.com/labstack/pitot/internal/telemetry/semconv"
 )
 
 var coercions = []struct {

@@ -20,7 +20,7 @@ Maintainers may remove comments, close issues and pull requests, and block
 accounts that make the project worse to participate in.
 
 Report conduct privately through
-[GitHub's reporting flow](https://github.com/labstack/fanout/security/advisories/new)
+[GitHub's reporting flow](https://github.com/labstack/pitot/security/advisories/new)
 or contact the maintainers directly. Security vulnerabilities follow
 [SECURITY.md](SECURITY.md).
 

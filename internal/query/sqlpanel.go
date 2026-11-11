@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/pitot/internal/engine"
 )
 
 var (

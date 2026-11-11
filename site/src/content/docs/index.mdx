@@ -1,30 +1,30 @@
 ---
 title: Observability your agents can operate.
-description: Send OpenTelemetry to one binary. Investigate with Fanout's built-in agent, or connect yours over MCP.
-summary: Investigate with Fanout's built-in agent, or use the same typed tools from your own agent over MCP.
+description: Send OpenTelemetry to one binary. Investigate with Pitot's built-in agent, or connect yours over MCP.
+summary: Investigate with Pitot's built-in agent, or use the same typed tools from your own agent over MCP.
 template: splash
 # Override Starlight's title order consistently for search and social cards.
 # The canonical stays at the public root even though Astro writes index.html.
 head:
   - tag: title
-    content: "Fanout · Observability your agents can operate."
+    content: "Pitot · Observability your agents can operate."
   - tag: link
     attrs:
       rel: canonical
-      href: "https://fanout.run/"
+      href: "https://pitot.dev/"
   - tag: meta
     attrs:
       property: og:title
-      content: "Fanout · Observability your agents can operate."
+      content: "Pitot · Observability your agents can operate."
   - tag: meta
     attrs:
       property: og:url
-      content: "https://fanout.run/"
+      content: "https://pitot.dev/"
 hero:
   title: Observability your agents can operate.
-  tagline: Send OpenTelemetry to one binary. Investigate with Fanout's built-in agent, or connect yours over MCP.
+  tagline: Send OpenTelemetry to one binary. Investigate with Pitot's built-in agent, or connect yours over MCP.
   actions:
-    - text: Install Fanout
+    - text: Install Pitot
       link: /docs/get-started/install
       attrs:
         data-analytics-action: install
@@ -64,7 +64,7 @@ import ThroughputReplayClient from "../../components/landing/ThroughputReplayCli
 
 Ask for the whole store's request rate, errors and p95 latency by service, its dependency map, slowest operations, recent errors and slowest traces. The agent checks every panel, then saves the dashboard.
 
-<ProductVideo slot="capture" view="dashboard" eager alt="Fanout agent building and saving a store overview dashboard, then a tour of its panels." description="A one-sentence request becomes a saved eleven-panel dashboard: request rate, error rate, p95 latency and error log stats, by-service time series, a service dependency map, slowest operations, recent error logs and slowest traces." />
+<ProductVideo slot="capture" view="dashboard" eager alt="Pitot agent building and saving a store overview dashboard, then a tour of its panels." description="A one-sentence request becomes a saved eleven-panel dashboard: request rate, error rate, p95 latency and error log stats, by-service time series, a service dependency map, slowest operations, recent error logs and slowest traces." />
 
 </CaptureRow>
 
@@ -74,7 +74,7 @@ Ask for the whole store's request rate, errors and p95 latency by service, its d
 
 The agent queries traces, logs and metrics, then explains what the evidence shows.
 
-<ProductVideo slot="capture" view="chat" alt="Fanout agent answering which service is slowest, with telemetry evidence inline." description="The question &quot;Which service is slowest right now?&quot; leads to a system health check and a service latency table, then an answer that names accounting and explains its p95 latency." />
+<ProductVideo slot="capture" view="chat" alt="Pitot agent answering which service is slowest, with telemetry evidence inline." description="The question &quot;Which service is slowest right now?&quot; leads to a system health check and a service latency table, then an answer that names accounting and explains its p95 latency." />
 
 </CaptureRow>
 

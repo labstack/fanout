@@ -7,7 +7,7 @@ const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function put(root: string, file: string, text: string) { mkdirSync(dirname(join(root,file)),{recursive:true}); writeFileSync(join(root,file),text); }
 function uiCopy() {
- const root=mkdtempSync(join(tmpdir(),"fanout-knip-")); roots.push(root);
+ const root=mkdtempSync(join(tmpdir(),"pitot-knip-")); roots.push(root);
  cpSync(join(source,"ui"),join(root,"ui"),{recursive:true,filter:path=>!path.includes("node_modules")});
  symlinkSync(join(source,"ui/host/node_modules"),join(root,"ui/host/node_modules"),"dir");return root;
 }
@@ -27,7 +27,7 @@ for(const area of ["host/src","panels",""]) {
  });
 }
 function goCopy(cache = join(source, ".cache")) {
- const root=mkdtempSync(join(tmpdir(),"fanout-deadcode-"));roots.push(root);
+ const root=mkdtempSync(join(tmpdir(),"pitot-deadcode-"));roots.push(root);
  for(const path of ["go.mod","go.sum","cmd","internal","scripts","ui/host/package.json"])
   cpSync(join(source,path),join(root,path),{recursive:true});
  mkdirSync(cache, { recursive: true });
@@ -35,7 +35,7 @@ function goCopy(cache = join(source, ".cache")) {
 }
 for(const mode of ["exported","test-only","cmd-helper","dbmigrate-helper","notices-helper","new-main-helper"]) {
  test(`rejects ${mode} Go code outside production reachability`,()=>{
-  const root=goCopy(),dir=mode==="cmd-helper"?"cmd/fanout":mode==="dbmigrate-helper"?"internal/cmd/dbmigrate":mode==="notices-helper"?"internal/cmd/notices":mode==="new-main-helper"?"internal/gatecommand":"internal/id",name=mode.endsWith("helper")?"unusedCmdGateProbe":"UnusedExportGateProbe";
+  const root=goCopy(),dir=mode==="cmd-helper"?"cmd/pitot":mode==="dbmigrate-helper"?"internal/cmd/dbmigrate":mode==="notices-helper"?"internal/cmd/notices":mode==="new-main-helper"?"internal/gatecommand":"internal/id",name=mode.endsWith("helper")?"unusedCmdGateProbe":"UnusedExportGateProbe";
   put(root,dir+"/gate_probe.go",`package ${mode.endsWith("helper")?"main":"id"}\nfunc ${name}() {}\n`);
   if(mode==="new-main-helper") put(root,dir+"/main.go","package main\nfunc main() {}\n");
   if(mode==="test-only") put(root,dir+"/gate_probe_test.go",'package id\nimport "testing"\nfunc TestGateProbe(t *testing.T) { UnusedExportGateProbe() }\n');
@@ -46,7 +46,7 @@ for(const mode of ["exported","test-only","cmd-helper","dbmigrate-helper","notic
 
 test("rejects stale and wildcard Go allowlist entries", () => {
  const root = goCopy(), file = join(root, "scripts/go-deadcode.allowlist"), original = readFileSync(file, "utf8");
- for (const [entry, message] of [["github.com/labstack/fanout/internal/id.AbsentGateProbe\tNot a real entry point", "Stale allowlist entry"], ["github.com/labstack/fanout/internal/id.*\tNo wildcard allowance", "Invalid allowlist entry"]]) {
+ for (const [entry, message] of [["github.com/labstack/pitot/internal/id.AbsentGateProbe\tNot a real entry point", "Stale allowlist entry"], ["github.com/labstack/pitot/internal/id.*\tNo wildcard allowance", "Invalid allowlist entry"]]) {
   writeFileSync(file, original + "\n" + entry + "\n");
   const out = Bun.spawnSync(["node", "scripts/go-deadcode.mjs"], { cwd: root, env: { ...process.env, GOCACHE: join(source, ".cache/gocache"),  GOFLAGS: "-mod=readonly" } });
   expect(out.exitCode).not.toBe(0);
@@ -73,7 +73,7 @@ test("the configured production graph contains every entry and a nonempty projec
 
 
 test("Go probe copies share a usable cache even before the first native build", () => {
- const shared = mkdtempSync(join(tmpdir(), "fanout-native-cache-")); roots.push(shared);
+ const shared = mkdtempSync(join(tmpdir(), "pitot-native-cache-")); roots.push(shared);
  const cache = join(shared, "cache"), root = goCopy(cache);
  put(root, ".cache/probe", "shared cache");
  expect(readFileSync(join(cache, "probe"), "utf8")).toBe("shared cache");

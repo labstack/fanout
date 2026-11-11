@@ -3,7 +3,7 @@ package fanql
 import (
 	"testing"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 func TestFormatGaugeExplainsNoGrouping(t *testing.T) {

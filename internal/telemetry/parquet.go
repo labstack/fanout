@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/pitot/internal/metrics"
 	"github.com/parquet-go/parquet-go"
 	"github.com/zeebo/xxh3"
 	"golang.org/x/sync/errgroup"

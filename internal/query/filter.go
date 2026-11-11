@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/pitot/internal/engine"
 )
 
 // Filter is one checked filter expression.

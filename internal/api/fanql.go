@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/fanql"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/fanql"
+	"github.com/labstack/pitot/internal/query"
 )
 
 type FanQLHandler struct {

@@ -11,8 +11,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/labstack/fanout/internal/telemetry"
-	"github.com/labstack/fanout/internal/telemetry/semconv"
+	"github.com/labstack/pitot/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry/semconv"
 )
 
 // Batch format 5 copies the standard keys into typed dedicated columns
@@ -471,7 +471,7 @@ func (r *keyRewriter) expressionStar(star map[string]any, scope *keyScope) {
 // the inner star.
 func patternFilter(star, pattern map[string]any) map[string]any {
 	param := func() map[string]any {
-		return map[string]any{"class": "COLUMN_REF", "type": "COLUMN_REF", "alias": "", "column_names": []any{"__fanout_column"}}
+		return map[string]any{"class": "COLUMN_REF", "type": "COLUMN_REF", "alias": "", "column_names": []any{"__pitot_column"}}
 	}
 	function := func(name string, args ...map[string]any) map[string]any {
 		arguments := make([]any, len(args))

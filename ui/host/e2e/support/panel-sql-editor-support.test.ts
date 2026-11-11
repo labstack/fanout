@@ -27,7 +27,7 @@ async function fixture(status = 204, reject = false) {
 it("confirms dashboard deletion with the dashboard id and asserts success", async () => {
   const { cleanup, remove } = await fixture();
   await cleanup();
-  expect(remove).toHaveBeenCalledWith("/api/dashboards/sql-dashboard", { headers: { "Fanout-Request": "1", "Fanout-Confirm-Delete": "sql-dashboard" } });
+  expect(remove).toHaveBeenCalledWith("/api/dashboards/sql-dashboard", { headers: { "Pitot-Request": "1", "Pitot-Confirm-Delete": "sql-dashboard" } });
   expect(cleanupFailures).toEqual([]);
 });
 

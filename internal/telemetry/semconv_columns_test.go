@@ -3,7 +3,7 @@ package telemetry
 import (
 	"testing"
 
-	"github.com/labstack/fanout/internal/telemetry/semconv"
+	"github.com/labstack/pitot/internal/telemetry/semconv"
 )
 
 // Spans carry every standard key's column and logs and metrics every

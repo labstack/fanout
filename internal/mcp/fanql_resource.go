@@ -3,11 +3,11 @@ package mcp
 import (
 	"context"
 
-	"github.com/labstack/fanout/internal/fanql"
+	"github.com/labstack/pitot/internal/fanql"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const fanqlReferenceURI = "fanout://fanql/reference"
+const fanqlReferenceURI = "pitot://fanql/reference"
 
 func (s *Server) registerFanQLResource() {
 	s.mcp.AddResource(&mcp.Resource{

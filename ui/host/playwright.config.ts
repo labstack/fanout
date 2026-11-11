@@ -3,12 +3,12 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env.FANOUT_E2E_STATE ??= join(tmpdir(), `fanout-e2e-${randomUUID()}.json`);
+process.env.PITOT_E2E_STATE ??= join(tmpdir(), `pitot-e2e-${randomUUID()}.json`);
 const snapshotPathTemplate = "{testDir}/../../__screenshots__/{projectName}/{platform}/{testFilePath}/{arg}{ext}";
 export default defineConfig({
   testDir: "./e2e/specs",
   testMatch: "**/*.spec.ts",
-  testIgnore: process.env.FANOUT_E2E_SKIP_PERFORMANCE === "1" ? ["**/performance.spec.ts"] : [],
+  testIgnore: process.env.PITOT_E2E_SKIP_PERFORMANCE === "1" ? ["**/performance.spec.ts"] : [],
   globalTeardown: "./e2e/support/app-teardown.ts",
   fullyParallel: true,
   workers: 1,
@@ -16,7 +16,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   failOnFlakyTests: true,
   timeout: 120_000,
-  globalTimeout: (process.env.FANOUT_LANDING_RECORDINGS === "1" ? 40 : 12) * 60_000,
+  globalTimeout: (process.env.PITOT_LANDING_RECORDINGS === "1" ? 40 : 12) * 60_000,
   expect: { timeout: 30_000, toHaveScreenshot: { animations: "disabled" } },
   reporter: [["list"], ["./e2e/failure-report.ts", { outputFolder: "playwright-report" }]],
   outputDir: "test-results",

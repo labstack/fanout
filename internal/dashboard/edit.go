@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 // Operation is one typed edit. Panels are addressed by their stable id, never

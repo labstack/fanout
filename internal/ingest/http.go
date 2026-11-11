@@ -21,7 +21,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/labstack/fanout/internal/settings"
+	"github.com/labstack/pitot/internal/settings"
 )
 
 const (

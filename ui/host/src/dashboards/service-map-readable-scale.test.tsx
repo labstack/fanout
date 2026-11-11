@@ -13,7 +13,7 @@ it.each([1,2,3])("caps %s-service fit at natural scale and centres it",n=>{
  for(const card of fit.nodes) {expect(card.width).toBeLessThanOrEqual(200);expect(card.height).toBe(44);}
  const xs=fit.nodes.flatMap(n=>[n.x,n.x+n.width]);expect((Math.min(...xs)+Math.max(...xs))/2).toBeCloseTo(size.width/2);
 });
-it("starts a dense 20-service fanout at the readable floor with its entry centred",()=>{
+it("starts a dense 20-service pitot at the readable floor with its entry centred",()=>{
  const nodes=[node("gateway"),...Array.from({length:19},(_,i)=>node(`service-${i}-backend`))],m={nodes,edges:nodes.slice(1).map(n=>edge("gateway",n.id))};
  const fit=fitServiceMap(layoutServiceMapRaw(m,size),m,size);expect(fit.scale).toBe(.95);expect(fit.contentHeight).toBeGreaterThan(220);
  const root=fit.nodes.find(n=>n.entry)!;expect(root.y+root.height/2+fit.initialView.y).toBeCloseTo(size.height/2);expect(root.y+fit.initialView.y).toBeGreaterThanOrEqual(0);expect(root.y+root.height+fit.initialView.y).toBeLessThanOrEqual(220);
@@ -22,7 +22,7 @@ it("starts a dense 20-service fanout at the readable floor with its entry centre
 });
 let cleanup=()=>{};
 afterEach(async()=>{await act(async()=>cleanup());cleanup=()=>{};vi.restoreAllMocks();vi.unstubAllGlobals();});
-it("keeps dense fanout labels in their boxes and allows pan then Fit",async()=>{
+it("keeps dense pitot labels in their boxes and allows pan then Fit",async()=>{
  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
  vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockImplementation(()=>DOMRect.fromRect(size));
  const names=["gateway",...Array.from({length:19},(_,i)=>`service-${i}-backend`)];

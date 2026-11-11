@@ -11,14 +11,14 @@ status: shipped
 import BenchmarkSweep from "../../../../components/landing/BenchmarkSweep.astro";
 
 On a Hetzner Cloud ccx33 (8 dedicated vCPUs, 32 GB RAM), with telemetrygen
-on a separate ccx33 over a private network, Fanout v2026.11.0-alpha accepted
+on a separate ccx33 over a private network, Pitot v2026.11.0-alpha accepted
 **507,311 mixed OpenTelemetry items/s** over **306.8 seconds**.
 The composition was 61,571 spans, 224,112 log records and
-221,628 metric points per second. The run measured ingest only. Reads under sustained ingest did not meet the read target and are tracked in [issue #419](https://github.com/labstack/fanout/issues/419).
+221,628 metric points per second. The run measured ingest only. Reads under sustained ingest did not meet the read target and are tracked in [issue #419](https://github.com/labstack/pitot/issues/419).
 
 ## Setup and measurement
 
-Both hosts were described as **Hetzner Cloud ccx33, fsn1, ubuntu-24.04**. The Fanout host
+Both hosts were described as **Hetzner Cloud ccx33, fsn1, ubuntu-24.04**. The Pitot host
 reported AMD EPYC-Milan Processor, 8 logical CPUs and
 32,857,186,304 bytes of memory. telemetrygen v0.157.0 sent
 plaintext OTLP/gRPC over the private network, using 1,000-item batches
@@ -27,7 +27,7 @@ and 8 workers per process.
 The `publish` preset ran 1, 2, 4, 8, 16, 32 and 64 processes per signal
 for traces, logs, metrics and mixed ingest, with 3 repetitions per point.
 Accepted throughput is the change
-in Fanout's `fanout_ingest_rows_total` counter over the measured scrape window.
+in Pitot's `pitot_ingest_rows_total` counter over the measured scrape window.
 
 The suite accepted **667.3 million items** in total: 145,879,781 spans,
 265,470,588 log records and 255,924,526 metric points.
@@ -35,7 +35,7 @@ The suite accepted **667.3 million items** in total: 145,879,781 spans,
 ## Measured mixed ingest
 
 The sustained phase ran for **306.8 seconds** at 64 processes per signal.
-Fanout averaged **7.73 CPU cores** and reached **10.6 GiB peak RSS**.
+Pitot averaged **7.73 CPU cores** and reached **10.6 GiB peak RSS**.
 The generator host averaged **7.93 of 8 CPU cores**.
 The sustained phase is classified generator-limited.
 
@@ -56,7 +56,7 @@ Each peak is the highest median accepted rate in that workload's recorded sweep.
 Ranges cover the three repetitions at the listed process count. CPU columns
 are median average cores at that count; each host has 8 cores.
 
-| Workload | Median peak items/s | Processes per signal | Range items/s | Fanout CPU cores | Generator CPU cores | Repetitions |
+| Workload | Median peak items/s | Processes per signal | Range items/s | Pitot CPU cores | Generator CPU cores | Repetitions |
 |---|---:|---:|---:|---:|---:|---:|
 | Mixed | 460,640 | 64 | 453,181–485,193 | 7.22 | 7.39 | 3 |
 | Traces | 297,345 | 64 | 192,120–330,450 | 6.97 | 7.24 | 3 |
@@ -68,7 +68,7 @@ are median average cores at that count; each host has 8 cores.
 All rates below are accepted items/s across three repetitions per mixed process
 count. CPU columns are median average cores per host.
 
-| Processes per signal | Median items/s | Min items/s | Max items/s | Fanout CPU cores | Generator CPU cores |
+| Processes per signal | Median items/s | Min items/s | Max items/s | Pitot CPU cores | Generator CPU cores |
 |---|---:|---:|---:|---:|---:|
 | 1 | 38,820 | 38,640 | 39,227 | 5.47 | 0.82 |
 | 2 | 76,587 | 76,483 | 76,741 | 6.15 | 1.71 |
@@ -89,16 +89,16 @@ The shaded region marks generator CPU of at least 7 cores.
 
 ## Evidence
 
-The [published evidence](https://github.com/labstack/fanout-bench/tree/main/published/2026-11-06-ccx33x2-v2026.11.0-alpha)
+The [published evidence](https://github.com/labstack/pitot-bench/tree/main/published/2026-11-06-ccx33x2-v2026.11.0-alpha)
 contains `report.json` and `samples.jsonl`, produced by
-[Fanout Bench](https://github.com/labstack/fanout-bench) on 6 November 2026 at
+[Pitot Bench](https://github.com/labstack/pitot-bench) on 6 November 2026 at
 04:15 UTC. All quality gates passed: successful generator exits, zero dropped
 rows, no restarts, authoritative accepted-row counters in every phase and
 verified Parquet storage.
 
 The harness commit was
-[`5462cbbcde9c49521c918c45f45312493aa4bb24`](https://github.com/labstack/fanout-bench/commit/5462cbbcde9c49521c918c45f45312493aa4bb24); the harness working tree was clean.
-The [Fanout release artifact](https://github.com/labstack/fanout/releases/download/v2026.11.0-alpha/fanout_v2026.11.0-alpha_linux_amd64.tar.gz) has SHA-256:
+[`5462cbbcde9c49521c918c45f45312493aa4bb24`](https://github.com/labstack/pitot-bench/commit/5462cbbcde9c49521c918c45f45312493aa4bb24); the harness working tree was clean.
+The [Pitot release artifact](https://github.com/labstack/pitot/releases/download/v2026.11.0-alpha/pitot_v2026.11.0-alpha_linux_amd64.tar.gz) has SHA-256:
 
 ```text
 1e83657b9eb0ff7e7ad406bd5162642badf087c380448deebd1f88b183656ddc
@@ -106,18 +106,18 @@ The [Fanout release artifact](https://github.com/labstack/fanout/releases/downlo
 
 ## Reproduce
 
-From the [fanout-bench](https://github.com/labstack/fanout-bench) repository:
+From the [pitot-bench](https://github.com/labstack/pitot-bench) repository:
 
 ```sh
-FANOUT_BENCH_HCLOUD_SSH_KEY='<key>' scripts/hetzner.sh \
-  --fanout-version v2026.11.0-alpha \
+PITOT_BENCH_HCLOUD_SSH_KEY='<key>' scripts/hetzner.sh \
+  --pitot-version v2026.11.0-alpha \
   --preset publish \
   --repeat 3 \
   --output results/publish-ingest-ccx33x2-v2026.11.0-alpha
 ```
 
 Both VMs default to ccx33. The
-[publishing guide](https://github.com/labstack/fanout-bench/blob/main/docs/publishing.md)
+[publishing guide](https://github.com/labstack/pitot-bench/blob/main/docs/publishing.md)
 documents provisioning, the private network and artifact collection.
 
 Regenerate the website's data from the completed run:

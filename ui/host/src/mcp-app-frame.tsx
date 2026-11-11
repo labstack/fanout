@@ -34,7 +34,7 @@ async function createBrowserMCPConnection(): Promise<BrowserMCPConnection> {
   const transport = new StreamableHTTPClientTransport(new URL("/api/mcp", location.origin), {
     fetch: (url, init) => authorizedFetch(url, init),
   });
-  const client = new Client({ name: "fanout-browser", version: "0.2.0" }, {
+  const client = new Client({ name: "pitot-browser", version: "0.2.0" }, {
     supportedProtocolVersions: ["2026-07-28"],
     versionNegotiation: { mode: { pin: "2026-07-28" } },
     capabilities: {
@@ -265,7 +265,7 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
     try {
       const bridge = new AppBridge(
         null,
-        { name: "Fanout", version: "0.2.0" },
+        { name: "Pitot", version: "0.2.0" },
         { serverTools: {}, logging: {} },
         { hostContext: { theme: colorSchemeRef.current, displayMode: "inline", availableDisplayModes } },
       );
@@ -307,9 +307,9 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
   if (!html) return <DataState state="loading" loadingLabel="Preparing view…" />;
   // Keep the iframe in the same DOM position: reparenting or remounting reloads the app.
   return <FocusTrap active={displayMode === "fullscreen"}><Box data-app-fullscreen={displayMode === "fullscreen" ? "" : undefined}
-    role={displayMode === "fullscreen" ? "dialog" : undefined} aria-modal={displayMode === "fullscreen" ? true : undefined} aria-label={displayMode === "fullscreen" ? "Fanout analysis view" : undefined}
+    role={displayMode === "fullscreen" ? "dialog" : undefined} aria-modal={displayMode === "fullscreen" ? true : undefined} aria-label={displayMode === "fullscreen" ? "Pitot analysis view" : undefined}
     bg="var(--mantine-color-body)" style={displayMode === "fullscreen" ? { position: "fixed", inset: 0, zIndex: 1000, display: "flex", flexDirection: "column" } : undefined}>
     {displayMode === "fullscreen" && <Box p="xs" ta="right"><Button ref={closeRef} data-autofocus size="compact-sm" variant="default" aria-label="Close analysis view" onClick={() => changeDisplayMode("inline")}>Close</Button></Box>}
-    <Box component="iframe" tabIndex={0} ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height: displayMode === "fullscreen" ? "100%" : height, ...(displayMode === "fullscreen" ? { flex: "1 1 0", minHeight: 0 } : {}) }} onLoad={() => void connectBridge()} />
+    <Box component="iframe" tabIndex={0} ref={iframeRef} title="Pitot analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height: displayMode === "fullscreen" ? "100%" : height, ...(displayMode === "fullscreen" ? { flex: "1 1 0", minHeight: 0 } : {}) }} onLoad={() => void connectBridge()} />
   </Box></FocusTrap>;
 }

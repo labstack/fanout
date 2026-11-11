@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/db/generated"
-	"github.com/labstack/fanout/internal/query"
-	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/db/generated"
+	"github.com/labstack/pitot/internal/query"
+	appstore "github.com/labstack/pitot/internal/store"
 	"modernc.org/sqlite"
 )
 

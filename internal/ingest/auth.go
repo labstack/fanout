@@ -12,8 +12,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/labstack/fanout/internal/secret"
-	"github.com/labstack/fanout/internal/settings"
+	"github.com/labstack/pitot/internal/secret"
+	"github.com/labstack/pitot/internal/settings"
 )
 
 // GRPCServerOptions authenticates exports. The shared HTTP server owns TLS.
@@ -66,7 +66,7 @@ func (a *ingestAuthorizer) authorizeToken(ctx context.Context, token string) err
 		return errInvalidIngestToken
 	}
 	if a.settingsStore == nil {
-		// Defensive: production always wires a store (cmd/fanout/main.go). Reaching
+		// Defensive: production always wires a store (cmd/pitot/main.go). Reaching
 		// this path means a mis-wired init; fail closed and log so it surfaces.
 		slog.Error("ingest: settings store not wired; rejecting request")
 		return errIngestAuthUnavailable

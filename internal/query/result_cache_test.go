@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/observability"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // cacheEngine counts reads, and can hold them until release closes or

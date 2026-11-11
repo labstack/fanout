@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/queryrows"
 )
 
 // Hold the first panel inside its admitted read while its sibling waits locally.

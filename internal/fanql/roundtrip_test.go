@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/dashboard"
+	"github.com/labstack/pitot/internal/query"
 )
 
 type storedQueryFixture struct {

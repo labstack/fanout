@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // exponentialBuckets reads the explicit bounds and counts the metric series

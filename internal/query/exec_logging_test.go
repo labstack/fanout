@@ -12,7 +12,7 @@ import (
 	"time"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/queryrows"
 )
 
 func TestFailedLogsOperationalCauseExactlyOnce(t *testing.T) {

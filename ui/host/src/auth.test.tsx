@@ -29,14 +29,14 @@ describe("AuthGate OAuth return", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
-    window.happyDOM.setURL(`https://fanout.example.com/?return_to=${encodeURIComponent(returnTo)}`);
+    window.happyDOM.setURL(`https://pitot.example.com/?return_to=${encodeURIComponent(returnTo)}`);
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     document.body.innerHTML = "";
-    window.happyDOM.setURL("https://fanout.example.com/");
+    window.happyDOM.setURL("https://pitot.example.com/");
   });
 
   it("shows login instead of redirecting without an account session", async () => {
@@ -47,7 +47,7 @@ describe("AuthGate OAuth return", () => {
 
     await act(async () => root.render(
       <MantineProvider>
-        <AuthGate><div>Fanout application</div></AuthGate>
+        <AuthGate><div>Pitot application</div></AuthGate>
       </MantineProvider>,
     ));
 
@@ -55,13 +55,13 @@ describe("AuthGate OAuth return", () => {
     expect(document.body.textContent).not.toContain("Sign in to investigate");
     expect(window.location.pathname).toBe("/");
     expect(window.location.search).toContain("return_to=");
-    expect(document.body.textContent).not.toContain("Fanout application");
+    expect(document.body.textContent).not.toContain("Pitot application");
 
     await act(async () => root.unmount());
   });
 
   it("tells new visitors that email sign-in creates an account when self-signup is enabled", async () => {
-    window.happyDOM.setURL("https://fanout.example.com/");
+    window.happyDOM.setURL("https://pitot.example.com/");
     fetchMock.mockImplementation(async (input) => {
       const path = String(input);
       if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true, self_signup: true });
@@ -74,11 +74,11 @@ describe("AuthGate OAuth return", () => {
 
     await act(async () => root.render(
       <MantineProvider>
-        <AuthGate><div>Fanout application</div></AuthGate>
+        <AuthGate><div>Pitot application</div></AuthGate>
       </MantineProvider>,
     ));
 
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in to Fanout"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in to Pitot"));
     expect(document.body.textContent).toContain("New here? This creates your account.");
     await act(async () => root.unmount());
   });
@@ -94,7 +94,7 @@ describe("AuthGate OAuth return", () => {
 
     await act(async () => root.render(
       <MantineProvider>
-        <AuthGate><div>Fanout application</div></AuthGate>
+        <AuthGate><div>Pitot application</div></AuthGate>
       </MantineProvider>,
     ));
 
@@ -105,7 +105,7 @@ describe("AuthGate OAuth return", () => {
   });
 
   it("renders the app for a persisted viewer outside the OAuth flow", async () => {
-    window.happyDOM.setURL("https://fanout.example.com/");
+    window.happyDOM.setURL("https://pitot.example.com/");
     fetchMock.mockImplementation(async (input) => authResponse(input, {
       id: "viewer-123",
       role: "viewer",
@@ -116,18 +116,18 @@ describe("AuthGate OAuth return", () => {
 
     await act(async () => root.render(
       <MantineProvider>
-        <AuthGate><div>Fanout application</div></AuthGate>
+        <AuthGate><div>Pitot application</div></AuthGate>
       </MantineProvider>,
     ));
 
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Pitot application"));
     expect(document.body.textContent).not.toContain("Sign in");
 
     await act(async () => root.unmount());
   });
 
   it("shows a recoverable error when runtime status cannot be loaded", async () => {
-    window.happyDOM.setURL("https://fanout.example.com/");
+    window.happyDOM.setURL("https://pitot.example.com/");
     fetchMock.mockImplementation(async (input) => {
       if (String(input) === "/api/auth/status") return json({ message: "status unavailable" }, 500);
       if (String(input) === "/api/auth/me") return json({ message: "not authenticated" }, 401);
@@ -139,17 +139,17 @@ describe("AuthGate OAuth return", () => {
 
     await act(async () => root.render(
       <MantineProvider>
-        <AuthGate><div>Fanout application</div></AuthGate>
+        <AuthGate><div>Pitot application</div></AuthGate>
       </MantineProvider>,
     ));
 
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout is unavailable"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Pitot is unavailable"));
     expect(document.body.textContent).toContain("status unavailable");
     await act(async () => root.unmount());
   });
 
   it("redeems a login link once and removes the credential from the URL", async () => {
-    window.happyDOM.setURL("https://fanout.example.com/login?login_token=one-time-secret");
+    window.happyDOM.setURL("https://pitot.example.com/login?login_token=one-time-secret");
     fetchMock.mockImplementation(async (input, init) => {
       const path = String(input);
       if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: false, smtp_configured: false, self_signup: false });
@@ -164,7 +164,7 @@ describe("AuthGate OAuth return", () => {
     document.body.append(container);
     const root = createRoot(container);
     const rootRoute = createRootRoute({
-      component: () => <AuthGate><div>Fanout application</div></AuthGate>,
+      component: () => <AuthGate><div>Pitot application</div></AuthGate>,
     });
     const loginRoute = createRoute({
       getParentRoute: () => rootRoute,
@@ -179,7 +179,7 @@ describe("AuthGate OAuth return", () => {
       </MantineProvider>,
     ));
 
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Pitot application"));
     expect(window.location.search).toBe("");
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/auth/link/verify")).toHaveLength(1);
 
@@ -187,7 +187,7 @@ describe("AuthGate OAuth return", () => {
   });
 
   it("exposes the signed-in account through useViewer", async () => {
-    window.happyDOM.setURL("https://fanout.example.com/");
+    window.happyDOM.setURL("https://pitot.example.com/");
     fetchMock.mockImplementation(async (input) => authResponse(input, {
       id: "viewer-123",
       email: "v@example.com",
@@ -214,7 +214,7 @@ describe("AuthGate OAuth return", () => {
   });
 
   it("sends display_name when setting up the first administrator", async () => {
-    window.happyDOM.setURL("https://fanout.example.com/");
+    window.happyDOM.setURL("https://pitot.example.com/");
     let setupBody: unknown;
     fetchMock.mockImplementation(async (input, init) => {
       const path = String(input);
@@ -229,7 +229,7 @@ describe("AuthGate OAuth return", () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
-    await act(async () => root.render(<MantineProvider><AuthGate><div>Fanout application</div></AuthGate></MantineProvider>));
+    await act(async () => root.render(<MantineProvider><AuthGate><div>Pitot application</div></AuthGate></MantineProvider>));
     await vi.waitFor(() => expect(document.body.textContent).toContain("Create the first admin"));
     const inputs = document.querySelectorAll<HTMLInputElement>('form input');
     expect(inputs).toHaveLength(3);
@@ -246,7 +246,7 @@ describe("AuthGate OAuth return", () => {
 
   it("verifies automatically after six digits and offers resend and change email", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval", "Date"] });
-    window.happyDOM.setURL("https://fanout.example.com/");
+    window.happyDOM.setURL("https://pitot.example.com/");
     const posts: Array<{ path: string; body: unknown }> = [];
     fetchMock.mockImplementation(async (input, init) => {
       const path = String(input);
@@ -262,7 +262,7 @@ describe("AuthGate OAuth return", () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
-    await act(async () => root.render(<MantineProvider><AuthGate><div>Fanout application</div></AuthGate></MantineProvider>));
+    await act(async () => root.render(<MantineProvider><AuthGate><div>Pitot application</div></AuthGate></MantineProvider>));
     await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in"));
     expect(document.body.textContent).not.toContain("Sign in to investigate");
 
@@ -303,7 +303,7 @@ describe("AuthGate OAuth return", () => {
       });
     }
     await vi.waitFor(() => expect(posts.at(-1)).toEqual({ path: "/api/auth/code/verify", body: { email: "v@example.com", code: "123456" } }));
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Pitot application"));
 
     const settled = posts.length;
     await act(async () => { vi.advanceTimersByTime(5_000); });
@@ -317,7 +317,7 @@ describe("AuthGate OAuth return", () => {
   });
 
   it("offers a verify button and returns focus to the first digit after a rejected code", async () => {
-    window.happyDOM.setURL("https://fanout.example.com/");
+    window.happyDOM.setURL("https://pitot.example.com/");
     const posts: Array<{ path: string; body: unknown }> = [];
     fetchMock.mockImplementation(async (input, init) => {
       const path = String(input);
@@ -333,7 +333,7 @@ describe("AuthGate OAuth return", () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
-    await act(async () => root.render(<MantineProvider><AuthGate><div>Fanout application</div></AuthGate></MantineProvider>));
+    await act(async () => root.render(<MantineProvider><AuthGate><div>Pitot application</div></AuthGate></MantineProvider>));
     await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in"));
 
     const email = document.querySelector('input[type="email"]') as HTMLInputElement;

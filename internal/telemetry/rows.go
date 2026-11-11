@@ -1,5 +1,5 @@
 // Package telemetry defines the canonical, storage-independent rows emitted by
-// the OTLP decoder. These are the only telemetry write contracts in Fanout.
+// the OTLP decoder. These are the only telemetry write contracts in Pitot.
 package telemetry
 
 type Span struct {

@@ -3,9 +3,9 @@ package query
 import (
 	"context"
 	"fmt"
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	"reflect"
 	"testing"
 	"time"

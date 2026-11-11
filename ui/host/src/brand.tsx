@@ -12,10 +12,10 @@ const lockup = {
 export function BrandLockup({ size = "regular" }: { size?: BrandSize }) {
   const style = lockup[size];
   return (
-    <Group component="span" gap={style.gap} wrap="nowrap" aria-label="Fanout">
+    <Group component="span" gap={style.gap} wrap="nowrap" aria-label="Pitot">
       <BrandMark size={size} />
       <Text component="span" fz={style.fontSize} fw={800} lh={1} lts={style.tracking} tt="uppercase">
-        Fanout
+        Pitot
       </Text>
     </Group>
   );
@@ -23,14 +23,14 @@ export function BrandLockup({ size = "regular" }: { size?: BrandSize }) {
 
 export function BrandMark({ size = "regular" }: { size?: BrandSize }) {
   const pixels = { small: 32, regular: 46, large: 50 }[size];
-  return <ThemeIcon size={pixels} variant="transparent" aria-hidden="true"><FanoutMark /></ThemeIcon>;
+  return <ThemeIcon size={pixels} variant="transparent" aria-hidden="true"><PitotMark /></ThemeIcon>;
 }
 
 // "Flowing F" mark: three rounded ribbons forming an abstract F (no tile).
 // Keep the ribbon paths and gradients in sync with ui/host/public/favicon.svg
 // and the server-rendered mark in internal/brand; the favicon additionally
 // carries a drop-shadow filter that this component omits.
-function FanoutMark() {
+function PitotMark() {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const top = `fo-top-${uid}`;
   const mid = `fo-mid-${uid}`;

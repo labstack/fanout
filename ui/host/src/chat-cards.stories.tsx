@@ -4,7 +4,7 @@ import { expect, fn, waitFor } from "storybook/test";
 import { useRef, type FormEvent } from "react";
 import { contrastRatio } from "@labstack/ui";
 import type { Message } from "@ag-ui/client";
-import { FanoutAppContext } from "./app-context";
+import { PitotAppContext } from "./app-context";
 import { ChatPage } from "./chat";
 import { answer, userMessage } from "./catalog/fixtures";
 import { pageParameters } from "./catalog/product";
@@ -18,7 +18,7 @@ const meta = {
   render: function Render(args: Props) {
     const [, updateArgs] = useArgs<Props>();
     const inputRef = useRef<HTMLTextAreaElement>(null);
-    return <FanoutAppContext.Provider value={{ ...args, agentAvailable: true, threadID: "commerce-review", threadMissing: false, ready: true, running: false, activity: "", stopped: false, error: "", inputRef, messageTimes: {}, setInput: value => { args.onInput(value); updateArgs({ input: value }); } }}><ChatPage /></FanoutAppContext.Provider>;
+    return <PitotAppContext.Provider value={{ ...args, agentAvailable: true, threadID: "commerce-review", threadMissing: false, ready: true, running: false, activity: "", stopped: false, error: "", inputRef, messageTimes: {}, setInput: value => { args.onInput(value); updateArgs({ input: value }); } }}><ChatPage /></PitotAppContext.Provider>;
   },
 } satisfies Meta<Props>;
 export default meta;
@@ -26,7 +26,7 @@ type Story = StoryObj<typeof meta>;
 export const Answer: Story = {};
 export const Markdown: Story = { args: { messages: [userMessage, { id: "markdown-001", role: "assistant", content: "### Latency by service\n\n| Service | p95 |\n| --- | --- |\n| checkout | 342 ms |\n| cart | 78 ms |\n| accounting | 126 ms |\n| payment | 184 ms |\n\nCheckout needs attention; the other three services are within their latency budgets." }] } };
 export const Composer: Story = { args: { messages: [] }, play: async ({ canvas, userEvent }) => {
-  const input = canvas.getByRole("textbox", { name: "Message Fanout" });
+  const input = canvas.getByRole("textbox", { name: "Message Pitot" });
   let typed = "";
   for (const character of "How is checkout?") {
     await userEvent.type(input, character);

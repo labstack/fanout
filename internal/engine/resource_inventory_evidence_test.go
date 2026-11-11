@@ -9,19 +9,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/queryrows"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/queryrows"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 func TestResourceInventoryFrozenSnapshotPlans(t *testing.T) {
-	root := os.Getenv("FANOUT_TEST_INVENTORY_SNAPSHOT")
+	root := os.Getenv("PITOT_TEST_INVENTORY_SNAPSHOT")
 	if root == "" {
-		t.Skip("set FANOUT_TEST_INVENTORY_SNAPSHOT to an extracted telemetry repository")
+		t.Skip("set PITOT_TEST_INVENTORY_SNAPSHOT to an extracted telemetry repository")
 	}
-	evidence := os.Getenv("FANOUT_TEST_INVENTORY_EVIDENCE")
+	evidence := os.Getenv("PITOT_TEST_INVENTORY_EVIDENCE")
 	if evidence == "" {
-		t.Fatal("FANOUT_TEST_INVENTORY_EVIDENCE is required")
+		t.Fatal("PITOT_TEST_INVENTORY_EVIDENCE is required")
 	}
 	data, err := os.ReadFile(filepath.Join(evidence, "panel-sql.json"))
 	if err != nil {

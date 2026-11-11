@@ -25,9 +25,9 @@ import (
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/settings"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/settings"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 type httpIngestFixture struct {
@@ -133,7 +133,7 @@ func TestHTTPIngestAuthentication(t *testing.T) {
 		f := newHTTPIngestFixture(t, true)
 		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), "foi_"+strings.Repeat("A", 43), http.StatusUnauthorized)
 	})
-	t.Run("legacy Fanout header", func(t *testing.T) {
+	t.Run("legacy Pitot header", func(t *testing.T) {
 		f := newHTTPIngestFixture(t, true)
 		payload, err := proto.Marshal(testTraceRequest())
 		if err != nil {
@@ -141,7 +141,7 @@ func TestHTTPIngestAuthentication(t *testing.T) {
 		}
 		req := httptest.NewRequest(http.MethodPost, "/v1/traces", bytes.NewReader(payload))
 		req.Header.Set("Content-Type", otlpProtobufContentType)
-		req.Header.Set("x-fanout-ingest-token", f.token)
+		req.Header.Set("x-pitot-ingest-token", f.token)
 		rec := httptest.NewRecorder()
 		f.handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {

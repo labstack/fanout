@@ -12,8 +12,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/labstack/fanout/internal/alert"
-	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/pitot/internal/alert"
+	"github.com/labstack/pitot/internal/auth"
 )
 
 func TestAlertingReadRoutesRequireAuthenticationAndPreserveBodies(t *testing.T) {

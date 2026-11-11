@@ -4,14 +4,14 @@ import { nativeAudit } from "./chart-measurements";
 
 type Snapshot = ReturnType<typeof chartAuditSnapshot>;
 const snapshots = new Map<string, () => Snapshot | undefined>();
-declare global { interface Window { __fanoutAudit?: (id: string) => Snapshot | undefined } }
+declare global { interface Window { __pitotAudit?: (id: string) => Snapshot | undefined } }
 let nextAuditID = 0;
 export function registerAudit(element: HTMLElement, snapshot: () => Snapshot | undefined) {
-  const id = `fanout-audit-${++nextAuditID}`;
+  const id = `pitot-audit-${++nextAuditID}`;
   element.id = id;
   snapshots.set(id, snapshot);
-  window.__fanoutAudit = id => snapshots.get(id)?.();
-  return () => { element.removeAttribute("id"); snapshots.delete(id); if (!snapshots.size) delete window.__fanoutAudit; };
+  window.__pitotAudit = id => snapshots.get(id)?.();
+  return () => { element.removeAttribute("id"); snapshots.delete(id); if (!snapshots.size) delete window.__pitotAudit; };
 }
 /** Explicit, on-demand development inspection; never runs on an ECharts frame. */
 export function chartAuditSnapshot(instance: EChartsType, compiled: EChartsCoreOption, size: ChartSize) {

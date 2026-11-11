@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/fanout/internal/db/generated"
-	appid "github.com/labstack/fanout/internal/id"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/db/generated"
+	appid "github.com/labstack/pitot/internal/id"
+	"github.com/labstack/pitot/internal/query"
 )
 
 var (

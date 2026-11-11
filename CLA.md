@@ -1,7 +1,7 @@
 # LabStack Contributor License Agreement
 
 Thank you for your interest in contributing to a project of LabStack LLC
-("LabStack", "we", "us"), such as Driga, Fanout, or Onebox.
+("LabStack", "we", "us"), such as Driga, Pitot, or Onebox.
 
 This Contributor License Agreement ("Agreement") documents the rights granted
 by contributors to LabStack. It applies to any Contribution you submit to any

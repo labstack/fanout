@@ -17,7 +17,7 @@ data/
 /.cache/
 telemetry.test
 bin/
-fanout
+pitot
 ui/host/dist/
 
 # Dev files

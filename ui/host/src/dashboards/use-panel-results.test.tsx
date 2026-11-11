@@ -291,7 +291,7 @@ it.each([new Error("Network disconnected"),new DOMException("Request aborted","A
       for(const id of ["a","b"]){
         const card=host.node.querySelector(`[data-panel="${id}"]`)!;
         expect(card.textContent).toContain("This panel failed");expect(card.querySelector<HTMLElement>('[data-panel-error-message]')!.title).toBe(error.message);
-        expect(card.textContent).not.toContain("Ask Fanout to fix it");
+        expect(card.textContent).not.toContain("Ask Pitot to fix it");
         expect([...card.querySelectorAll("button")].some(button=>button.textContent==="Retry")).toBe(true);
       }
       expect(host.node.querySelector('[data-panel-body] > [role="status"],[aria-label="Refreshing"]')).toBeNull();
@@ -346,7 +346,7 @@ it.each(["Invalid measure","Query execution failed"])("retries a failed transpor
   try {
     await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.get("loaded")?.error).toBe(message); });
     await act(async()=>within(host.node).getByRole("button", {name: /loaded menu/}).click());
-    expect(document.body.textContent).toContain("Ask Fanout to fix it");
+    expect(document.body.textContent).toContain("Ask Pitot to fix it");
     const before = wire.panels.mock.calls.length;
     await act(async () => host.current.retry("loaded"));
     expect(wire.panels).toHaveBeenCalledTimes(before);
@@ -411,7 +411,7 @@ it("restores query error actions when a transport retry returns a panel error wh
     await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("loaded")?.error).toBe("Invalid query");});
     expect(host.current.results.get("loaded")?.frame).toEqual(resultFor("loaded").frame);
     await act(async()=>within(host.node).getByRole("button", {name: /loaded menu/}).click());
-    expect(document.body.textContent).toContain("Ask Fanout to fix it");
+    expect(document.body.textContent).toContain("Ask Pitot to fix it");
     const before=wire.panels.mock.calls.length;await act(async()=>host.current.retry("loaded"));expect(wire.panels).toHaveBeenCalledTimes(before);
   } finally {await host.dispose();}
 });
@@ -452,7 +452,7 @@ it.each([200, 388].flatMap(height => [false, true].flatMap(stale => failureCases
     // Menu actions are queried with hidden:true; the focusable warning uses normal accessible queries.
     const role = scenario.stale ? "menuitem" : "button";
     if (scenario.retryable) {
-      expect(actions.queryByRole(role, {name: "Ask Fanout to fix it", hidden: role === "menuitem"})).toBeNull();
+      expect(actions.queryByRole(role, {name: "Ask Pitot to fix it", hidden: role === "menuitem"})).toBeNull();
       const retry = await waitForHook(() => actions.getByRole(role, {name: "Retry", hidden: role === "menuitem"}));
       const before = wire.panels.mock.calls.length;
       wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
@@ -462,13 +462,13 @@ it.each([200, 388].flatMap(height => [false, true].flatMap(stale => failureCases
       if (scenario.stale) expect(host.current.results.get("c")?.frame).toEqual(resultFor("c").frame);
     } else {
       expect(actions.queryByRole(role, {name: "Retry", hidden: role === "menuitem"})).toBeNull();
-      const fixAction = await waitForHook(() => actions.getByRole(role, {name: "Ask Fanout to fix it", hidden: role === "menuitem"}));
+      const fixAction = await waitForHook(() => actions.getByRole(role, {name: "Ask Pitot to fix it", hidden: role === "menuitem"}));
       await act(async () => fixAction.click());
       expect(fix).toHaveBeenCalledOnce();
       if (!scenario.stale) {
         await act(async () => query.getByRole("button", {name: "a menu"}).click());
         expect(within(document.body).queryByRole("menuitem", {name: "Retry", hidden: true})).toBeNull();
-        const menuFix = within(document.body).getByRole("menuitem", {name: "Ask Fanout to fix it", hidden: true});
+        const menuFix = within(document.body).getByRole("menuitem", {name: "Ask Pitot to fix it", hidden: true});
         await act(async () => menuFix.click());
         expect(fix).toHaveBeenCalledTimes(2);
       }
@@ -483,10 +483,10 @@ it.each([200, 388])("shows only a fixable error message without an agent at heig
     await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.node.textContent).toContain("Invalid query");});
     const card = within(host.node.querySelector<HTMLElement>('[data-panel="a"]')!);
     expect(card.queryByRole("button", {name: "Retry", hidden: false})).toBeNull();
-    expect(card.queryByRole("button", {name: "Ask Fanout to fix it", hidden: false})).toBeNull();
+    expect(card.queryByRole("button", {name: "Ask Pitot to fix it", hidden: false})).toBeNull();
     await act(async () => card.getByRole("button", {name: "a menu"}).click());
     expect(within(document.body).queryByRole("menuitem", {name: "Retry", hidden: true})).toBeNull();
-    expect(within(document.body).queryByRole("menuitem", {name: "Ask Fanout to fix it", hidden: true})).toBeNull();
+    expect(within(document.body).queryByRole("menuitem", {name: "Ask Pitot to fix it", hidden: true})).toBeNull();
   } finally {await host.dispose();}
 });
 

@@ -89,7 +89,7 @@ const { target, event } = Astro.props;
         // button a dependency on whether analytics loaded at all.
         if (button.dataset.copyEvent) {
           document.dispatchEvent(
-            new CustomEvent("fanout:copy", { detail: button.dataset.copyEvent }),
+            new CustomEvent("pitot:copy", { detail: button.dataset.copyEvent }),
           );
         }
 

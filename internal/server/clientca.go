@@ -21,7 +21,7 @@ func RequireClientCertificates(srv *http.Server, pool *x509.CertPool) {
 	srv.TLSConfig.ClientAuth = tls.RequireAndVerifyClientCert
 }
 
-// LoadClientCAs reads the FANOUT_TLS_CLIENT_CA_FILE bundle: one or more PEM
+// LoadClientCAs reads the PITOT_TLS_CLIENT_CA_FILE bundle: one or more PEM
 // CERTIFICATE blocks separated only by whitespace. It rejects anything else,
 // including text around the blocks and malformed blocks that pem.Decode would
 // otherwise skip, so a truncated or wrong file fails startup. Errors name the
@@ -29,7 +29,7 @@ func RequireClientCertificates(srv *http.Server, pool *x509.CertPool) {
 func LoadClientCAs(path string) (*x509.CertPool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("FANOUT_TLS_CLIENT_CA_FILE: read %q: %w", path, err)
+		return nil, fmt.Errorf("PITOT_TLS_CLIENT_CA_FILE: read %q: %w", path, err)
 	}
 	pool := x509.NewCertPool()
 	count := 0
@@ -43,21 +43,21 @@ func LoadClientCAs(path string) (*x509.CertPool, error) {
 		// pem.Decode skips leading text and malformed blocks; only accept a
 		// block that starts the remaining input and is the only one consumed.
 		if block == nil || !bytes.HasPrefix(data, pemBegin) || bytes.Count(consumed, pemBegin) != 1 {
-			return nil, fmt.Errorf("FANOUT_TLS_CLIENT_CA_FILE: %q contains data that is not a PEM block after certificate %d", path, count)
+			return nil, fmt.Errorf("PITOT_TLS_CLIENT_CA_FILE: %q contains data that is not a PEM block after certificate %d", path, count)
 		}
 		if block.Type != "CERTIFICATE" {
-			return nil, fmt.Errorf("FANOUT_TLS_CLIENT_CA_FILE: %q contains a %q PEM block; only certificates are allowed", path, block.Type)
+			return nil, fmt.Errorf("PITOT_TLS_CLIENT_CA_FILE: %q contains a %q PEM block; only certificates are allowed", path, block.Type)
 		}
 		certificate, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			return nil, fmt.Errorf("FANOUT_TLS_CLIENT_CA_FILE: parse certificate %d in %q: %w", count+1, path, err)
+			return nil, fmt.Errorf("PITOT_TLS_CLIENT_CA_FILE: parse certificate %d in %q: %w", count+1, path, err)
 		}
 		pool.AddCert(certificate)
 		count++
 		data = rest
 	}
 	if count == 0 {
-		return nil, fmt.Errorf("FANOUT_TLS_CLIENT_CA_FILE: no PEM certificates in %q", path)
+		return nil, fmt.Errorf("PITOT_TLS_CLIENT_CA_FILE: no PEM certificates in %q", path)
 	}
 	return pool, nil
 }

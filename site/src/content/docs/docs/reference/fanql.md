@@ -324,4 +324,4 @@ Machine text inputs carry visualization, time, comparison, declarations, resolve
 
 Completion accepts a relative `window` duration or absolute `from` and `to` timestamps. Absolute windows and durations over 24h use recent 24h schema, disclosed by `schema.recent` and `schema.notice`. With no selected window, the same recent fallback applies.
 
-HTTP exposes `/api/fanql/parse`, `/api/fanql/format`, `/api/fanql/complete` and `/api/fanql/reference`, requiring telemetry:read. MCP query_telemetry accepts optional text beside panel; agents should prefer panel.query, or panel.sql for complex work. This reference is also `fanout://fanql/reference`.
+HTTP exposes `/api/fanql/parse`, `/api/fanql/format`, `/api/fanql/complete` and `/api/fanql/reference`, requiring telemetry:read. MCP query_telemetry accepts optional text beside panel; agents should prefer panel.query, or panel.sql for complex work. This reference is also `pitot://fanql/reference`.

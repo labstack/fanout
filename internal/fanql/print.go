@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/query"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // Print prints the canonical spelling of a resolved tree. This spelling is

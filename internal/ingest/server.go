@@ -21,9 +21,9 @@ import (
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/grpc"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

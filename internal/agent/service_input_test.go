@@ -8,16 +8,16 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/engine"
-	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/query"
-	controlstore "github.com/labstack/fanout/internal/store"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
-	"github.com/labstack/fanout/internal/toolerror"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/dashboard"
+	"github.com/labstack/pitot/internal/engine"
+	pitotmcp "github.com/labstack/pitot/internal/mcp"
+	"github.com/labstack/pitot/internal/observability"
+	"github.com/labstack/pitot/internal/query"
+	controlstore "github.com/labstack/pitot/internal/store"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/toolerror"
 )
 
 func TestToolRegistryUnknownServiceBoundsOversizedAliases(t *testing.T) {
@@ -47,7 +47,7 @@ func TestToolRegistryUnknownServiceBoundsOversizedAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := query.NewExecutor(duck, 7)
-	server := fanoutmcp.NewWithIntelligence(observability.New(duck, duck, 7), nil, executor, nil, "test")
+	server := pitotmcp.NewWithIntelligence(observability.New(duck, duck, 7), nil, executor, nil, "test")
 	registry, err := NewToolRegistry(t.Context(), server.MCP())
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestToolRegistryNoDataAndDashboardPanelErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := query.NewExecutor(duck, 7)
-	server := fanoutmcp.NewWithIntelligence(observability.New(duck, duck, 7), dashboard.New(db.DB, executor), executor, nil, "test")
+	server := pitotmcp.NewWithIntelligence(observability.New(duck, duck, 7), dashboard.New(db.DB, executor), executor, nil, "test")
 	registry, err := NewToolRegistry(t.Context(), server.MCP())
 	if err != nil {
 		t.Fatal(err)

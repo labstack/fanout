@@ -2,7 +2,7 @@ package query
 
 import (
 	"context"
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/queryrows"
 	"strings"
 	"testing"
 	"time"

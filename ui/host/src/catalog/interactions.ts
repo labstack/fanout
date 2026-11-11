@@ -5,8 +5,8 @@ import { Product } from "./product";
 type Context = Parameters<NonNullable<StoryObj<typeof Product>["play"]>>[0];
 
 export async function sendQuestion({ canvas, userEvent, step, globals, parameters }: Context, question: string) {
-  await step("Ask Fanout", async () => {
-    const composer = await canvas.findByRole("textbox", { name: "Message Fanout" });
+  await step("Ask Pitot", async () => {
+    const composer = await canvas.findByRole("textbox", { name: "Message Pitot" });
     await waitFor(() => expect(composer).toBeEnabled());
     if (globals.pace === "recording" || parameters.scenario?.pace === "recording") {
       for (const character of question) {
@@ -41,7 +41,7 @@ export async function dashboardInRail({ canvas, step }: Context, question: strin
 export async function analysisReady({ canvasElement, step }: Context) {
   await step("Render the real sandboxed analysis app", async () => {
     await waitFor(() => {
-      const iframe = canvasElement.querySelector<HTMLIFrameElement>('iframe[title="Fanout analysis view"]');
+      const iframe = canvasElement.querySelector<HTMLIFrameElement>('iframe[title="Pitot analysis view"]');
       expect(iframe).toBeVisible();
       expect(iframe?.getAttribute("sandbox")).toBe("allow-scripts");
       // The built app reports its rendered content height over AppBridge.

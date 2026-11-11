@@ -6,9 +6,9 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

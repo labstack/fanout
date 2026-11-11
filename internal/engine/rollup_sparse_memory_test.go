@@ -16,11 +16,11 @@ import (
 // not hide the native t-digest heap, which memory_limit does not govern.
 func rollupMemoryProcess(t *testing.T) bool {
 	t.Helper()
-	if os.Getenv("FANOUT_ROLLUP_MEMORY_CHILD") == t.Name() {
+	if os.Getenv("PITOT_ROLLUP_MEMORY_CHILD") == t.Name() {
 		return true
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$", "-test.v", "-test.timeout=90s")
-	cmd.Env = append(os.Environ(), "FANOUT_ROLLUP_MEMORY_CHILD="+t.Name())
+	cmd.Env = append(os.Environ(), "PITOT_ROLLUP_MEMORY_CHILD="+t.Name())
 	out, err := cmd.CombinedOutput()
 	t.Logf("%s", out)
 	if cmd.ProcessState != nil {

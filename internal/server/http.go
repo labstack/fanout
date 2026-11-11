@@ -1,4 +1,4 @@
-// Package server serves Fanout's browser and OTLP surfaces on one listener.
+// Package server serves Pitot's browser and OTLP surfaces on one listener.
 package server
 
 import (

@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 func TestPressuredCompactionBoundsRowsAndPreservesNormalCeilings(t *testing.T) {

@@ -175,7 +175,7 @@ it("lets long Markdown scroll and keeps query error actions available in short c
  expect(error.querySelector<HTMLElement>("[data-panel-body]")!.style.overflow).toBe("auto");
  expect(error.querySelector<HTMLElement>("[data-panel-error]")!.style.maxHeight).toBe("100%");
  await act(async () => within(error).getByRole("button", {name: /^Content menu/}).click());
- const action = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === "Ask Fanout to fix it")!;
+ const action = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === "Ask Pitot to fix it")!;
  await act(async () => action.click()); expect(fix).toHaveBeenCalledOnce();
 });
 

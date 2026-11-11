@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // seedEdgeSpread writes SERVER/CLIENT pairs that share one ingested instant but

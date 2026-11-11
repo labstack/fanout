@@ -2,7 +2,7 @@ package query
 
 import (
 	"fmt"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 	"strings"
 	"testing"
 	"time"

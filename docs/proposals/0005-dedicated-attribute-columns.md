@@ -60,7 +60,7 @@ Recorded on 2026-11-01:
     target as M1 to M3: at most half of format 4's time.
 
 The rule comes from the published standard alone. No key is added or removed
-because of what Fanout's own test or lab data contains.
+because of what Pitot's own test or lab data contains.
 
 ## Motivation
 
@@ -204,12 +204,12 @@ The `exception.*` keys sit on span events and remain the existing
 - `deployment.environment` → `deployment.environment.name`
 - `peer.service` → `service.peer.name`, which is Development
 
-Fanout stores keys exactly as they are sent. Old spellings stay in the map
+Pitot stores keys exactly as they are sent. Old spellings stay in the map
 and can still be queried, but slowly. Only keys in the list get a column.
 Producers that still send old names convert them upstream, either with the
 Collector's
 [schema processor](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/schemaprocessor)
-(alpha for traces) or with a transform processor recipe in the docs. Fanout
+(alpha for traces) or with a transform processor recipe in the docs. Pitot
 itself carries no alias table. The ingest fallbacks for old spellings in
 `internal/ingest/server.go` are removed together with the columns they fill.
 A semconv upgrade reruns the script. A changed list is a schema change and
@@ -246,7 +246,7 @@ The following format-4 columns are removed with no aliases: `http_method`,
 `service_version` and `deployment_env`. Six of them map to keys that now have
 dedicated columns. `rpc_method` does not, because `rpc.method` is Release
 Candidate at v1.44.0. Filters on `rpc.method` read the VARIANT map until a
-later format adds the key. `peer_service` and `rpc_service` contain Fanout
+later format adds the key. `peer_service` and `rpc_service` contain Pitot
 logic and stay as derived columns, which is open question 1.
 
 **Resolution.** FanQL already reads `http.route` as `attributes['http.route']`
@@ -297,7 +297,7 @@ shredding `messaging.*`.
   counts each key's values without a conversion.
 
 **Existing format-4 data.** AGENTS.md and ADR 0004 forbid a legacy reader.
-Fanout keeps refusing format-4 directories and preserves them, as it does
+Pitot keeps refusing format-4 directories and preserves them, as it does
 today. The operator deletes them before starting format 5. There is a
 precedent: the data reset on 2026-10-11.
 
@@ -346,7 +346,7 @@ arrays and the exponential layout as sent. Format 5 follows it.
 
 ### Metric points in format 5
 
-The physical `type` column holds Fanout's vocabulary, `gauge`, `counter`,
+The physical `type` column holds Pitot's vocabulary, `gauge`, `counter`,
 `updown`, `histogram` and `summary` (`internal/query/vocabulary.go`), as a
 dictionary-encoded string. Each value names one OTLP point kind, except that
 `histogram` covers both histogram kinds; a non-null `exp_scale` marks the
@@ -443,7 +443,7 @@ service and metric of its file. Peers order these tables as follows:
 
 All of them put either a coarse time bucket or the stream or series identity
 first, and time last. Format 5 adopts the ClickHouse exporter's keys, the
-OTel-native peer, with Fanout's `namespace` placed before `service`:
+OTel-native peer, with Pitot's `namespace` placed before `service`:
 
 - **Logs:** five-minute bucket of `log_time`, `namespace`, `service`,
   `log_time`.
@@ -594,7 +594,7 @@ of the peer order, not a tuning target, and the evaluation reports it.
 - The ingest fallbacks for old spellings are removed, so producers that send
   old names lose fast paths until they convert upstream.
 - Exemplar, event and link attributes need a list of VARIANT values, a nesting the writer
-  and DuckDB's reader have not yet carried in Fanout. It must be proven
+  and DuckDB's reader have not yet carried in Pitot. It must be proven
   before the format ships.
 - List columns break the merge's rule of one physical value per row. The
   column copier must handle repetition levels, and a mistake there corrupts

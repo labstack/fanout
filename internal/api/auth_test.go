@@ -13,10 +13,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/settings"
-	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/settings"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 type testAuthServer struct {
@@ -101,7 +101,7 @@ func sessionRequest(method, target string, body *strings.Reader, cookie *http.Co
 		req.AddCookie(cookie)
 	}
 	if isUnsafeMethod(method) {
-		req.Header.Set("Fanout-Request", "1")
+		req.Header.Set("Pitot-Request", "1")
 	}
 	return req
 }
@@ -443,12 +443,12 @@ func TestBrowserMutationValidation(t *testing.T) {
 		want int
 	}{
 		{name: "missing", want: http.StatusForbidden},
-		{name: "custom header", head: map[string]string{"Fanout-Request": "1"}, want: http.StatusNoContent},
+		{name: "custom header", head: map[string]string{"Pitot-Request": "1"}, want: http.StatusNoContent},
 		{name: "same origin", head: map[string]string{"Origin": "http://example.com"}, want: http.StatusNoContent},
 		{name: "referer", head: map[string]string{"Referer": "http://example.com/page"}, want: http.StatusNoContent},
 		{name: "malformed referer", head: map[string]string{"Referer": "://bad"}, want: http.StatusForbidden},
 		{name: "evil origin", head: map[string]string{"Origin": "https://evil.test"}, want: http.StatusForbidden},
-		{name: "cross site overrides header", head: map[string]string{"Fanout-Request": "1", "Sec-Fetch-Site": "cross-site"}, want: http.StatusForbidden},
+		{name: "cross site overrides header", head: map[string]string{"Pitot-Request": "1", "Sec-Fetch-Site": "cross-site"}, want: http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/alerting/rules", nil)
@@ -483,7 +483,7 @@ func TestLogoutDeletesServerSession(t *testing.T) {
 }
 
 func TestStartDoesNotRevealAccountState(t *testing.T) {
-	smtp := auth.SMTPConfig{Host: "smtp.example.com", Port: 587, User: "user", Pass: "pass", From: "Fanout <noreply@example.com>"}
+	smtp := auth.SMTPConfig{Host: "smtp.example.com", Port: 587, User: "user", Pass: "pass", From: "Pitot <noreply@example.com>"}
 	s := newTestAuthServerWith(t, config.Config{AuthMode: "local"}, smtp)
 	suspended, _ := s.users.CreateWithAudit("suspended@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	status := auth.UserStatusSuspended
@@ -548,7 +548,7 @@ func TestLoginLinkAuthenticatesExactlyOnce(t *testing.T) {
 }
 
 func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
-	smtp := auth.SMTPConfig{Host: "127.0.0.1", Port: 1, User: "user", Pass: "pass", From: "Fanout <noreply@example.com>"}
+	smtp := auth.SMTPConfig{Host: "127.0.0.1", Port: 1, User: "user", Pass: "pass", From: "Pitot <noreply@example.com>"}
 	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", SelfSignup: true}, smtp)
 	if _, err := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -743,7 +743,7 @@ func TestSetupExpiryAndExistingAdminRetry(t *testing.T) {
 }
 
 func TestSetupReturnsPublicIngestEndpoint(t *testing.T) {
-	const endpoint = "https://fanout.example.com"
+	const endpoint = "https://pitot.example.com"
 	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", PublicURL: endpoint}, auth.SMTPConfig{})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
 	req.Header.Set("Content-Type", "application/json")

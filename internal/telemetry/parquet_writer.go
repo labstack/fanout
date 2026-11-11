@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/labstack/fanout/internal/telemetry/semconv"
+	"github.com/labstack/pitot/internal/telemetry/semconv"
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/variant"
 	"golang.org/x/sync/errgroup"

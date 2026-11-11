@@ -3,14 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/pitot/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/dashboard"
+	"github.com/labstack/pitot/internal/query"
 )
 
 type structuralValidator struct{}
@@ -97,7 +97,7 @@ func TestDashboardLifecycleOverHTTP(t *testing.T) {
 	if rec := call(http.MethodDelete, "/api/dashboards/"+created.ID, "", ownerCookie); rec.Code != http.StatusPreconditionRequired || !strings.Contains(rec.Body.String(), `"code":"confirmation_required"`) {
 		t.Fatalf("unconfirmed delete = %d %s", rec.Code, rec.Body)
 	}
-	if rec := call(http.MethodDelete, "/api/dashboards/"+created.ID, "", ownerCookie, "Fanout-Confirm-Delete", created.ID); rec.Code != http.StatusNoContent {
+	if rec := call(http.MethodDelete, "/api/dashboards/"+created.ID, "", ownerCookie, "Pitot-Confirm-Delete", created.ID); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d", rec.Code)
 	}
 }

@@ -31,7 +31,7 @@ func TestLoadIgnoresInactiveProviderSecretFiles(t *testing.T) {
 			} {
 				for _, bothSet := range []bool{false, true} {
 					t.Run(fmt.Sprintf("%s/%s/%s/both_set=%t", provider, vendor, file.name, bothSet), func(t *testing.T) {
-						env := []string{"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider}
+						env := []string{"PITOT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "PITOT_AI_PROVIDER=" + provider}
 						if provider != "" {
 							env = append(env, strings.ToUpper(provider)+"_API_KEY=selected-key")
 						}
@@ -62,7 +62,7 @@ func TestLoadRejectsSelectedProviderSecretFileErrors(t *testing.T) {
 				name := strings.ToUpper(provider) + "_API_KEY"
 				path := filepath.Join(t.TempDir(), "missing")
 				env := []string{
-					"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider,
+					"PITOT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "PITOT_AI_PROVIDER=" + provider,
 					name + "_FILE=" + path,
 				}
 				if bothSet {
@@ -92,7 +92,7 @@ func TestLoadSelectsProviderCredentials(t *testing.T) {
 		{"openai default endpoint", "openai", "openai-test", DefaultOpenAIBaseURL, []string{"OPENAI_API_KEY=openai-test", "ANTHROPIC_BASE_URL=not-used"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			env := []string{"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + tc.provider}
+			env := []string{"PITOT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "PITOT_AI_PROVIDER=" + tc.provider}
 			cfg, err := Load(LoadOptions{Environ: append(env, tc.credentials...)})
 			if err != nil {
 				t.Fatal(err)
@@ -106,9 +106,9 @@ func TestLoadSelectsProviderCredentials(t *testing.T) {
 
 func TestLoadIgnoresOtherVendorEnvironment(t *testing.T) {
 	cfg, err := Load(LoadOptions{Environ: []string{
-		"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32),
-		"FANOUT_AI_PROVIDER=openai", "OPENAI_API_KEY=openai-env",
-		"OPENAI_BASE_URL=https://gateway.example/api/v1/", "FANOUT_AI_MODEL=configured-model",
+		"PITOT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32),
+		"PITOT_AI_PROVIDER=openai", "OPENAI_API_KEY=openai-env",
+		"OPENAI_BASE_URL=https://gateway.example/api/v1/", "PITOT_AI_MODEL=configured-model",
 		"ANTHROPIC_API_KEY=", "ANTHROPIC_BASE_URL=",
 		"OPENAI_MODEL=unrelated-tool", "ANTHROPIC_MODEL=unrelated-tool",
 		"OPENAI_PROJECT_ID=another-consumer", "ANTHROPIC_AUTH_TOKEN=another-consumer",
@@ -125,7 +125,7 @@ func TestLoadRejectsInvalidProviderURLWithoutLeakingValues(t *testing.T) {
 	for _, provider := range []string{"anthropic", "openai"} {
 		name := strings.ToUpper(provider) + "_BASE_URL"
 		for _, value := range []string{"file:///private", "https://user:private-value@example.com", "https://example.com?key=private-value", "https://example.com#private-value", "https://example.com?", "https://example.com#", "https://", "https://example.com/%zz"} {
-			_, err := Load(LoadOptions{Environ: []string{"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider, strings.ToUpper(provider) + "_API_KEY=test-key", name + "=" + value}})
+			_, err := Load(LoadOptions{Environ: []string{"PITOT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "PITOT_AI_PROVIDER=" + provider, strings.ToUpper(provider) + "_API_KEY=test-key", name + "=" + value}})
 			if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), value) || strings.Contains(err.Error(), "private-value") {
 				t.Fatalf("expected redacted validation error naming %s", name)
 			}
@@ -135,8 +135,8 @@ func TestLoadRejectsInvalidProviderURLWithoutLeakingValues(t *testing.T) {
 
 func TestLoadRejectsUnsupportedProviderWithoutAKey(t *testing.T) {
 	for _, provider := range []string{"unsupported", "OpenAI", " OpenAI ", " openai ", "Anthropic"} {
-		_, err := Load(LoadOptions{Environ: []string{"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider}})
-		if err == nil || !strings.Contains(err.Error(), "FANOUT_AI_PROVIDER") {
+		_, err := Load(LoadOptions{Environ: []string{"PITOT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "PITOT_AI_PROVIDER=" + provider}})
+		if err == nil || !strings.Contains(err.Error(), "PITOT_AI_PROVIDER") {
 			t.Fatal("unsupported provider must fail at startup, even without a key")
 		}
 	}
@@ -151,7 +151,7 @@ func TestLoadRequiresSelectedProviderKey(t *testing.T) {
 		for _, value := range []string{"", "   "} {
 			name := strings.ToUpper(provider) + "_API_KEY"
 			_, err := Load(LoadOptions{Environ: []string{
-				"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider,
+				"PITOT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "PITOT_AI_PROVIDER=" + provider,
 				name + "=" + value, otherKey + "=other-provider-key",
 			}})
 			if err == nil || !strings.Contains(err.Error(), name) {

@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/query"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/query"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 func newTestEngine(t testing.TB) (*engine.Duck, *telemetrystore.Repository) {

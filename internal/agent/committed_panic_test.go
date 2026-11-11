@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
-	"github.com/labstack/fanout/internal/dashboard"
-	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/query"
-	controlstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/dashboard"
+	pitotmcp "github.com/labstack/pitot/internal/mcp"
+	"github.com/labstack/pitot/internal/query"
+	controlstore "github.com/labstack/pitot/internal/store"
 )
 
 func TestRuntimePanicDistinguishesCommittedSave(t *testing.T) {
@@ -28,7 +28,7 @@ func TestRuntimePanicDistinguishesCommittedSave(t *testing.T) {
 				t.Fatal(err)
 			}
 			service := dashboard.New(db.DB, query.NewExecutor(nil, 30))
-			server := fanoutmcp.NewWithIntelligence(registryQueries{}, service, query.NewExecutor(nil, 30), nil, "test")
+			server := pitotmcp.NewWithIntelligence(registryQueries{}, service, query.NewExecutor(nil, 30), nil, "test")
 			registry, err := NewToolRegistry(t.Context(), server.MCP())
 			if err != nil {
 				t.Fatal(err)

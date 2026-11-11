@@ -1,13 +1,13 @@
 # Operator runbook
 
-Fanout is one process and one persistent data directory. Operate those two
+Pitot is one process and one persistent data directory. Operate those two
 things as a unit: preserve the directory, pin the binary or image version, and
 give ingest credentials only to trusted services and collectors.
 
 ## Runtime secret delivery
 
 Runtime configuration uses built-in defaults followed by nonempty process
-environment values. Every setting requires a restart. Fanout reads no
+environment values. Every setting requires a restart. Pitot reads no
 configuration document or dotenv file. Generated `.env.example` lists the
 settings as commented-out empty entries, with types, defaults, and secret file
 forms in comments. Copying the template sets nothing and preserves image ENV;
@@ -16,9 +16,9 @@ loads optional ignored `./.env` with Node's native `parseEnv`; inherited values
 win, including empty values. Personal development credentials may live there.
 Personal environment files and operator profiles are excluded from Git and Docker.
 
-Custom names use `FANOUT_` plus a clear name, adding the area only when it
+Custom names use `PITOT_` plus a clear name, adding the area only when it
 clarifies. Vendor credentials and endpoints keep their documented names.
-Unknown `FANOUT_` names fail startup, except platform service-discovery names;
+Unknown `PITOT_` names fail startup, except platform service-discovery names;
 unrelated names in shared vendor namespaces are ignored.
 
 ### Environment and mounted secret files
@@ -28,29 +28,29 @@ Every secret accepts either its value or its file path:
 
 | Value variable | File path variable |
 | --- | --- |
-| `FANOUT_AUTH_CODE_SECRET` | `FANOUT_AUTH_CODE_SECRET_FILE` |
-| `FANOUT_OIDC_CLIENT_SECRET` | `FANOUT_OIDC_CLIENT_SECRET_FILE` |
-| `FANOUT_SMTP_PASSWORD` | `FANOUT_SMTP_PASSWORD_FILE` |
-| `FANOUT_INGEST_TOKEN` | `FANOUT_INGEST_TOKEN_FILE` |
-| `FANOUT_METRICS_TOKEN` | `FANOUT_METRICS_TOKEN_FILE` |
-| `FANOUT_SCIM_TOKEN` | `FANOUT_SCIM_TOKEN_FILE` |
+| `PITOT_AUTH_CODE_SECRET` | `PITOT_AUTH_CODE_SECRET_FILE` |
+| `PITOT_OIDC_CLIENT_SECRET` | `PITOT_OIDC_CLIENT_SECRET_FILE` |
+| `PITOT_SMTP_PASSWORD` | `PITOT_SMTP_PASSWORD_FILE` |
+| `PITOT_INGEST_TOKEN` | `PITOT_INGEST_TOKEN_FILE` |
+| `PITOT_METRICS_TOKEN` | `PITOT_METRICS_TOKEN_FILE` |
+| `PITOT_SCIM_TOKEN` | `PITOT_SCIM_TOKEN_FILE` |
 | `ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY_FILE` |
 | `OPENAI_API_KEY` | `OPENAI_API_KEY_FILE` |
 
-Both forms nonempty fail startup. Fanout strips exactly one trailing LF or CRLF
+Both forms nonempty fail startup. Pitot strips exactly one trailing LF or CRLF
 from file contents, then rejects an empty result. Errors identify the variable
-and path, never the contents. Fanout performs no file-mode check; the deployment
+and path, never the contents. Pitot performs no file-mode check; the deployment
 controls mount access. Do not bake credentials into images or frontend bundles.
 Unselected AI providers' value and file forms are ignored.
 
 For Docker, mount a provisioned secret and inject its path:
 
 ```sh
-docker run --name fanout --restart unless-stopped -p 7520:7520 \
-  -v fanout-data:/var/lib/fanout/data \
+docker run --name pitot --restart unless-stopped -p 7520:7520 \
+  -v pitot-data:/var/lib/pitot/data \
   --mount type=bind,src="$AUTH_SECRET_PATH",dst=/run/secrets/auth_code,readonly \
-  -e FANOUT_AUTH_CODE_SECRET_FILE=/run/secrets/auth_code \
-  labstack/fanout:latest
+  -e PITOT_AUTH_CODE_SECRET_FILE=/run/secrets/auth_code \
+  labstack/pitot:latest
 ```
 
 The source secret must be readable by the image's UID 65532. In Compose, grant
@@ -58,18 +58,18 @@ only the required secret to the service:
 
 ```yaml
 services:
-  fanout:
-    image: labstack/fanout:latest
+  pitot:
+    image: labstack/pitot:latest
     ports: ["7520:7520"]
-    volumes: ["fanout-data:/var/lib/fanout/data"]
+    volumes: ["pitot-data:/var/lib/pitot/data"]
     environment:
-      FANOUT_AUTH_CODE_SECRET_FILE: /run/secrets/auth_code
+      PITOT_AUTH_CODE_SECRET_FILE: /run/secrets/auth_code
     secrets: [auth_code]
 secrets:
   auth_code:
     file: ${AUTH_SECRET_PATH}
 volumes:
-  fanout-data:
+  pitot-data:
 ```
 
 For Kubernetes, put ordinary settings in a ConfigMap and credentials in a
@@ -78,16 +78,16 @@ injects both without putting credential values in the manifest:
 
 ```yaml
 containers:
-  - name: fanout
-    image: labstack/fanout:latest
+  - name: pitot
+    image: labstack/pitot:latest
     envFrom:
       - configMapRef:
-          name: fanout-settings
+          name: pitot-settings
     env:
-      - name: FANOUT_AUTH_CODE_SECRET
+      - name: PITOT_AUTH_CODE_SECRET
         valueFrom:
           secretKeyRef:
-            name: fanout-credentials
+            name: pitot-credentials
             key: auth_code_secret
 ```
 
@@ -97,7 +97,7 @@ paths. Use the existing persistent-volume and access policy for telemetry data.
 ### SOPS runtime injection
 
 Use one authoritative SOPS-encrypted profile per actual workload/credential
-set, such as ignored `secrets/fanout.env`. Select a complete profile explicitly;
+set, such as ignored `secrets/pitot.env`. Select a complete profile explicitly;
 never layer different credential sets or fall back on a missing profile.
 Platform-owned credentials remain platform-owned. This public repository ships
 no operator secrets, recipient policy, or decryption keys.
@@ -107,9 +107,9 @@ With a provisioned SOPS key and existing encrypted profile, launch through
 without writing decrypted credentials to disk:
 
 ```sh
-sops exec-env secrets/fanout.env './bin/fanout'
+sops exec-env secrets/pitot.env './bin/pitot'
 # For local development with optional personal settings:
-sops exec-env secrets/fanout.env 'just run'
+sops exec-env secrets/pitot.env 'just run'
 ```
 
 The profile supplies environment values to the child; ordinary settings may
@@ -122,7 +122,7 @@ item. 1Password holds recovery rather than a second maintained copy of
 SOPS-owned application secrets.
 
 AI chat is disabled by default. Select exactly `anthropic` or `openai` with
-`FANOUT_AI_PROVIDER`, then deliver its required `ANTHROPIC_API_KEY` or
+`PITOT_AI_PROVIDER`, then deliver its required `ANTHROPIC_API_KEY` or
 `OPENAI_API_KEY`. A selected provider without its key fails startup. Inherited
 keys never enable chat. Only the selected endpoint is validated and used.
 Overrides are `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`; the OpenAI base
@@ -135,68 +135,68 @@ includes `/v1`, while Anthropic's excludes it.
 | `127.0.0.1:7520` (native), `:7520` (image) | Browser, API, MCP, health, metrics, OTLP/gRPC and OTLP/HTTP | Users, trusted services or a reverse proxy |
 
 Both native and container deployments use one listener. Native installs default
-to loopback; set `FANOUT_ADDR=:7520` for remote access. The image supplies
-`FANOUT_ADDR=:7520` and `FANOUT_DATA_DIR=/var/lib/fanout/data`. Every OTLP request
+to loopback; set `PITOT_ADDR=:7520` for remote access. The image supplies
+`PITOT_ADDR=:7520` and `PITOT_DATA_DIR=/var/lib/pitot/data`. Every OTLP request
 requires an active ingest token, created during first-admin setup, by an
-administrator, or from `FANOUT_INGEST_TOKEN` on an empty install; browser sessions
+administrator, or from `PITOT_INGEST_TOKEN` on an empty install; browser sessions
 and MCP tokens do not authorize ingest. Do not embed the ingest token in a
 browser or shipped mobile application.
 
 For OTLP/HTTP, set `http/protobuf`, use the base endpoint
-`http://fanout:7520`, and supply `Authorization: Bearer <token>`. Exporters
+`http://pitot:7520`, and supply `Authorization: Bearer <token>`. Exporters
 derive `/v1/traces`, `/v1/metrics`, and `/v1/logs` from the general endpoint.
 Signal-specific endpoint variables require the full path. OTLP/gRPC uses the
 same address and authorization value, over HTTP/2.
 
 ## Mobile boundary
 
-Fanout remains a backend receiver, not a public mobile collector. The supported
+Pitot remains a backend receiver, not a public mobile collector. The supported
 path is `mobile SDK -> customer-controlled public Collector or gateway ->
-private Fanout`; the gateway owns public-client authentication, rate limits,
-privacy policy, and abuse controls. Never compile Fanout's shared ingest token
+private Pitot`; the gateway owns public-client authentication, rate limits,
+privacy policy, and abuse controls. Never compile Pitot's shared ingest token
 into a shipped application.
 
 Propagate the standard `traceparent` and `tracestate` headers from mobile HTTP
 requests to backend services. When the customer's gateway exports client spans
-to Fanout, that context correlates them with the backend trace without a Fanout
-mobile SDK or a public Fanout listener.
+to Pitot, that context correlates them with the backend trace without a Pitot
+mobile SDK or a public Pitot listener.
 
 ## TLS and reverse proxies
 
-Setting both `FANOUT_TLS_CERT_FILE` and `FANOUT_TLS_KEY_FILE` enables TLS 1.3 on
-the shared listener. A proxy must forward HTTP/2 to Fanout for gRPC: use
-h2c for a plaintext backend, or HTTP/2 over TLS when Fanout has a certificate.
+Setting both `PITOT_TLS_CERT_FILE` and `PITOT_TLS_KEY_FILE` enables TLS 1.3 on
+the shared listener. A proxy must forward HTTP/2 to Pitot for gRPC: use
+h2c for a plaintext backend, or HTTP/2 over TLS when Pitot has a certificate.
 HTTP/1.1 forwarding supports OTLP/HTTP, but cannot carry gRPC.
-`FANOUT_TLS_CLIENT_CA_FILE` additionally requires every client, including a
+`PITOT_TLS_CLIENT_CA_FILE` additionally requires every client, including a
 TLS-terminating proxy such as Cloudflare with Authenticated Origin Pulls, to
 present a certificate from that CA bundle. The bundle is read at startup, so
 rotation needs a restart; keep the old and new CA in the bundle while clients
 move to certificates from the new one.
 
-Set `FANOUT_PUBLIC_URL` to the externally reachable HTTPS browser origin. When
-using forwarded client addresses, set `FANOUT_TRUSTED_PROXY_CIDRS` to only the
+Set `PITOT_PUBLIC_URL` to the externally reachable HTTPS browser origin. When
+using forwarded client addresses, set `PITOT_TRUSTED_PROXY_CIDRS` to only the
 proxy networks; never use `0.0.0.0/0`. The MCP resource URL is the same origin
-with `/mcp` appended. Fanout accepts public MCP transport requests only when
+with `/mcp` appended. Pitot accepts public MCP transport requests only when
 their HTTP `Host` matches that origin, so the reverse proxy must preserve the
 original host.
 
 MCP also validates `Origin` before authentication; see
-[Connect an agent over MCP](https://fanout.run/docs/guides/mcp#protocol).
+[Connect an agent over MCP](https://pitot.dev/docs/guides/mcp#protocol).
 
 ## Health and monitoring
 
-`fanout healthcheck` derives `/healthz` from `FANOUT_ADDR` or its built-in
+`pitot healthcheck` derives `/healthz` from `PITOT_ADDR` or its built-in
 default. Empty, `0.0.0.0`, and `::` bind hosts become `127.0.0.1`.
-`FANOUT_TLS_CERT_FILE` selects HTTPS. Derived probes bypass environment proxies.
+`PITOT_TLS_CERT_FILE` selects HTTPS. Derived probes bypass environment proxies.
 HTTPS IP-literal probes trust only the configured certificate and verify its
 first DNS or IP SAN, which may differ from the bind IP; hostname probes verify
-normally. Derived HTTPS probes present `FANOUT_HEALTHCHECK_CERT_FILE` and
-`FANOUT_HEALTHCHECK_KEY_FILE` when set, so they pass a listener with
-`FANOUT_TLS_CLIENT_CA_FILE`. Healthcheck reads only these settings and does
-not require valid secrets. An explicit `fanout healthcheck <url>` uses default
+normally. Derived HTTPS probes present `PITOT_HEALTHCHECK_CERT_FILE` and
+`PITOT_HEALTHCHECK_KEY_FILE` when set, so they pass a listener with
+`PITOT_TLS_CLIENT_CA_FILE`. Healthcheck reads only these settings and does
+not require valid secrets. An explicit `pitot healthcheck <url>` uses default
 proxy and certificate verification behaviour.
 
-- `/healthz` is the liveness check. It fails only when Fanout's own work on
+- `/healthz` is the liveness check. It fails only when Pitot's own work on
   the query engine stalls: a Parquet publication holds reads for 10 minutes,
   or an idle engine does not answer a ping while no read holds it. An
   overloaded engine stays alive, and so does one running a query past its
@@ -205,31 +205,31 @@ proxy and certificate verification behaviour.
   engine reports `degraded` with 200; a stalled one reports 503. A query still
   running 25 seconds past its deadline reports `queries` as `degraded`, logs
   a warning with a hash of the query (never its text), and increments
-  `fanout_duckdb_statement_overruns_total`. In OIDC mode, the `oidc` check
+  `pitot_duckdb_statement_overruns_total`. In OIDC mode, the `oidc` check
   reports `degraded` with 200 while provider discovery is failing; only new
   OIDC sign-ins are affected, and discovery retries without a restart.
 - `/metrics` exposes Prometheus metrics. Keep it private or configure
-  `FANOUT_METRICS_TOKEN`; do not make it public merely to simplify scraping.
+  `PITOT_METRICS_TOKEN`; do not make it public merely to simplify scraping.
 
 Monitor admission and compaction together:
 
-- `fanout_ingest_throttled_total{reason}` counts refused whole exports by `debt`,
+- `pitot_ingest_throttled_total{reason}` counts refused whole exports by `debt`,
   `reads`, or `budget`. Exporters need retries enabled.
-- `fanout_ingest_admission_rows_per_second` is the current row-rate cap; zero
+- `pitot_ingest_admission_rows_per_second` is the current row-rate cap; zero
   means uncapped.
-- `fanout_ingest_backpressure_seconds_total` measures time with an admission cap
+- `pitot_ingest_backpressure_seconds_total` measures time with an admission cap
   active. Earlier releases measured blocked-writer time; do not compare them
   directly.
-- `fanout_compaction_backlog_batches` is total generation-0 inventory, including
+- `pitot_compaction_backlog_batches` is total generation-0 inventory, including
   batches excluded from reclaimable debt.
-- `fanout_compaction_pass_seconds` measures pass duration, and
-  `fanout_compaction_retired_batches_total` counts input batches retired by
+- `pitot_compaction_pass_seconds` measures pass duration, and
+  `pitot_compaction_retired_batches_total` counts input batches retired by
   successful publications. Compare its rate with backlog growth.
 
-Run Fanout under a supervisor that restarts it on exit: Docker or Compose with
+Run Pitot under a supervisor that restarts it on exit: Docker or Compose with
 `restart: unless-stopped` (`--restart unless-stopped`), systemd with
 `Restart=on-failure`, or Kubernetes. Docker's `HEALTHCHECK` only marks a
-container unhealthy; it does not restart it. Fanout exits with status 1 when
+container unhealthy; it does not restart it. Pitot exits with status 1 when
 the query engine fails beyond recovery, for example when it runs out of memory
 while writing its cache, or when a stall that fails `/healthz` lasts another
 25 seconds. It first finishes writing received telemetry; the restart
@@ -237,56 +237,56 @@ rebuilds the query cache from stored telemetry.
 
 Alert on repeated restarts, readiness failures, ingest authentication failures,
 telemetry drops, sustained query latency, and available disk space. Retention
-is controlled by `FANOUT_RETENTION_DAYS`; maintenance removes expired data on
+is controlled by `PITOT_RETENTION_DAYS`; maintenance removes expired data on
 its configured cycle rather than immediately when the setting changes.
 
 ## Control database migrations
 
-Fanout uses SQLite with the modernc driver, sqlc query bindings, and embedded
+Pitot uses SQLite with the modernc driver, sqlc query bindings, and embedded
 Goose SQL migrations. Pending migrations run forward at startup. PostgreSQL
 and pgx are not required.
 
 ## Backup
 
 The supported portable baseline is a **cold backup** of the complete
-`FANOUT_DATA_DIR`. It contains atomic telemetry Parquet batches, query state,
+`PITOT_DATA_DIR`. It contains atomic telemetry Parquet batches, query state,
 and the control SQLite database; copying only one
 subdirectory does not produce a recoverable installation.
 
-1. Record the running Fanout version and configuration, excluding secrets from
+1. Record the running Pitot version and configuration, excluding secrets from
    ordinary logs or tickets.
-2. Stop Fanout cleanly and wait for the process to exit. Shutdown stops the shared
+2. Stop Pitot cleanly and wait for the process to exit. Shutdown stops the shared
    listener and allows five seconds for active requests before closing remaining
    connections, then drains the telemetry commit workers.
 3. Snapshot or copy the complete data directory with ownership and permissions
    preserved.
-4. Restart Fanout and confirm `/readyz`.
+4. Restart Pitot and confirm `/readyz`.
 5. Periodically restore a backup into an isolated directory; an untested backup
    is not a recovery plan.
 
-Do not use a normal recursive copy while Fanout is writing. A storage-level
+Do not use a normal recursive copy while Pitot is writing. A storage-level
 snapshot is acceptable only when it provides a crash-consistent point-in-time
 view of the entire data directory.
 
 ## Restore
 
-1. Stop the destination Fanout process.
+1. Stop the destination Pitot process.
 2. Move the existing data directory aside rather than mixing it with a backup.
 3. Restore the complete directory and its original ownership and permissions.
-4. Start the **same Fanout version that created the backup** and verify
+4. Start the **same Pitot version that created the backup** and verify
    `/readyz`, sign-in, and a known telemetry query.
 5. Upgrade separately after the restored installation is known healthy.
 
 Never recover an account by deleting its row from the control database; that
-cascades to sessions, OAuth grants, and owned dashboards. Use `fanout login-link
+cascades to sessions, OAuth grants, and owned dashboards. Use `pitot login-link
 <email>` as documented in [authentication.md](authentication.md).
 
 ## Upgrade and rollback
 
 1. Read the release notes and pin the target image tag or binary version.
 2. Take and verify a cold backup.
-3. Stop Fanout, replace only the binary/image, and retain the data directory.
-4. Start Fanout and check `/readyz`, authentication, both configured OTLP
+3. Stop Pitot, replace only the binary/image, and retain the data directory.
+4. Start Pitot and check `/readyz`, authentication, both configured OTLP
    transports, and representative queries.
 
 Database migrations run forward during startup. A binary rollback after
@@ -300,7 +300,7 @@ SMTP is optional. Creating a local user without it succeeds and returns
 operator with access to the same configuration and data directory then runs:
 
 ```sh
-fanout login-link user@example.com
+pitot login-link user@example.com
 ```
 
 The resulting link expires after 15 minutes, works once, and is recorded in the

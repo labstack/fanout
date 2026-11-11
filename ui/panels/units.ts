@@ -127,13 +127,13 @@ export function valueAxis(min: number, max: number, unit: string | undefined, pi
   let interval = niceStep(Math.max(max - min, Number.EPSILON) / splitNumber, unit);
   // Rounding the bounds must not introduce more ticks than the pixel budget; the cap ends the search whatever the step.
   for (let round = 0; round < 64 && Math.ceil(max / interval) - Math.floor(min / interval) > splitNumber; round++) interval = niceStep(interval * 1.01, unit);
-  return { min: Math.floor(min / interval) * interval, max: Math.ceil(max / interval) * interval, interval, splitNumber, fanout_unit: unit };
+  return { min: Math.floor(min / interval) * interval, max: Math.ceil(max / interval) * interval, interval, splitNumber, pitot_unit: unit };
 }
 /** Recompute after the native plot or annotation band changes its height. */
 export function adaptValueAxis(axis: Record<string, unknown>, pixels: number): Record<string, unknown> {
   if (axis.type !== "value" && axis.type !== "log") return axis;
   if (axis.type !== "value" || typeof axis.min !== "number" || typeof axis.max !== "number") return { ...axis, splitNumber: valueAxisTicks(pixels) };
-  const unit = typeof axis.fanout_unit === "string" ? axis.fanout_unit : undefined;
+  const unit = typeof axis.pitot_unit === "string" ? axis.pitot_unit : undefined;
   const next = valueAxis(axis.min, axis.max, unit, pixels);
   // New ticks may need another duration or binary unit.
   return { ...axis, ...next, ...(unit && (unit in durationFactor || unit === "bytes" || unit === "percent") ? { axisLabel: { ...(axis.axisLabel as object), formatter: formatAxis(unit, next) } } : {}) };

@@ -1,12 +1,12 @@
 import { DEFAULT_THEME, defaultCssVariablesResolver, mergeMantineTheme } from "@mantine/core";
 import { contrastRatio, defaultBrand } from "@labstack/ui";
 import { describe, expect, it } from "vitest";
-import { fanoutCssVariables, fanoutTheme, chart } from "../../theme";
+import { pitotCssVariables, pitotTheme, chart } from "../../theme";
 import { accent, bad, fonts, info, ok, surfaces, typeScale, warn } from "../../tokens";
 
-const theme = mergeMantineTheme(DEFAULT_THEME, fanoutTheme);
+const theme = mergeMantineTheme(DEFAULT_THEME, pitotTheme);
 function variables(scheme: "light" | "dark") {
-  const base = defaultCssVariablesResolver(theme), custom = fanoutCssVariables(theme);
+  const base = defaultCssVariablesResolver(theme), custom = pitotCssVariables(theme);
   const values: Record<string, string> = { ...base.variables, ...base[scheme], ...custom.variables, ...custom[scheme] };
   const resolve = (value: string): string => value.startsWith("var(") ? resolve(values[value.slice(4, -1)]) : value;
   return (name: string) => resolve(values[name]);

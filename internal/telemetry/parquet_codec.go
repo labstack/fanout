@@ -9,7 +9,7 @@ import (
 	"github.com/parquet-go/parquet-go/format"
 )
 
-// parquetCodec compresses every Parquet page Fanout writes. Each page is an
+// parquetCodec compresses every Parquet page Pitot writes. Each page is an
 // independent zstd frame of about parquetPageSize bytes, so a 1 MiB window
 // covers a whole data page. The library's fastest level defaults to a 4 MiB
 // window, and each new encoder then allocates 8 MiB of match history. Pooled

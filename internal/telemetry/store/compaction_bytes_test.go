@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // A merge holds every input's dictionaries and cursors at once, so the live

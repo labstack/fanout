@@ -5,7 +5,7 @@ Date: 2026-10-30
 
 ## Context
 
-Fanout needs a transactional store for users, sessions, dashboards, alerts and
+Pitot needs a transactional store for users, sessions, dashboards, alerts and
 settings, without adding a database server to operate.
 
 ## Decision

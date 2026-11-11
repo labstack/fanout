@@ -5,7 +5,7 @@ import { Anchor, Box, Button, Code, Group, Paper, Stack, Text, Title } from "@ma
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { getJSON } from "./api";
-import { useFanoutApp } from "./app-context";
+import { usePitotApp } from "./app-context";
 import { authorizedFetch, useRuntimeStatus } from "./auth";
 import { ConnectTelemetry } from "./connect-telemetry";
 import { docs } from "../../links";
@@ -32,7 +32,7 @@ function ConnectedAgents() {
     },
     mutationFn: async (agent: OAuthConnection) => {
       const response = await authorizedFetch(`/api/auth/oauth/connections/${encodeURIComponent(agent.client_id)}/revoke`, { method: "POST" });
-      if (!response.ok) throw new Error("Fanout could not disconnect this agent. Try again.");
+      if (!response.ok) throw new Error("Pitot could not disconnect this agent. Try again.");
     },
     onSuccess: (_, agent) => {
       queryClient.setQueryData<{ connections: OAuthConnection[] }>(agentsQueryKey, (data) => data && ({ connections: data.connections.filter((connection) => connection.client_id !== agent.client_id) }));
@@ -44,14 +44,14 @@ function ConnectedAgents() {
   return <Stack gap="sm">
     <Box>
       <Title order={2} fz={22} lts="-0.02em">Connected agents</Title>
-      <Text c="dimmed" size="sm" mt={2}>Agents you have authorized to access Fanout through MCP.</Text>
+      <Text c="dimmed" size="sm" mt={2}>Agents you have authorized to access Pitot through MCP.</Text>
     </Box>
     <Paper withBorder radius="md" p="lg">
       {!agents.data
         ? agents.isLoading
           ? <DataState state="loading" loadingLabel="Loading connected agents" skeleton={<LoadingSkeleton shape="agents" rows={3} />} />
           : <Stack gap="sm" align="flex-start">
-              <Notice tone="danger">Fanout could not load your connected agents.</Notice>
+              <Notice tone="danger">Pitot could not load your connected agents.</Notice>
               <Button size="compact-sm" variant="light" onClick={() => void agents.refetch()}>Try again</Button>
             </Stack>
         : agents.data.connections.length === 0
@@ -67,7 +67,7 @@ function ConnectedAgents() {
             </Stack>}
     </Paper>
     <Text size="sm" c="dimmed" role="status" aria-live="polite">{announcement}</Text>
-    <ConfirmDialog opened={selected !== null} onClose={() => { disconnect.reset(); setSelected(null); }} title={`Disconnect ${selected?.client_name ?? "agent"}?`} confirmLabel="Disconnect agent" tone="danger" pending={disconnect.isPending ? "confirm" : null} error={disconnect.isError ? "Fanout could not disconnect this agent. Try again." : undefined} onConfirm={() => selected && disconnect.mutate(selected)}>
+    <ConfirmDialog opened={selected !== null} onClose={() => { disconnect.reset(); setSelected(null); }} title={`Disconnect ${selected?.client_name ?? "agent"}?`} confirmLabel="Disconnect agent" tone="danger" pending={disconnect.isPending ? "confirm" : null} error={disconnect.isError ? "Pitot could not disconnect this agent. Try again." : undefined} onConfirm={() => selected && disconnect.mutate(selected)}>
       <Text span ff="monospace">{selected?.client_name}</Text> loses access immediately. Your other agents and browser session stay connected. You can authorize the agent again to reconnect.
     </ConfirmDialog>
   </Stack>;
@@ -75,12 +75,12 @@ function ConnectedAgents() {
 
 const localAdministration = "Administrators can still change an email or display name, suspend or reactivate an account, and delete an account.";
 const accountOwnershipNotice = {
-  identity_provider_roles: { tone: "info", title: "Managed by your identity provider", reason: `Your identity provider creates accounts at first sign-in and assigns roles, so Fanout refuses both here. ${localAdministration}` },
-  identity_provider_roles_no_provisioning: { tone: "warning", title: "New people cannot be added", reason: `Your identity provider assigns roles, so Fanout refuses creating accounts and changing roles here, and this workspace does not create accounts at sign-in. People without an account stay out until automatic provisioning with an allow-list or SCIM is configured. ${localAdministration}` },
-  identity_provider_directory: { tone: "info", title: "Managed by your identity provider", reason: "Your identity provider owns accounts through SCIM. Fanout refuses creating or deleting an account and changing its role, status, or email here. Display names can still be edited." },
+  identity_provider_roles: { tone: "info", title: "Managed by your identity provider", reason: `Your identity provider creates accounts at first sign-in and assigns roles, so Pitot refuses both here. ${localAdministration}` },
+  identity_provider_roles_no_provisioning: { tone: "warning", title: "New people cannot be added", reason: `Your identity provider assigns roles, so Pitot refuses creating accounts and changing roles here, and this workspace does not create accounts at sign-in. People without an account stay out until automatic provisioning with an allow-list or SCIM is configured. ${localAdministration}` },
+  identity_provider_directory: { tone: "info", title: "Managed by your identity provider", reason: "Your identity provider owns accounts through SCIM. Pitot refuses creating or deleting an account and changing its role, status, or email here. Display names can still be edited." },
 } as const;
 
-/** Fanout has no screen that changes other users, so this is where a person
+/** Pitot has no screen that changes other users, so this is where a person
  *  learns why those changes are refused. The mode comes from the server, which
  *  enforces it; local administration shows nothing. */
 function AccountOwnership() {
@@ -89,13 +89,13 @@ function AccountOwnership() {
   return <Stack gap="sm">
     <Title order={2} fz={22} lts="-0.02em">User accounts</Title>
     <Notice tone={accountOwnershipNotice[ownership].tone} title={accountOwnershipNotice[ownership].title}>
-      {accountOwnershipNotice[ownership].reason} <Anchor href={docs.authentication} target="_blank" rel="noopener noreferrer" underline="always">Authentication</Anchor> covers what stays in Fanout.
+      {accountOwnershipNotice[ownership].reason} <Anchor href={docs.authentication} target="_blank" rel="noopener noreferrer" underline="always">Authentication</Anchor> covers what stays in Pitot.
     </Notice>
   </Stack>;
 }
 
 export default function Settings() {
-  const { agentAvailable } = useFanoutApp();
+  const { agentAvailable } = usePitotApp();
 
   return <Box w="100%" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
     <Stack gap="xl">
@@ -105,7 +105,7 @@ export default function Settings() {
         <Title order={2} fz={22} lts="-0.02em">Chat is disabled</Title>
         <Paper withBorder radius="md" p="lg">
           <Stack gap="sm">
-            <Text size="sm">To enable chat on a self-hosted instance, set <Code>FANOUT_AI_PROVIDER</Code> to <Code>anthropic</Code> with <Code>ANTHROPIC_API_KEY</Code>, or <Code>openai</Code> with <Code>OPENAI_API_KEY</Code>, then restart Fanout.</Text>
+            <Text size="sm">To enable chat on a self-hosted instance, set <Code>PITOT_AI_PROVIDER</Code> to <Code>anthropic</Code> with <Code>ANTHROPIC_API_KEY</Code>, or <Code>openai</Code> with <Code>OPENAI_API_KEY</Code>, then restart Pitot.</Text>
             <Text size="sm">You can also <Anchor href={docs.connect} target="_blank" rel="noopener noreferrer" underline="always">connect an MCP client</Anchor> such as Claude, Codex, or ChatGPT to use your own AI.</Text>
           </Stack>
         </Paper>

@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 function check(html: string) {
-  const root = mkdtempSync(join(tmpdir(), "fanout-site-tables-"));
+  const root = mkdtempSync(join(tmpdir(), "pitot-site-tables-"));
   roots.push(root);
   mkdirSync(join(root, "scripts"));
   mkdirSync(join(root, "dist"));

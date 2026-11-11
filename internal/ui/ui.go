@@ -18,7 +18,7 @@ import (
 )
 
 // dist contains the Vite production build. JavaScript executes in the browser;
-// the Fanout process remains a single Go runtime.
+// the Pitot process remains a single Go runtime.
 //
 //go:embed dist
 var embedded embed.FS

@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/fanout/internal/metrics"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/metrics"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 type Batch struct {
@@ -87,7 +87,7 @@ func Open(root string) (*Repository, error) {
 // the other saying something the code no longer guarantees. Guidance an
 // operator can act on wrongly is worse than guidance in one place they have to
 // open. TestUnresolvedCompactionRunbookExists keeps the link honest.
-const compactionRunbookURL = "https://fanout.run/docs/guides/troubleshooting#an-unresolved-compaction-blocks-startup"
+const compactionRunbookURL = "https://pitot.dev/docs/guides/troubleshooting#an-unresolved-compaction-blocks-startup"
 
 // logUnresolvedCompaction spells out the operator's options for a marker that
 // blocks startup.
@@ -105,7 +105,7 @@ const compactionRunbookURL = "https://fanout.run/docs/guides/troubleshooting#an-
 // rollback warning is the kind of thing an operator has to be able to read
 // once, in full, at the moment the process refuses to come up.
 func (r *Repository) logUnresolvedCompaction(err error) {
-	slog.Error("Parquet compaction is unresolved; Fanout will not start",
+	slog.Error("Parquet compaction is unresolved; Pitot will not start",
 		"err", err,
 		"marker", filepath.Join(r.root, "COMPACTION.json"),
 		"compaction_staging", filepath.Join(r.root, "compaction"),

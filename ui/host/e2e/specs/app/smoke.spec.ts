@@ -20,7 +20,7 @@ const expectedElements: Record<string, string> = {
 
 test("resolves dashboard variables through the panel route", async ({ request }) => {
   const response = await request.post("/api/queries/variables/resolve", {
-    headers: { "Fanout-Request": "1" }, data: { dashboard: spec },
+    headers: { "Pitot-Request": "1" }, data: { dashboard: spec },
   });
   expect(response.status()).toBe(200);
   expect(await response.json()).toHaveProperty("options");
@@ -102,7 +102,7 @@ test("all fifteen dashboard panels settle with valid geometry", async ({ page })
   });
   // Mantine persists its own preference; force the exact project theme before the SPA mounts.
   await page.addInitScript(theme => localStorage.setItem("mantine-color-scheme-value", theme), test.info().project.use.colorScheme as "light" | "dark");
-  await page.goto(`/dashboards/${process.env.FANOUT_E2E_DASHBOARD_ID}`);
+  await page.goto(`/dashboards/${process.env.PITOT_E2E_DASHBOARD_ID}`);
   await expect(page.locator("html")).toHaveAttribute("data-mantine-color-scheme", test.info().project.use.colorScheme!);
   const cards: Rect[] = [];
   for (const panel of spec.panels) {

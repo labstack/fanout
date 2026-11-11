@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 // Log and metric files sort by time bucket or series identity (proposal 0005),

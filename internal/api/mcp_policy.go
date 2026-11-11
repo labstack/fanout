@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	appmcp "github.com/labstack/fanout/internal/mcp"
+	appmcp "github.com/labstack/pitot/internal/mcp"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"golang.org/x/time/rate"

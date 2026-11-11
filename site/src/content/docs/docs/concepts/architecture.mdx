@@ -3,12 +3,12 @@ title: Why one binary
 description: The reasoning behind packaging ingest, storage, query, alerts and the UI in a single process.
 summary: What collapsing an observability stack into one process buys, and what it costs.
 read_when:
-  - You are evaluating Fanout against an assembled stack.
+  - You are evaluating Pitot against an assembled stack.
   - You want to know where the single-process design stops being an advantage.
 status: shipped
 ---
 
-Fanout packages telemetry ingest, storage, queries, alerting and the browser
+Pitot packages telemetry ingest, storage, queries, alerting and the browser
 client in one process. The built-in agent and external MCP clients use the
 same typed tools to investigate that telemetry and build dashboards.
 
@@ -35,7 +35,7 @@ the UI. Monitor the instance from outside its host.
 
 ## Deployment scope
 
-Fanout runs on one machine; see [trust domains and namespace access](/docs/reference/capabilities#operating-limits).
+Pitot runs on one machine; see [trust domains and namespace access](/docs/reference/capabilities#operating-limits).
 
 Workloads requiring horizontal ingest, replication or an object-storage tier
 require a backend that provides those capabilities.

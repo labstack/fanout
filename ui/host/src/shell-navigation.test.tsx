@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useParams: () => ({}), useRouterState: () => "/dashboards" }));
-vi.mock("./app-context", () => ({ createDashboardPrompt: "", useFanoutApp: () => ({ agentAvailable: false, threadID: "", threadMissing: false, newThread: vi.fn(), selectThread: vi.fn(), openChat: vi.fn() }) }));
+vi.mock("./app-context", () => ({ createDashboardPrompt: "", usePitotApp: () => ({ agentAvailable: false, threadID: "", threadMissing: false, newThread: vi.fn(), selectThread: vi.fn(), openChat: vi.fn() }) }));
 vi.mock("./auth", () => ({ logout: vi.fn(), useViewer: () => ({ id: "u", email: "u@example.test", display_name: "U", status: "active", role: "admin" }) }));
 vi.mock("./rail", () => ({ default: ({ onNewDashboard }: { onNewDashboard(): void }) => <button onClick={onNewDashboard}>New dashboard</button> }));
 vi.mock("./dashboards/new-dashboard", () => ({ NewDashboard: ({ onClose }: { onClose(): void }) => <div role="dialog" aria-label="New dashboard"><button onClick={onClose}>Cancel</button></div> }));

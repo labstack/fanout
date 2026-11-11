@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine/writegate"
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine/writegate"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 func newBatchCacheTest(t *testing.T) (*Duck, *telemetrystore.Repository) {
@@ -86,7 +86,7 @@ func TestSnapshotUsesActualEventBoundsAndPreservesParameters(t *testing.T) {
 	for _, statement := range []string{
 		`SELECT count(telemetry.logs.namespace) FROM telemetry.logs`,
 		`WITH x AS (SELECT count(*) AS n FROM logs) SELECT n FROM x`,
-		`SELECT count(*) FROM logs WHERE '__fanout_snapshot_metrics'<>''`,
+		`SELECT count(*) FROM logs WHERE '__pitot_snapshot_metrics'<>''`,
 	} {
 		if err := d.QueryRowScan(ctx, []any{&value}, statement); err != nil || value != 1 {
 			t.Fatalf("snapshot SQL %s: %d %v", statement, value, err)
@@ -682,7 +682,7 @@ func TestReadCacheBudgetsAllSignalsAndReportsInventoryWork(t *testing.T) {
 	if err != nil || len(markers) != 1 || !markers["log-only"] || written != 2 {
 		t.Fatalf("all-signal budget/work: %v written=%d err=%v", markers, written, err)
 	}
-	if got := metricFamily(t, "fanout_read_cache_pending_batches").Metric[0].GetGauge().GetValue(); got != 3 {
+	if got := metricFamily(t, "pitot_read_cache_pending_batches").Metric[0].GetGauge().GetValue(); got != 3 {
 		t.Fatalf("pending all-signal gauge=%v want 3", got)
 	}
 	written, err = d.RefreshReadCaches(t.Context())

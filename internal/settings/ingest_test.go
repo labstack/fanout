@@ -18,9 +18,9 @@ import (
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 
-	"github.com/labstack/fanout/internal/db"
-	"github.com/labstack/fanout/internal/secret"
-	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/db"
+	"github.com/labstack/pitot/internal/secret"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -121,7 +121,7 @@ func TestMigrationMovesExistingTokenToDefaultAndStillAuthenticates(t *testing.T)
 	}
 }
 
-// An upgraded install whose token came from FANOUT_INGEST_TOKEN still carries
+// An upgraded install whose token came from PITOT_INGEST_TOKEN still carries
 // that setting. It must not gain a second token, and revoking the migrated one
 // must not let the setting bring it back on the next start.
 func TestMigrationOfConfiguredTokenIsNotSeededAgain(t *testing.T) {

@@ -186,13 +186,13 @@ func (c Config) logResolvedSizing(src sizingSource) {
 		"query_cache_max_bytes", QueryCacheMaxBytes,
 	)
 	if src.MemoryAuto && src.MemoryDetectionIncomplete {
-		slog.Warn("memory limit detection was incomplete; automatic DuckDB sizing may exceed a container limit — configure FANOUT_DUCKDB_MEMORY explicitly",
+		slog.Warn("memory limit detection was incomplete; automatic DuckDB sizing may exceed a container limit — configure PITOT_DUCKDB_MEMORY explicitly",
 			"memory_source", src.MemorySource,
 			"detected_memory_bytes", src.DetectedRAM,
 		)
 	}
 	if src.MemoryAuto && c.DuckDBMemory == "" {
-		slog.Warn("could not detect available memory; DuckDB will size itself to 80% of RAM, which can exceed the machine once the Go runtime is added — configure FANOUT_DUCKDB_MEMORY explicitly")
+		slog.Warn("could not detect available memory; DuckDB will size itself to 80% of RAM, which can exceed the machine once the Go runtime is added — configure PITOT_DUCKDB_MEMORY explicitly")
 	}
 	// A pinned budget skipped detection, so this is the only place it is ever
 	// compared to the machine it will run on.
@@ -226,7 +226,7 @@ func resolveDuckDBMemory(available uint64) string {
 // pinnedMemoryConcern reports why an operator-pinned DuckDB budget looks wrong
 // for this machine, or "" when it looks fine or cannot be judged.
 //
-// Pinning FANOUT_DUCKDB_MEMORY skips detection entirely (resolveSizing only
+// Pinning PITOT_DUCKDB_MEMORY skips detection entirely (resolveSizing only
 // fills a value that is empty), so without this nothing ever compares the
 // figure to the machine it will run on. DuckDB's budget is not the process's
 // budget: the Go heap, the ingest appender and compaction's merges all sit on
@@ -244,14 +244,14 @@ func pinnedMemoryConcern(pinned string, detectedRAM uint64) string {
 	}
 	budget, ok := parseByteSize(pinned)
 	if !ok {
-		return fmt.Sprintf("FANOUT_DUCKDB_MEMORY %q could not be parsed as a size; DuckDB may reject it or fall back to its own default", pinned)
+		return fmt.Sprintf("PITOT_DUCKDB_MEMORY %q could not be parsed as a size; DuckDB may reject it or fall back to its own default", pinned)
 	}
 	if budget >= detectedRAM {
-		return fmt.Sprintf("FANOUT_DUCKDB_MEMORY %q is at or above the %d bytes detected for this machine; the Go runtime and compaction allocate on top of it", pinned, detectedRAM)
+		return fmt.Sprintf("PITOT_DUCKDB_MEMORY %q is at or above the %d bytes detected for this machine; the Go runtime and compaction allocate on top of it", pinned, detectedRAM)
 	}
 	share := detectedRAM / 100 * duckDBMemoryPercent
 	if budget > share {
-		return fmt.Sprintf("FANOUT_DUCKDB_MEMORY %q takes more than the %d%% of %d bytes automatic sizing would leave DuckDB; the remainder has to cover the Go heap, the ingest appender and compaction merges", pinned, duckDBMemoryPercent, detectedRAM)
+		return fmt.Sprintf("PITOT_DUCKDB_MEMORY %q takes more than the %d%% of %d bytes automatic sizing would leave DuckDB; the remainder has to cover the Go heap, the ingest appender and compaction merges", pinned, duckDBMemoryPercent, detectedRAM)
 	}
 	return ""
 }
@@ -385,7 +385,7 @@ type cgroupMount struct {
 
 // detectCgroupMemoryLimitDetailed finds the process's actual memory cgroup from procfs
 // and walks toward the controller mount, taking the tightest finite limit. A
-// service such as systemd's fanout.service normally lives below the mount root;
+// service such as systemd's pitot.service normally lives below the mount root;
 // reading only /sys/fs/cgroup/memory.max would inspect the host, not the service.
 func detectCgroupMemoryLimitDetailed(cgroupPath, mountInfoPath string) (uint64, bool, error) {
 	if _, err := os.ReadFile(cgroupPath); err != nil {

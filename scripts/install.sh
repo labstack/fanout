@@ -1,20 +1,20 @@
 #!/bin/sh
-# Install Fanout, a single-binary observability server.
+# Install Pitot, a single-binary observability server.
 #
-#   curl -fsSL https://raw.githubusercontent.com/labstack/fanout/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/labstack/pitot/main/scripts/install.sh | sh
 #
 # Environment:
-#   FANOUT_VERSION  install this tag instead of the latest release (e.g. v2026.10.1-alpha)
-#   FANOUT_PREFIX   install into this directory instead of the default
+#   PITOT_VERSION  install this tag instead of the latest release (e.g. v2026.10.1-alpha)
+#   PITOT_PREFIX   install into this directory instead of the default
 # Tags use vYYYY.M.N with an alpha, beta, or rc suffix for maturity; GA has none.
 # N counts every release within the month, regardless of suffix.
 set -eu
 
-REPO="labstack/fanout"
-BIN="fanout"
+REPO="labstack/pitot"
+BIN="pitot"
 
 die() {
-	printf 'fanout: %s\n' "$1" >&2
+	printf 'pitot: %s\n' "$1" >&2
 	exit 1
 }
 
@@ -41,23 +41,35 @@ fi
 
 os="$(uname -s)"
 case "$os" in
-Linux) os=linux ;;
-Darwin) os=darwin ;;
-*) die "unsupported operating system: $os (Linux and macOS are supported)" ;;
+	Linux) os=linux ;;
+	Darwin) os=darwin ;;
+	*) die "unsupported operating system: $os (Linux and macOS are supported)" ;;
 esac
 
 arch="$(uname -m)"
 case "$arch" in
-x86_64 | amd64) arch=amd64 ;;
-aarch64 | arm64) arch=arm64 ;;
-*) die "unsupported architecture: $arch (amd64 and arm64 are supported)" ;;
+	x86_64 | amd64) arch=amd64 ;;
+	aarch64 | arm64) arch=arm64 ;;
+	*) die "unsupported architecture: $arch (amd64 and arm64 are supported)" ;;
 esac
 
-version="${FANOUT_VERSION:-}"
+legacy_names=""
+if [ "${PITOT_VERSION+x}" != x ] && [ "${FANOUT_VERSION+x}" = x ]; then
+	PITOT_VERSION=$FANOUT_VERSION
+	legacy_names="FANOUT_VERSION"
+fi
+if [ "${PITOT_PREFIX+x}" != x ] && [ "${FANOUT_PREFIX+x}" = x ]; then
+	PITOT_PREFIX=$FANOUT_PREFIX
+	legacy_names="${legacy_names:+$legacy_names, }FANOUT_PREFIX"
+fi
+if [ -n "$legacy_names" ]; then
+	printf 'pitot: deprecated environment variables: %s; use PITOT_ equivalents before the next alpha release\n' "$legacy_names" >&2
+fi
+version="${PITOT_VERSION:-}"
 if [ -z "$version" ]; then
 	version="$(fetch_stdout "https://api.github.com/repos/${REPO}/releases/latest" |
 		sed -n 's/.*"tag_name" *: *"\([^"]*\)".*/\1/p' | head -n 1)"
-	[ -n "$version" ] || die "could not resolve the latest release; set FANOUT_VERSION to pin one"
+	[ -n "$version" ] || die "could not resolve the latest release; set PITOT_VERSION to pin one"
 fi
 
 archive="${BIN}_${version}_${os}_${arch}.tar.gz"
@@ -66,7 +78,7 @@ base="https://github.com/${REPO}/releases/download/${version}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-printf 'fanout: downloading %s %s/%s\n' "$version" "$os" "$arch"
+printf 'pitot: downloading %s %s/%s\n' "$version" "$os" "$arch"
 fetch "${base}/${archive}" "${tmp}/${archive}" ||
 	die "no release asset ${archive} — check https://github.com/${REPO}/releases"
 fetch "${base}/SHA256SUMS" "${tmp}/SHA256SUMS" || die "could not download SHA256SUMS"
@@ -74,7 +86,7 @@ fetch "${base}/SHA256SUMS" "${tmp}/SHA256SUMS" || die "could not download SHA256
 # Verify before extracting, never after.
 (
 	cd "$tmp"
-	grep " ${archive}\$" SHA256SUMS > expected.sha256 ||
+	grep " ${archive}\$" SHA256SUMS >expected.sha256 ||
 		die "SHA256SUMS does not list ${archive}"
 	if command -v sha256sum >/dev/null 2>&1; then
 		sha256sum -c expected.sha256 >/dev/null
@@ -88,7 +100,7 @@ fetch "${base}/SHA256SUMS" "${tmp}/SHA256SUMS" || die "could not download SHA256
 tar -xzf "${tmp}/${archive}" -C "$tmp" "./${BIN}" || die "archive did not contain ${BIN}"
 chmod +x "${tmp}/${BIN}"
 
-prefix="${FANOUT_PREFIX:-}"
+prefix="${PITOT_PREFIX:-}"
 if [ -z "$prefix" ]; then
 	if [ -w /usr/local/bin ] 2>/dev/null; then
 		prefix=/usr/local/bin
@@ -97,15 +109,15 @@ if [ -z "$prefix" ]; then
 	fi
 fi
 mkdir -p "$prefix" || die "could not create ${prefix}"
-[ -w "$prefix" ] || die "${prefix} is not writable; set FANOUT_PREFIX or re-run with sudo"
+[ -w "$prefix" ] || die "${prefix} is not writable; set PITOT_PREFIX or re-run with sudo"
 
 mv "${tmp}/${BIN}" "${prefix}/${BIN}" || die "could not install into ${prefix}"
 
-printf 'fanout: %s installed to %s/%s\n' "$version" "$prefix" "$BIN"
+printf 'pitot: %s installed to %s/%s\n' "$version" "$prefix" "$BIN"
 # The $PATH in the hint below is deliberately literal: it is text to paste.
 # shellcheck disable=SC2016
 case ":${PATH}:" in
-*":${prefix}:"*) ;;
-*) printf 'fanout: %s is not on your PATH — add it with:\n  export PATH="%s:$PATH"\n' "$prefix" "$prefix" ;;
+	*":${prefix}:"*) ;;
+	*) printf 'pitot: %s is not on your PATH — add it with:\n  export PATH="%s:$PATH"\n' "$prefix" "$prefix" ;;
 esac
-printf 'fanout: next, see https://github.com/labstack/fanout#quick-start\n'
+printf 'pitot: next, see https://github.com/labstack/pitot#quick-start\n'

@@ -1,4 +1,4 @@
-// Package id centralizes identifiers generated and owned by Fanout.
+// Package id centralizes identifiers generated and owned by Pitot.
 package id
 
 import "github.com/google/uuid"

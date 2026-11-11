@@ -3,9 +3,9 @@ package engine
 import (
 	"context"
 	"errors"
-	"github.com/labstack/fanout/internal/readpressure"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/readpressure"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	"testing"
 	"time"
 )

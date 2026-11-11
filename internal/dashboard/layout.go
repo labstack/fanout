@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"slices"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 // RowHeight is the grid row height in pixels; ui/host/src/dashboards/grid.tsx

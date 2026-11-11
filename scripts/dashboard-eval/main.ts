@@ -15,7 +15,7 @@ export const HELP=`Usage: bun scripts/dashboard-eval/main.ts [options]
   --judge                        Optional paired judges; same retained ledger
   --settle ID --cost-usd USD --reason TEXT --cost-ledger PATH
                                  Controller settlement of unknown prompt cost
-  --base ORIGIN                  Controller's disposable Fanout origin
+  --base ORIGIN                  Controller's disposable Pitot origin
   --cookies PATH                 Private Netscape cookie jar
   --model-label LABEL            Expected model or provider:model (does not select it)
   --out PATH                     Fresh run parent; benchmark: .cache/dashboard-eval/
@@ -89,7 +89,7 @@ export async function runEvaluation(config:EvaluationConfig):Promise<{exit_code:
   let default_model:string|undefined;
   const model_mismatch:ObjectValue[]=[];
   const json=(path:string,init:RequestInit={})=>requestJSON(config.base,path,headers(init,path));
-  function headers(init:RequestInit,path:string):RequestInit {return {...init,headers:{'Content-Type':'application/json','Fanout-Request':'1',Cookie:cookieHeader(config.cookies,new URL(path,config.base)),...Object.fromEntries(new Headers(init.headers))}};}
+  function headers(init:RequestInit,path:string):RequestInit {return {...init,headers:{'Content-Type':'application/json','Pitot-Request':'1',Cookie:cookieHeader(config.cookies,new URL(path,config.base)),...Object.fromEntries(new Headers(init.headers))}};}
   const turn=async(prompt:Prompt,thread_id=crypto.randomUUID()):Promise<ObjectValue>=>{
     const run_id=crypto.randomUUID(),observed_at=new Date().toISOString(),post_started=performance.now();
     const result:ObjectValue={...blankRun(),prompt_id:prompt.id,prompt_sha:sha(prompt.prompt),thread_id,run_id,observed_at,saved_record:null,persisted_status:null,terminal_events:[],incomplete:false,expect:prompt.expect,prompt:prompt.prompt,rationale:prompt.rationale,final_text:'',mutation_observed:false,mutation_evidence_complete:false};
@@ -233,7 +233,7 @@ export async function main(args=process.argv.slice(2),log:(message:string)=>void
     if(!opts.settle){
       if(set==='holdout'){
         category='sealed_hash';if(!opts['holdout-sha'])throw new Error('Frozen hash required');
-        category='output_root';if(!process.env.FANOUT_HOLDOUT_OUT_ROOT)throw new Error('Controller root required');
+        category='output_root';if(!process.env.PITOT_HOLDOUT_OUT_ROOT)throw new Error('Controller root required');
       }
       category='output';out=validateOutput(join(opts.out,opts['model-label']??'default'),set);
       category='sealed_hash';const promptPath=privateFile(opts['prompts-file']);

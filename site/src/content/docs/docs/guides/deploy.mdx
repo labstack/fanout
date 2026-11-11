@@ -1,9 +1,9 @@
 ---
 title: Run with Compose or systemd
-description: Run a persistent Fanout instance under a process supervisor.
+description: Run a persistent Pitot instance under a process supervisor.
 summary: A Compose service and a systemd unit with mounted secrets and persistent data.
 read_when:
-  - You need Fanout to restart after an exit or host reboot.
+  - You need Pitot to restart after an exit or host reboot.
 status: preview
 ---
 
@@ -15,20 +15,20 @@ source file, readable by UID/GID 65532.
 
 ```yaml
 services:
-  fanout:
-    image: ghcr.io/labstack/fanout:2026.11.0-alpha
-    container_name: fanout
+  pitot:
+    image: ghcr.io/labstack/pitot:2026.11.0-alpha
+    container_name: pitot
     restart: unless-stopped
     ports:
       - "127.0.0.1:7520:7520"
     volumes:
-      - fanout-data:/var/lib/fanout/data
+      - pitot-data:/var/lib/pitot/data
     environment:
-      FANOUT_AUTH_CODE_SECRET_FILE: /run/secrets/auth_code
+      PITOT_AUTH_CODE_SECRET_FILE: /run/secrets/auth_code
     secrets:
       - auth_code
     healthcheck:
-      test: ["CMD", "fanout", "healthcheck"]
+      test: ["CMD", "pitot", "healthcheck"]
       interval: 30s
       timeout: 3s
       start_period: 40s
@@ -37,18 +37,18 @@ secrets:
   auth_code:
     file: ${AUTH_SECRET_PATH}
 volumes:
-  fanout-data:
+  pitot-data:
 ```
 
 Start with `docker compose up -d`. Read the setup URL with
-`docker compose logs fanout`, then complete [first boot](/docs/get-started/first-boot).
-The image listens on `:7520` and keeps data in `/var/lib/fanout/data`.
+`docker compose logs pitot`, then complete [first boot](/docs/get-started/first-boot).
+The image listens on `:7520` and keeps data in `/var/lib/pitot/data`.
 The port mapping above exposes it only on the host's loopback interface.
 Use [TLS](/docs/guides/tls) and a restricted network route for remote clients.
 
 The ingest token is issued during administrator setup and stored in control
 state as a hash. An automated install can set the first token instead with
-`FANOUT_INGEST_TOKEN` or `FANOUT_INGEST_TOKEN_FILE`; see
+`PITOT_INGEST_TOKEN` or `PITOT_INGEST_TOKEN_FILE`; see
 [send telemetry](/docs/get-started/send-telemetry). Give the token to your
 exporters through their secret delivery mechanism.
 
@@ -58,29 +58,29 @@ restart it solely because that check fails.
 
 ## Run with systemd
 
-Install the binary as `/usr/local/bin/fanout`. Create a dedicated system user
-and group named `fanout`, with no interactive login. Store the auth secret
-at `/etc/fanout/auth_code`, readable only by root. systemd passes it to the
+Install the binary as `/usr/local/bin/pitot`. Create a dedicated system user
+and group named `pitot`, with no interactive login. Store the auth secret
+at `/etc/pitot/auth_code`, readable only by root. systemd passes it to the
 service as a credential.
 
-Save this as `/etc/systemd/system/fanout.service`:
+Save this as `/etc/systemd/system/pitot.service`:
 
 ```ini
 [Unit]
-Description=Fanout
+Description=Pitot
 After=network.target
 
 [Service]
 Type=simple
-User=fanout
-Group=fanout
-StateDirectory=fanout
-WorkingDirectory=/var/lib/fanout
-Environment=FANOUT_ADDR=127.0.0.1:7520
-Environment=FANOUT_DATA_DIR=/var/lib/fanout/data
-LoadCredential=fanout_auth_code:/etc/fanout/auth_code
-Environment=FANOUT_AUTH_CODE_SECRET_FILE=%d/fanout_auth_code
-ExecStart=/usr/local/bin/fanout
+User=pitot
+Group=pitot
+StateDirectory=pitot
+WorkingDirectory=/var/lib/pitot
+Environment=PITOT_ADDR=127.0.0.1:7520
+Environment=PITOT_DATA_DIR=/var/lib/pitot/data
+LoadCredential=pitot_auth_code:/etc/pitot/auth_code
+Environment=PITOT_AUTH_CODE_SECRET_FILE=%d/pitot_auth_code
+ExecStart=/usr/local/bin/pitot
 Restart=on-failure
 RestartSec=5s
 
@@ -88,13 +88,13 @@ RestartSec=5s
 WantedBy=multi-user.target
 ```
 
-`StateDirectory` creates `/var/lib/fanout` for the service user. Fanout creates
+`StateDirectory` creates `/var/lib/pitot` for the service user. Pitot creates
 its data subdirectory. Load and start the unit:
 
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl enable --now fanout
-sudo journalctl -u fanout
+sudo systemctl enable --now pitot
+sudo journalctl -u pitot
 ```
 
 Use the setup URL from the journal. Restrict journal access because that URL
@@ -106,59 +106,59 @@ See [hardening](/docs/guides/hardening) before exposing the listener.
 Some TLS-terminating proxies connect to the origin only on port 443. For
 example, [Cloudflare's gRPC proxying](https://developers.cloudflare.com/network/grpc-connections/)
 requires the origin to listen on 443 with TLS and HTTP/2 advertised through
-ALPN, which Fanout's [direct TLS](/docs/guides/tls#direct-tls) provides.
+ALPN, which Pitot's [direct TLS](/docs/guides/tls#direct-tls) provides.
 On Cloudflare, also enable gRPC in the zone's network settings (otherwise
 Cloudflare answers gRPC requests with `403 Forbidden`), set the DNS record to
 proxied, and set the SSL/TLS encryption mode to Full (strict). Cloudflare
 accepts Full, but only Full (strict) verifies the origin certificate.
 
 Linux reserves ports below 1024 for privileged processes, so grant the
-unprivileged `fanout` user only the capability to bind them rather than running
+unprivileged `pitot` user only the capability to bind them rather than running
 as root.
 
-Add a drop-in with `sudo systemctl edit fanout`:
+Add a drop-in with `sudo systemctl edit pitot`:
 
 ```ini
 [Service]
-Environment=FANOUT_ADDR=:443
-LoadCredential=fanout_tls_cert:/etc/fanout/tls/cert.pem
-LoadCredential=fanout_tls_key:/etc/fanout/tls/key.pem
-Environment=FANOUT_TLS_CERT_FILE=%d/fanout_tls_cert
-Environment=FANOUT_TLS_KEY_FILE=%d/fanout_tls_key
+Environment=PITOT_ADDR=:443
+LoadCredential=pitot_tls_cert:/etc/pitot/tls/cert.pem
+LoadCredential=pitot_tls_key:/etc/pitot/tls/key.pem
+Environment=PITOT_TLS_CERT_FILE=%d/pitot_tls_cert
+Environment=PITOT_TLS_KEY_FILE=%d/pitot_tls_key
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ```
 
 `AmbientCapabilities` gives the process `CAP_NET_BIND_SERVICE` although it runs
-as `fanout`. `CapabilityBoundingSet` drops every other capability, and
+as `pitot`. `CapabilityBoundingSet` drops every other capability, and
 `NoNewPrivileges` stops the process and its children from gaining more.
-The later `FANOUT_ADDR` replaces the unit's loopback address; `:443` listens on
+The later `PITOT_ADDR` replaces the unit's loopback address; `:443` listens on
 every interface, so restrict the port to the proxy's networks with a firewall.
 For Cloudflare, allow only [Cloudflare's published IP ranges](https://www.cloudflare.com/ips/).
 The certificate and key are passed as credentials, like the auth secret, so
 they can stay readable only by root. systemd copies credentials when the
-service starts, and Fanout loads the certificate once, so restart the service
+service starts, and Pitot loads the certificate once, so restart the service
 after renewing the certificate.
 
-Restart and confirm the listener runs as `fanout` with only that capability:
+Restart and confirm the listener runs as `pitot` with only that capability:
 
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl restart fanout
-systemctl show fanout -p User -p AmbientCapabilities -p CapabilityBoundingSet
+sudo systemctl restart pitot
+systemctl show pitot -p User -p AmbientCapabilities -p CapabilityBoundingSet
 sudo ss -ltnp 'sport = :443'
-grep Cap /proc/"$(systemctl show fanout -p MainPID --value)"/status
+grep Cap /proc/"$(systemctl show pitot -p MainPID --value)"/status
 ```
 
-`ss` should show the `fanout` process on port 443, and `CapAmb` and `CapEff`
+`ss` should show the `pitot` process on port 443, and `CapAmb` and `CapEff`
 should both be `0000000000000400` (`CAP_NET_BIND_SERVICE` alone). Check
 readiness on the host with a name in the certificate:
 
 ```sh
-curl --resolve fanout.example.com:443:127.0.0.1 https://fanout.example.com/readyz
+curl --resolve pitot.example.com:443:127.0.0.1 https://pitot.example.com/readyz
 ```
 
 If the certificate comes from a private CA or is a Cloudflare Origin CA
 certificate, which public trust stores reject, pass that CA's certificate with
-`--cacert`, for example `--cacert /etc/fanout/tls/origin-ca.pem`.
+`--cacert`, for example `--cacert /etc/pitot/tls/origin-ca.pem`.

@@ -1,7 +1,7 @@
 package fanql
 
 import (
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 	"regexp"
 	"strings"
 	"testing"

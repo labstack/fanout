@@ -1,6 +1,6 @@
 ---
 title: Authentication modes
-description: Why Fanout has two sign-in modes, what each one owns, and where the boundary between them sits.
+description: Why Pitot has two sign-in modes, what each one owns, and where the boundary between them sits.
 summary: Local codes versus an identity provider, who owns roles in each, and what happens on every login.
 read_when:
   - You are choosing between local sign-in and OIDC.
@@ -8,7 +8,7 @@ read_when:
 status: preview
 ---
 
-Fanout supports local sign-in and OIDC, selected by `FANOUT_AUTH_MODE`.
+Pitot supports local sign-in and OIDC, selected by `PITOT_AUTH_MODE`.
 Both use the same [roles and capabilities](/docs/reference/roles), browser sessions
 and account suspension rules.
 
@@ -16,13 +16,13 @@ and account suspension rules.
 
 Active users sign in with an emailed code when SMTP is configured. Without
 SMTP, an operator with access to the control database mints a single-use link
-with `fanout login-link <email>`. Administrators manage accounts and roles
+with `pitot login-link <email>`. Administrators manage accounts and roles
 through the HTTP API. There is no user-management browser page. See
 [account profiles and suspension](#account-profiles-and-suspension)
 for account APIs and [local recovery](#recover-local-sign-in) for invitation delivery
 and recovery.
 
-`FANOUT_SELF_SIGNUP` allows verified email addresses to create viewer accounts.
+`PITOT_SELF_SIGNUP` allows verified email addresses to create viewer accounts.
 It defaults to `false` and requires complete SMTP configuration. Self-signup is
 available only after the first administrator completes setup. Viewers can read
 all telemetry, manage their own dashboards and run the built-in agent.
@@ -35,39 +35,39 @@ an email address.
 An identity provider handles sign-in. Group and domain allowlists are evaluated
 on every login, including for linked identities. Removing a user's eligibility
 blocks their next login; it does not revoke a browser session already issued.
-Suspending the account in Fanout blocks access and revokes its sessions.
+Suspending the account in Pitot blocks access and revokes its sessions.
 
-Fanout starts even when the identity provider is unreachable, so ingest, MCP
+Pitot starts even when the identity provider is unreachable, so ingest, MCP
 and existing sessions keep working. Discovery retries in the background with
 backoff capped at 1 minute. Until it succeeds, the OIDC sign-in routes return
 503 and the `oidc` check in `/readyz` reads `degraded`; no restart is needed.
 Invalid configuration, including a provider that answers for a different
 issuer at startup, still fails startup.
 
-If neither `FANOUT_OIDC_ALLOWED_GROUPS` nor `FANOUT_OIDC_ALLOWED_DOMAINS` is
+If neither `PITOT_OIDC_ALLOWED_GROUPS` nor `PITOT_OIDC_ALLOWED_DOMAINS` is
 configured, no eligibility allow policy is enforced. Membership is then managed
 locally, unless a role mapping is set; see [Who owns accounts](#who-owns-accounts).
 
 ### Account provisioning
 
-`FANOUT_OIDC_AUTO_PROVISION` creates eligible accounts on first sign-in after
+`PITOT_OIDC_AUTO_PROVISION` creates eligible accounts on first sign-in after
 administrator setup. It requires an allowed group or domain. The role comes
-from the configured group mapping, falling back to `FANOUT_OIDC_DEFAULT_ROLE`
+from the configured group mapping, falling back to `PITOT_OIDC_DEFAULT_ROLE`
 (`viewer`).
 
-`FANOUT_OIDC_EMAIL_VERIFICATION=required` requires a verified email. The `issuer`
+`PITOT_OIDC_EMAIL_VERIFICATION=required` requires a verified email. The `issuer`
 policy trusts the configured issuer and requires an allowlist. See
 [Microsoft Entra ID group overage](#microsoft-entra-id-group-overage) if group
 claims are omitted.
 
 ### Role ownership
 
-If `FANOUT_OIDC_ADMIN_GROUPS` or `FANOUT_OIDC_OPERATOR_GROUPS` is configured, the
+If `PITOT_OIDC_ADMIN_GROUPS` or `PITOT_OIDC_OPERATOR_GROUPS` is configured, the
 provider reapplies the mapped role on every login. Users outside mapped groups
-receive `FANOUT_OIDC_DEFAULT_ROLE`. A role change revokes browser sessions and
+receive `PITOT_OIDC_DEFAULT_ROLE`. A role change revokes browser sessions and
 writes an audit event in the same transaction.
 
-Without a role-group mapping, administrators manage roles inside Fanout and
+Without a role-group mapping, administrators manage roles inside Pitot and
 OIDC sign-in preserves them. Reconciliation cannot demote the last active
 administrator; promote a second administrator before applying that mapping.
 
@@ -80,20 +80,20 @@ explains it to signed-in users.
 | `account_ownership` | Configuration | Browser user routes refuse |
 |---|---|---|
 | `local` | No role mapping, with or without a SCIM token | Nothing |
-| `identity_provider_roles` | Role mapping and `FANOUT_OIDC_AUTO_PROVISION`, no SCIM token | Creating a user and changing a role |
-| `identity_provider_roles_no_provisioning` | Role mapping, no `FANOUT_OIDC_AUTO_PROVISION`, no SCIM token | Creating a user and changing a role |
+| `identity_provider_roles` | Role mapping and `PITOT_OIDC_AUTO_PROVISION`, no SCIM token | Creating a user and changing a role |
+| `identity_provider_roles_no_provisioning` | Role mapping, no `PITOT_OIDC_AUTO_PROVISION`, no SCIM token | Creating a user and changing a role |
 | `identity_provider_directory` | Role mapping and a SCIM token | Creating and deleting a user; changing a role, status or email |
 
-To add users under a role mapping, set `FANOUT_OIDC_AUTO_PROVISION` with an
+To add users under a role mapping, set `PITOT_OIDC_AUTO_PROVISION` with an
 allowed group or domain, or configure a SCIM token. With neither, nobody new can
-get an account: `POST /api/users` is refused and a first login is denied. Fanout
+get an account: `POST /api/users` is refused and a first login is denied. Pitot
 still starts, logs a warning, and Settings says so.
 
 A refused request returns `403` with the code `managed_by_identity_provider`
 and changes nothing. On `PATCH /api/users/{id}`, malformed JSON returns `400`
 because the body must be decoded to see whether `email` is present. SCIM, login-time role reconciliation and provisioning,
 display-name edits, `POST /api/users/{id}/access/revoke`, first-administrator
-setup and `fanout login-link --break-glass` keep working in every mode.
+setup and `pitot login-link --break-glass` keep working in every mode.
 Without a SCIM token, administrators can still suspend, reactivate, delete and
 change the email of a user.
 
@@ -101,7 +101,7 @@ change the email of a user.
 
 Entra can omit the `groups` claim when an account has too many memberships.
 If the token signals group overage and any group-based policy is configured,
-Fanout denies login. It does not fetch group membership from Graph.
+Pitot denies login. It does not fetch group membership from Graph.
 Configure the application registration to emit only groups assigned to the
 application. Domain-only allow policies are unaffected.
 
@@ -128,7 +128,7 @@ can sign in again.
 
 ### Call account APIs from a script
 
-These routes accept only a browser session with the admin role. Fanout has no
+These routes accept only a browser session with the admin role. Pitot has no
 API key for user administration. Ingest tokens, metrics tokens and MCP OAuth
 tokens cannot substitute for that session.
 
@@ -139,30 +139,30 @@ can use that jar while the session remains valid:
 
 ```sh
 curl --fail-with-body --cookie "$COOKIE_JAR" \
-  https://fanout.example.com/api/users
+  https://pitot.example.com/api/users
 
 curl --fail-with-body --cookie "$COOKIE_JAR" \
-  -H 'Fanout-Request: 1' -H 'Content-Type: application/json' \
-  -X POST https://fanout.example.com/api/users \
+  -H 'Pitot-Request: 1' -H 'Content-Type: application/json' \
+  -X POST https://pitot.example.com/api/users \
   --data '{"email":"user@example.com","display_name":"New user","role":"viewer"}'
 ```
 
 Replace the origin and set `COOKIE_JAR` to that private jar. Mutating requests
-need `Fanout-Request: 1` or a matching Origin/Referer; cross-site browser requests
+need `Pitot-Request: 1` or a matching Origin/Referer; cross-site browser requests
 are rejected. Session expiry or revocation requires signing in again. Delete
 the temporary jar when finished and sign out to revoke that session.
 
 ## SCIM provisioning
 
-Set `FANOUT_SCIM_TOKEN` (or `FANOUT_SCIM_TOKEN_FILE`) so an identity provider or
+Set `PITOT_SCIM_TOKEN` (or `PITOT_SCIM_TOKEN_FILE`) so an identity provider or
 automation can create, update and deactivate accounts. It requires
-`FANOUT_AUTH_MODE=oidc` and at least 32 characters. Without a token the routes
+`PITOT_AUTH_MODE=oidc` and at least 32 characters. Without a token the routes
 do not exist.
 
-With a token, Fanout prints no setup banner and `/api/auth/setup` returns `410`;
+With a token, Pitot prints no setup banner and `/api/auth/setup` returns `410`;
 the first administrator comes from SCIM.
 
-Fanout implements a small subset of SCIM 2.0 under `/scim/v2`. Send
+Pitot implements a small subset of SCIM 2.0 under `/scim/v2`. Send
 `Authorization: Bearer <token>`. Responses and errors use
 `application/scim+json` and the RFC 7644 formats.
 
@@ -182,7 +182,7 @@ active administrator returns `409`.
 
 Deactivation revokes the user's browser sessions and MCP tokens. Reactivation
 restores neither, and keeps the identity link. See
-[docs/authentication.md](https://github.com/labstack/fanout/blob/main/docs/authentication.md#scim-provisioning)
+[docs/authentication.md](https://github.com/labstack/pitot/blob/main/docs/authentication.md#scim-provisioning)
 for the full contract.
 
 ## Recover local sign-in
@@ -190,9 +190,9 @@ for the full contract.
 Run with the server's environment and data directory:
 
 ```sh
-fanout login-link admin@example.com
+pitot login-link admin@example.com
 # For Docker:
-docker exec fanout fanout login-link admin@example.com
+docker exec pitot pitot login-link admin@example.com
 ```
 
 The URL is printed to stderr, expires in 15 minutes and works once. Issuance
@@ -205,7 +205,7 @@ Creating a local user without SMTP returns `201`,
 for that active user and deliver it through a trusted channel. If configured
 SMTP fails delivery, the API reports an error. Repair SMTP after regaining access.
 
-If the only administrator is suspended or has an unusable address, stop Fanout
+If the only administrator is suspended or has an unusable address, stop Pitot
 and back up the control database. Repair that existing account's email or status
 in SQLite, preserving its ID and owned data. Restart and mint a login link for
 the active account.
@@ -216,14 +216,14 @@ If the identity provider is unavailable, run this with the server's environment
 and data directory to issue a one-time link for an active administrator:
 
 ```sh
-fanout login-link --break-glass admin@example.com
+pitot login-link --break-glass admin@example.com
 # For Docker:
-docker exec fanout fanout login-link --break-glass admin@example.com
+docker exec pitot pitot login-link --break-glass admin@example.com
 ```
 
-Set `FANOUT_AUTH_CODE_SECRET` with at least 32 characters before you need this.
+Set `PITOT_AUTH_CODE_SECRET` with at least 32 characters before you need this.
 OIDC mode does not require it at startup, but without it the command fails and
-the server keeps login links disabled. Fanout starts while the provider is
+the server keeps login links disabled. Pitot starts while the provider is
 unavailable, so this also works after a restart during the outage.
 
 The command refuses other roles, suspended users and local mode. The URL expires
@@ -231,11 +231,11 @@ in 15 minutes and works once. In OIDC mode, the server accepts only these links
 and re-checks that the account is still an active administrator. Issuing and
 redeeming write the distinct audit events `login_link.break_glass_issued` and
 `login_link.break_glass_redeemed`. If the redemption event cannot be written,
-Fanout creates no session and the request fails; the link is spent, so issue a
+Pitot creates no session and the request fails; the link is spent, so issue a
 new one.
 
 `/api/auth/link/verify` is rate limited per client address. Behind a reverse
-proxy, set `FANOUT_TRUSTED_PROXY_CIDRS`; otherwise every request shares the
+proxy, set `PITOT_TRUSTED_PROXY_CIDRS`; otherwise every request shares the
 proxy's address and one limit, and other traffic can block recovery.
 
 ## Review MCP connections

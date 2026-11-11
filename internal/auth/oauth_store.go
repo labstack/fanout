@@ -10,9 +10,9 @@ import (
 	"fmt"
 	"time"
 
-	appid "github.com/labstack/fanout/internal/id"
+	appid "github.com/labstack/pitot/internal/id"
 
-	"github.com/labstack/fanout/internal/secret"
+	"github.com/labstack/pitot/internal/secret"
 )
 
 const (

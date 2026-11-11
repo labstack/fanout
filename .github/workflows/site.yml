@@ -21,7 +21,7 @@ on:
     # regenerated page is a documentation change whether or not anything under
     # site/ was touched by hand: settings come from internal/config, alert
     # variables from internal/alert, the roles matrix and route table from
-    # internal/api plus internal/agent and cmd/fanout, and the MCP tools from
+    # internal/api plus internal/agent and cmd/pitot, and the MCP tools from
     # internal/mcp.
     paths:
       - "site/**"
@@ -30,8 +30,8 @@ on:
       - "internal/api/**"
       - "internal/agent/**"
       - "internal/mcp/**"
-      - "cmd/fanout/**"
-      - "cmd/fanout-docgen/**"
+      - "cmd/pitot/**"
+      - "cmd/pitot-docgen/**"
       - "internal/duckdb/**"
       - "scripts/with-duckdb.sh"
       - "scripts/go-build-tags.sh"
@@ -82,7 +82,7 @@ jobs:
       - name: Refuse a reference that is behind the code
         env:
           CGO_ENABLED: "1"
-        run: bash scripts/with-duckdb.sh go run ./cmd/fanout-docgen --check
+        run: bash scripts/with-duckdb.sh go run ./cmd/pitot-docgen --check
 
       - name: Install dependencies
         working-directory: site
@@ -95,7 +95,7 @@ jobs:
       - name: Build
         working-directory: site
         env:
-          SITE_URL: https://fanout.run
+          SITE_URL: https://pitot.dev
           # A GA4 measurement id is public in the delivered page, so this is a
           # repository variable rather than a secret. When absent, the site
           # build emits no analytics script or request.
@@ -117,6 +117,6 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: e6379d37f788129207ab5f566abfb4ff
         run: |
           npx --yes wrangler@4.123.0 pages deploy dist \
-            --project-name fanout \
+            --project-name pitot \
             --branch main \
             --commit-hash "${GITHUB_SHA}"

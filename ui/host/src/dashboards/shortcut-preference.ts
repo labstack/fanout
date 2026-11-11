@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 /** Browser-local, viewer-separated dashboard preference; storage may be unavailable. */
 export function useShortcutPreference(viewer: string) {
+  // Keep the existing accessibility preference through the product rename.
   const key = "fanout:single-key-shortcuts:" + viewer;
   const read = () => { try { return localStorage.getItem(key) !== "off"; } catch { return true; } };
   const [enabled, setEnabled] = useState(read);

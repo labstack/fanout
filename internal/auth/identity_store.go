@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	appid "github.com/labstack/fanout/internal/id"
-	appstore "github.com/labstack/fanout/internal/store"
+	appid "github.com/labstack/pitot/internal/id"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 type UserIdentity struct {

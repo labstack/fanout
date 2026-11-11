@@ -14,9 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/metrics"
-	"github.com/labstack/fanout/internal/observability"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/metrics"
+	"github.com/labstack/pitot/internal/observability"
 )
 
 // The result cache keeps recent panel, exemplar and trace-detail results so a
@@ -40,7 +40,7 @@ import (
 
 type cacheKey [32]byte
 
-// Lookup outcomes, also the result label of fanout_query_cache_requests_total.
+// Lookup outcomes, also the result label of pitot_query_cache_requests_total.
 const (
 	cacheHit       = "hit"
 	cacheStale     = "stale"

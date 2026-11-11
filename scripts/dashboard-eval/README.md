@@ -27,11 +27,11 @@ does not run it. Keep all input paths private and environment supplied:
 
 ```sh
 rtk proxy bun scripts/dashboard-eval/main.ts \
-  --base "$FANOUT_EVAL_BASE" --cookies "$FANOUT_EVAL_COOKIES" \
-  --model-label "$FANOUT_EVAL_LABEL" --out "$FANOUT_EVAL_OUT" \
-  --prompts-file "$FANOUT_EVAL_PROMPTS" --set benchmark \
-  --budget-usd "$FANOUT_EVAL_CAP" --cost-ledger "$FANOUT_EVAL_LEDGER" \
-  --snapshot-manifest "$FANOUT_EVAL_SNAPSHOT" --edits-file "$FANOUT_EVAL_EDITS"
+  --base "$PITOT_EVAL_BASE" --cookies "$PITOT_EVAL_COOKIES" \
+  --model-label "$PITOT_EVAL_LABEL" --out "$PITOT_EVAL_OUT" \
+  --prompts-file "$PITOT_EVAL_PROMPTS" --set benchmark \
+  --budget-usd "$PITOT_EVAL_CAP" --cost-ledger "$PITOT_EVAL_LEDGER" \
+  --snapshot-manifest "$PITOT_EVAL_SNAPSHOT" --edits-file "$PITOT_EVAL_EDITS"
 ```
 
 Options also include `--help`, `--mock`, `--no-output`, `--judge`, `--holdout-sha` and the
@@ -116,8 +116,8 @@ For unknown usage, first reconcile `agui_runs` and correlated usage logs. Then:
 
 ```sh
 rtk proxy bun scripts/dashboard-eval/main.ts \
-  --settle "$FANOUT_EVAL_PROMPT_ID" --cost-usd "$FANOUT_EVAL_VERIFIED_COST" \
-  --reason "$FANOUT_EVAL_SETTLEMENT_REASON" --cost-ledger "$FANOUT_EVAL_LEDGER"
+  --settle "$PITOT_EVAL_PROMPT_ID" --cost-usd "$PITOT_EVAL_VERIFIED_COST" \
+  --reason "$PITOT_EVAL_SETTLEMENT_REASON" --cost-ledger "$PITOT_EVAL_LEDGER"
 ```
 
 The ID may be the unique unsettled prompt ID or its run ID. The cost is the
@@ -258,7 +258,7 @@ boards and public sentinel leakage. Mock dollars never represent provider spend.
 Only the controller's final frozen-candidate invocation may use `--set holdout`
 with `--holdout-sha` matching the complete frozen prompt file hash. Dispatches
 must never open sealed prompts or use aggregate results to tune the candidate.
-Set `FANOUT_HOLDOUT_OUT_ROOT` to a controller-owned location outside the worktree
+Set `PITOT_HOLDOUT_OUT_ROOT` to a controller-owned location outside the worktree
 and `.cache/dashboard-eval/`; the ledger must also be outside the worktree. Use a
 fresh label and output directory. Output is whitelisted to aggregate evidence
 and prompt IDs/hashes; it omits prompts, rationales, responses, tool inputs,

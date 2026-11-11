@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 type budgetParser struct {
@@ -108,7 +108,7 @@ func TestLatencyBudgets(t *testing.T) {
 	}
 	t.Run("smoke", func(t *testing.T) {
 		if !latencyAcceptanceEnabled() {
-			t.Skip("set FANOUT_TEST_LATENCY=1 or run just fanql-perf to assert wall-clock budgets")
+			t.Skip("set PITOT_TEST_LATENCY=1 or run just fanql-perf to assert wall-clock budgets")
 		}
 		if raceInstrumentation {
 			t.Skip("wall-clock smoke budgets exclude race instrumentation; deterministic work bounds still run")
@@ -233,11 +233,11 @@ func BenchmarkParseRank(b *testing.B) {
 
 func TestLatencyAcceptanceRequiresOptIn(t *testing.T) {
 	for _, value := range []string{"", "0", "true", "1"} {
-		t.Setenv("FANOUT_TEST_LATENCY", value)
+		t.Setenv("PITOT_TEST_LATENCY", value)
 		if got := latencyAcceptanceEnabled(); got != (value == "1") {
 			t.Errorf("opt-in %q: got %v", value, got)
 		}
 	}
 }
 
-func latencyAcceptanceEnabled() bool { return os.Getenv("FANOUT_TEST_LATENCY") == "1" }
+func latencyAcceptanceEnabled() bool { return os.Getenv("PITOT_TEST_LATENCY") == "1" }

@@ -129,7 +129,7 @@ func TestDetailedCgroupDetectionReportsUnreadableMetadata(t *testing.T) {
 
 func TestDetectCgroupV2MemoryLimitUsesTheProcessCgroup(t *testing.T) {
 	mountPoint := t.TempDir()
-	processDir := filepath.Join(mountPoint, "system.slice", "fanout.service")
+	processDir := filepath.Join(mountPoint, "system.slice", "pitot.service")
 	if err := os.MkdirAll(processDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestDetectCgroupV2MemoryLimitUsesTheProcessCgroup(t *testing.T) {
 	procDir := t.TempDir()
 	cgroupPath := filepath.Join(procDir, "cgroup")
 	mountInfoPath := filepath.Join(procDir, "mountinfo")
-	writeTestFile(t, cgroupPath, "0::/system.slice/fanout.service\n")
+	writeTestFile(t, cgroupPath, "0::/system.slice/pitot.service\n")
 	writeTestFile(t, mountInfoPath, fmt.Sprintf(
 		"36 25 0:32 / %s rw,nosuid,nodev,noexec,relatime - cgroup2 cgroup rw\n",
 		mountPoint,
@@ -151,7 +151,7 @@ func TestDetectCgroupV2MemoryLimitUsesTheProcessCgroup(t *testing.T) {
 
 func TestDetectCgroupMemoryLimitUsesTheTightestAncestor(t *testing.T) {
 	mountPoint := t.TempDir()
-	processDir := filepath.Join(mountPoint, "tenant", "fanout")
+	processDir := filepath.Join(mountPoint, "tenant", "pitot")
 	if err := os.MkdirAll(processDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestDetectCgroupMemoryLimitUsesTheTightestAncestor(t *testing.T) {
 	procDir := t.TempDir()
 	cgroupPath := filepath.Join(procDir, "cgroup")
 	mountInfoPath := filepath.Join(procDir, "mountinfo")
-	writeTestFile(t, cgroupPath, "0::/tenant/fanout\n")
+	writeTestFile(t, cgroupPath, "0::/tenant/pitot\n")
 	writeTestFile(t, mountInfoPath, fmt.Sprintf(
 		"36 25 0:32 / %s rw - cgroup2 cgroup rw\n",
 		mountPoint,
@@ -175,7 +175,7 @@ func TestDetectCgroupMemoryLimitUsesTheTightestAncestor(t *testing.T) {
 
 func TestDetectCgroupV1MemoryLimitHonorsTheMountRoot(t *testing.T) {
 	mountPoint := t.TempDir()
-	processDir := filepath.Join(mountPoint, "fanout")
+	processDir := filepath.Join(mountPoint, "pitot")
 	if err := os.MkdirAll(processDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestDetectCgroupV1MemoryLimitHonorsTheMountRoot(t *testing.T) {
 	procDir := t.TempDir()
 	cgroupPath := filepath.Join(procDir, "cgroup")
 	mountInfoPath := filepath.Join(procDir, "mountinfo")
-	writeTestFile(t, cgroupPath, "5:cpu,memory:/docker/abc/fanout\n")
+	writeTestFile(t, cgroupPath, "5:cpu,memory:/docker/abc/pitot\n")
 	writeTestFile(t, mountInfoPath, fmt.Sprintf(
 		"29 24 0:26 /docker/abc %s rw - cgroup cgroup rw,memory\n",
 		mountPoint,

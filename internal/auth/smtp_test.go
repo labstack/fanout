@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/brand"
+	"github.com/labstack/pitot/internal/brand"
 )
 
-func TestCodeMailUsesFanoutBrandAndEscapesCode(t *testing.T) {
+func TestCodeMailUsesPitotBrandAndEscapesCode(t *testing.T) {
 	body, err := renderMail(codeMailTemplate, mailData{
 		Preheader: `Sign in <now>`,
 		Code:      `<script>alert("x")</script>`,
@@ -18,7 +18,7 @@ func TestCodeMailUsesFanoutBrandAndEscapesCode(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"Fanout",
+		"Pitot",
 		"Secure sign in",
 		"Your verification code",
 		brand.EmailMarkHTML,
@@ -36,11 +36,11 @@ func TestCodeMailUsesFanoutBrandAndEscapesCode(t *testing.T) {
 
 func TestMailMessageContainsPlainTextAndHTMLAlternatives(t *testing.T) {
 	message, err := newMailMessage(
-		"Fanout <fanout@example.com>",
+		"Pitot <pitot@example.com>",
 		"operator@example.com",
-		"Fanout login code: 123456",
-		"Your Fanout verification code is 123456.",
-		"<strong>Your Fanout verification code is 123456.</strong>",
+		"Pitot login code: 123456",
+		"Your Pitot verification code is 123456.",
+		"<strong>Your Pitot verification code is 123456.</strong>",
 	)
 	if err != nil {
 		t.Fatalf("newMailMessage: %v", err)
@@ -74,20 +74,20 @@ func TestPlainTextMailBodiesIncludeSafetyNotice(t *testing.T) {
 	}
 }
 
-func TestInviteMailUsesFanoutBrand(t *testing.T) {
+func TestInviteMailUsesPitotBrand(t *testing.T) {
 	body, err := renderMail(inviteMailTemplate, mailData{
-		Preheader: "You've been invited to a Fanout workspace.",
+		Preheader: "You've been invited to a Pitot workspace.",
 	})
 	if err != nil {
 		t.Fatalf("renderMail: %v", err)
 	}
 
 	for _, want := range []string{
-		"Fanout",
+		"Pitot",
 		"Workspace invitation",
-		"You've been invited to Fanout",
+		"You've been invited to Pitot",
 		"start investigating your observability data",
-		"Fanout observability",
+		"Pitot observability",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("invite email missing %q:\n%s", want, body)

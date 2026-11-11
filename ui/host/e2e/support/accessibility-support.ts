@@ -64,7 +64,7 @@ export async function openSurface(page: Page, request: APIRequestContext, info: 
       await route.fulfill({ response, body: encodePanelResults(results, isStream(response)) });
     });
     await page.addInitScript(value => localStorage.setItem("mantine-color-scheme-value", value), theme);
-    await page.goto(`/dashboards/${process.env.FANOUT_E2E_DASHBOARD_ID}`);
+    await page.goto(`/dashboards/${process.env.PITOT_E2E_DASHBOARD_ID}`);
     await expect(page.locator("html")).toHaveAttribute("data-mantine-color-scheme", theme);
     return page;
   }
@@ -73,7 +73,7 @@ export async function openSurface(page: Page, request: APIRequestContext, info: 
   // State mutations below are explicitly synthetic, not telemetry.
   const panels = panel ? [panel] : spec.panels;
   const dashboard: DashboardSpec = { ...spec, variables: [{ name: "service", kind: "custom", options: ["checkout"], multi: true, include_all: true, default: "$__all" }], panels };
-  const response = await request.post("/api/queries/run", { headers: { "Fanout-Request": "1" }, data: { dashboard, vars: { service: "$__all" } } });
+  const response = await request.post("/api/queries/run", { headers: { "Pitot-Request": "1" }, data: { dashboard, vars: { service: "$__all" } } });
   expect(response.status()).toBe(200);
   const results = await panelResults(response);
   expect(results).toHaveLength(panels.length);

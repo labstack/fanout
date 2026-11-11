@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/query"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 type expect struct {

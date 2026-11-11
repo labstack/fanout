@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/fanql"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/fanql"
+	"github.com/labstack/pitot/internal/query"
 )
 
 type nonExecutingFanQLPanels struct {

@@ -64,16 +64,16 @@ func (p *scaleCapture) ExecContext(ctx context.Context, q string, args ...any) (
 
 // Opt-in measurements run each case in a fresh process for peak RSS accounting.
 // Build with scripts/with-duckdb.sh go test -c, then invoke the test binary with
-// FANOUT_SCALE_KEYS=1000|10000|60000 and FANOUT_SCALE_KIND=service|edge.
+// PITOT_SCALE_KEYS=1000|10000|60000 and PITOT_SCALE_KIND=service|edge.
 // Prepare is unbound preparation; bound_explain includes binding, optimization
 // and JSON plan serialization. Pass excludes those extra instrumentation calls.
 // Peak RSS includes fixture setup and instrumentation; timings exclude setup.
 func TestRollupKeyScaleMeasurement(t *testing.T) {
-	n, _ := strconv.Atoi(os.Getenv("FANOUT_SCALE_KEYS"))
+	n, _ := strconv.Atoi(os.Getenv("PITOT_SCALE_KEYS"))
 	if n == 0 {
-		t.Skip("set FANOUT_SCALE_KEYS")
+		t.Skip("set PITOT_SCALE_KEYS")
 	}
-	kind := os.Getenv("FANOUT_SCALE_KIND")
+	kind := os.Getenv("PITOT_SCALE_KIND")
 	measureRollupKeyScale(t, n, kind, false)
 }
 

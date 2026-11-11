@@ -17,7 +17,7 @@ The user chose to rebuild the shell with a persistent rail and to give dashboard
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ ▣ FANOUT                                   ☾  (avatar ▾)     │  header 52px
+│ ▣ PITOT                                   ☾  (avatar ▾)     │  header 52px
 ├────────────┬─────────────────────────────────────────────────┤
 │ + New chat │                                                 │
 │ CHATS      │                                                 │
@@ -34,7 +34,7 @@ The user chose to rebuild the shell with a persistent rail and to give dashboard
 - Mantine `AppShell` with `header` (52px) and `navbar` (256px). No `footer`.
 - Navbar breakpoint `md`: below it the rail is hidden and a hamburger `ActionIcon` in the header opens the same rail content in a `Drawer`. There is no separate icon-only rail state.
 - The rail is the only navigation surface. The header keeps the brand lockup, the colour-scheme toggle, and an avatar `Menu`. The Dashboard/Chat toggle button, the history icon, the plus icon, the "Live" indicator and the footer are removed.
-- Avatar menu items: the signed-in email (disabled label), "Fanout on GitHub", "LabStack", divider, "Sign out". The copyright line goes away.
+- Avatar menu items: the signed-in email (disabled label), "Pitot on GitHub", "LabStack", divider, "Sign out". The copyright line goes away.
 - Header at 390px shows: hamburger, brand, colour-scheme toggle, avatar. Nothing else, so nothing clips.
 
 ### Rail contents
@@ -96,7 +96,7 @@ URLs are unchanged: `/chat`, `/chat/$threadId`, `/dashboards`, `/dashboards/$das
 ### Page header
 
 - Title (`Title order={1}`, 32px mono), description on the next line.
-- One control row under it: window `Select` (same six values), namespace `TextInput`, "Add view" `Menu` button, "Ask Fanout" `Button variant="subtle"` (agent only). No surrounding `Paper`.
+- One control row under it: window `Select` (same six values), namespace `TextInput`, "Add view" `Menu` button, "Ask Pitot" `Button variant="subtle"` (agent only). No surrounding `Paper`.
 - No "Refresh" button. Widget data refetches every 30s (`refetchInterval: 30_000`; failed queries keep the existing 15s retry). A dimmed "Updated 11:16" line sits at the right of the control row and uses the newest `dataUpdatedAt` across the widget queries.
 - No "Saved" pill. The save mutation is silent on success; on failure the existing "Dashboard changes not saved" alert with Retry remains.
 - Dashboard switching lives in the rail. The "Dashboards" dropdown above the title is removed. The dashboard list poll drops from 3s to 30s; the selected dashboard poll drops from 3s to 30s and still pauses during a pending or failed save.

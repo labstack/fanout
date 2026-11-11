@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 // detectorEngine is a real engine whose detector reads can fail on demand: a

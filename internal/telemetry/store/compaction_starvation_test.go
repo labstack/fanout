@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 func genBatches(day int64, generation uint32, n int, rows int) []telemetry.BatchMetadata {

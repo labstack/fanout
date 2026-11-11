@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 	"testing"
 	"time"
 )

@@ -13,7 +13,7 @@ import (
 
 	"github.com/alexedwards/scs/v2"
 
-	appstore "github.com/labstack/fanout/internal/store"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 const (
@@ -264,6 +264,7 @@ func NewBrowserSessions(db *sql.DB, idleTTL, absoluteTTL time.Duration, secure b
 	manager.Lifetime = absoluteTTL
 	manager.IdleTimeout = 0
 	manager.HashTokenInStore = true
+	// Keep existing browser sessions valid through the product rename.
 	manager.Cookie.Name = "fanout_session"
 	if secure {
 		manager.Cookie.Name = "__Host-fanout_session"

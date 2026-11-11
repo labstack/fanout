@@ -1,6 +1,6 @@
 ---
 title: Harden an instance
-description: Restrict network access and protect credentials on a Fanout instance.
+description: Restrict network access and protect credentials on a Pitot instance.
 summary: TLS, operations access, account policy and secret delivery.
 read_when:
   - You are preparing an instance for shared or remote access.
@@ -9,9 +9,9 @@ status: preview
 
 ## Protect the listener
 
-Fanout serves plaintext by default. Configure `FANOUT_TLS_CERT_FILE` and
-`FANOUT_TLS_KEY_FILE` together, or terminate TLS at a reverse proxy. Direct TLS
-uses TLS 1.3. Set `FANOUT_PUBLIC_URL` to the stable external HTTPS origin.
+Pitot serves plaintext by default. Configure `PITOT_TLS_CERT_FILE` and
+`PITOT_TLS_KEY_FILE` together, or terminate TLS at a reverse proxy. Direct TLS
+uses TLS 1.3. Set `PITOT_PUBLIC_URL` to the stable external HTTPS origin.
 See [TLS](/docs/guides/tls) for HTTP/2 and proxy setup.
 
 Native installs bind `127.0.0.1:7520`; the image binds `:7520`. Restrict host
@@ -20,15 +20,15 @@ share that listener. Follow the [network surface](/docs/reference/endpoints#rest
 notes to keep ingest private and route public SDKs through a gateway.
 
 Trust forwarded client addresses only from your proxy networks with
-`FANOUT_TRUSTED_PROXY_CIDRS`. Never use `0.0.0.0/0`.
+`PITOT_TRUSTED_PROXY_CIDRS`. Never use `0.0.0.0/0`.
 
 ## Restrict operations access
 
-Keep `/metrics` private or set `FANOUT_METRICS_TOKEN` for authenticated scrapes.
+Keep `/metrics` private or set `PITOT_METRICS_TOKEN` for authenticated scrapes.
 An administrator browser session can also read it. Leave
-`FANOUT_METRICS_PUBLIC=false`; enabling it permits unauthenticated scrapes.
+`PITOT_METRICS_PUBLIC=false`; enabling it permits unauthenticated scrapes.
 
-Leave `FANOUT_PPROF_ENABLED=false` unless profiling is needed. When enabled,
+Leave `PITOT_PPROF_ENABLED=false` unless profiling is needed. When enabled,
 `/debug/pprof/*` still requires `operations:read`, available only to admins.
 Profiles can contain memory contents. Health and readiness probes require no
 credential. See [endpoints](/docs/reference/endpoints).
@@ -36,7 +36,7 @@ credential. See [endpoints](/docs/reference/endpoints).
 ## Choose an account policy
 
 Keep local self-signup off unless any verified email address should receive a
-viewer account. `FANOUT_SELF_SIGNUP=true` requires SMTP. Viewers can query all
+viewer account. `PITOT_SELF_SIGNUP=true` requires SMTP. Viewers can query all
 telemetry and run the built-in agent, which can incur provider charges.
 
 Each instance is one trust domain. Namespaces filter queries and do not isolate
@@ -48,7 +48,7 @@ for OIDC eligibility, suspension and access revocation.
 
 Supply secret settings through runtime injection or managed mounts with their
 `_FILE` variables. Set only one nonempty form. Restrict mount access at the
-platform layer; Fanout does not check file modes. See
+platform layer; Pitot does not check file modes. See
 [secret settings](/docs/reference/configuration#secrets).
 
 Keep the setup URL, login links, session cookies and ingest token out of public
@@ -57,4 +57,4 @@ Use the [ingest rotation procedure](/docs/get-started/send-telemetry#the-ingest-
 if a token is lost or exposed: create a replacement, then revoke the exposed one.
 
 Report vulnerabilities privately through
-[SECURITY.md](https://github.com/labstack/fanout/blob/main/SECURITY.md).
+[SECURITY.md](https://github.com/labstack/pitot/blob/main/SECURITY.md).

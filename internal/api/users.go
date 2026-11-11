@@ -8,8 +8,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
 )
 
 // UserHandler handles admin user management endpoints.
@@ -112,7 +112,7 @@ func (h *UserHandler) ListUsers(c *echo.Context) error {
 // CreateUser adds a new user (admin only).
 func (h *UserHandler) CreateUser(c *echo.Context) error {
 	if h.ownership != accountOwnershipLocal {
-		return ownedByIdentityProvider("Accounts cannot be created in Fanout when roles come from the identity provider.")
+		return ownedByIdentityProvider("Accounts cannot be created in Pitot when roles come from the identity provider.")
 	}
 	var req struct {
 		Email       string `json:"email"`
@@ -180,7 +180,7 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 		return err
 	}
 	if req.Email != nil && h.ownership == accountOwnershipDirectory {
-		return ownedByIdentityProvider("Email addresses are managed by the identity provider, not in Fanout.")
+		return ownedByIdentityProvider("Email addresses are managed by the identity provider, not in Pitot.")
 	}
 	if req.Email != nil {
 		email, err := auth.NormalizeEmail(*req.Email)
@@ -195,7 +195,7 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 // UpdateRole modifies a user's role (admin only).
 func (h *UserHandler) UpdateRole(c *echo.Context) error {
 	if h.ownership != accountOwnershipLocal {
-		return ownedByIdentityProvider("Roles are assigned by the identity provider, not in Fanout.")
+		return ownedByIdentityProvider("Roles are assigned by the identity provider, not in Pitot.")
 	}
 	var req struct {
 		Role string `json:"role"`
@@ -213,7 +213,7 @@ func (h *UserHandler) UpdateRole(c *echo.Context) error {
 // UpdateStatus modifies a user's status (admin only).
 func (h *UserHandler) UpdateStatus(c *echo.Context) error {
 	if h.ownership == accountOwnershipDirectory {
-		return ownedByIdentityProvider("Account status is managed by the identity provider, not in Fanout.")
+		return ownedByIdentityProvider("Account status is managed by the identity provider, not in Pitot.")
 	}
 	var req struct {
 		Status string `json:"status"`
@@ -254,7 +254,7 @@ func (h *UserHandler) updateUser(c *echo.Context, email, displayName *string, ro
 // DeleteUser removes a user (admin only).
 func (h *UserHandler) DeleteUser(c *echo.Context) error {
 	if h.ownership == accountOwnershipDirectory {
-		return ownedByIdentityProvider("Accounts are deactivated by the identity provider, not deleted in Fanout.")
+		return ownedByIdentityProvider("Accounts are deactivated by the identity provider, not deleted in Pitot.")
 	}
 	id := c.Param("id")
 	if err := h.users.DeleteWithAudit(id, userAuditEvent(c, "user.deleted")); err != nil {

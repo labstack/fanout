@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/queryrows"
 )
 
 // Panic at the first setup operation after readConn has acquired its pin.

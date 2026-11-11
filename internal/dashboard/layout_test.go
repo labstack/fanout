@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 func TestPackedRowBandsSnapOnlyFreeNewPanels(t *testing.T) {

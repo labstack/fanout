@@ -8,7 +8,7 @@ import { clipFilter, clipSegments, freezeDetectFilter, parseFreezeDetect } from 
 
 const input = resolve(process.argv[2] ?? fileURLToPath(new URL("../../ui/host/test-results/landing-recordings/", import.meta.url)));
 const output = resolve(process.argv[3] ?? fileURLToPath(new URL("../src/assets/landing/", import.meta.url)));
-const temporary = mkdtempSync(join(tmpdir(), "fanout-clips-"));
+const temporary = mkdtempSync(join(tmpdir(), "pitot-clips-"));
 function run(command, args, capture = false) {
   const result = spawnSync(command, args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
     stdio: capture === "stderr" ? ["ignore", "ignore", "pipe"] : capture ? ["ignore", "pipe", "inherit"] : "inherit" });

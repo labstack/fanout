@@ -75,7 +75,7 @@ export async function startAppServer(path: string, { command = ["bun", manager],
   await stopAppServers(path);
   const registry = `${path}.instances`;
   await mkdir(registry, { recursive: true, mode: 0o700 });
-  const dir = await mkdtemp(join(tmpdir(), "fanout-e2e-"));
+  const dir = await mkdtemp(join(tmpdir(), "pitot-e2e-"));
   const id = randomUUID();
   const child = spawn(command[0], [...command.slice(1), id, dir], { stdio: ["ignore", "inherit", "inherit"] });
   let failed = false;

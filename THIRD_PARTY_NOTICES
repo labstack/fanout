@@ -1,11 +1,11 @@
-FANOUT THIRD-PARTY NOTICES
+PITOT THIRD-PARTY NOTICES
 
 This file is generated from the Go packages linked into the four supported
 release targets, the pinned native DuckDB engine, and the production dependency graphs of the two embedded
 browser applications. Development-only dependencies are excluded. Regenerate it
 with `just notices`; CI verifies it with `just notices-check`.
 
-The following components are provided under their own terms. Fanout's Apache-2.0
+The following components are provided under their own terms. Pitot's Apache-2.0
 license does not replace or alter those terms.
 
 COMPONENT INVENTORY

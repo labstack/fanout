@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/queryrows"
 )
 
 func metricCrosscheckDashboard(name, measure string, start, end time.Time) Dashboard {
@@ -274,9 +274,9 @@ func crosscheckMetricFrame(t *testing.T, engine Engine, name, measure string, st
 }
 
 func TestMetricDemoDataMatchesIndependentWindowSQL(t *testing.T) {
-	input := os.Getenv("FANOUT_PANEL_BENCH_DATA_DIR")
+	input := os.Getenv("PITOT_PANEL_BENCH_DATA_DIR")
 	if input == "" {
-		t.Skip("FANOUT_PANEL_BENCH_DATA_DIR is unset")
+		t.Skip("PITOT_PANEL_BENCH_DATA_DIR is unset")
 	}
 	data := copyMetricCrosscheckData(t, input)
 	engine, _ := panelBenchEngine(t, data)

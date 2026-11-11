@@ -1,6 +1,6 @@
 ---
 title: First boot
-description: What Fanout checks before it opens a listener, and how to claim the first administrator account.
+description: What Pitot checks before it opens a listener, and how to claim the first administrator account.
 summary: Configuration validation, the one-time setup URL, and the ingest token you are shown once.
 read_when:
   - The process refuses to start and you want to know what it validated.
@@ -8,11 +8,11 @@ read_when:
 status: preview
 ---
 
-Fanout validates configuration before opening data files or listeners. Invalid
+Pitot validates configuration before opening data files or listeners. Invalid
 settings stop startup with an error naming the setting. See
 [configuration](/docs/reference/configuration) for precedence, secret files and validation.
 
-Local sign-in requires `FANOUT_AUTH_CODE_SECRET` with at least 32 characters.
+Local sign-in requires `PITOT_AUTH_CODE_SECRET` with at least 32 characters.
 SMTP and an AI provider are optional; each validates its required settings when
 enabled. OIDC requires an HTTPS issuer and public URL, a client ID and a client
 secret. The generated [settings reference](/docs/reference/configuration/auth) lists the
@@ -20,12 +20,12 @@ available authentication settings.
 
 ## Claiming the first administrator
 
-When the control database holds no users, Fanout prints a one-time setup URL to
+When the control database holds no users, Pitot prints a one-time setup URL to
 standard error:
 
 ```text
 ============================================================
- FANOUT SETUP
+ PITOT SETUP
 
  Open:  http://127.0.0.1:7520/login?setup_token=…
  Valid: one-time use, expires in 1 hour
@@ -38,16 +38,16 @@ standard error:
 Under Docker, read it back with:
 
 ```sh
-docker logs fanout 2>&1 | grep -A8 "FANOUT SETUP"
+docker logs pitot 2>&1 | grep -A8 "PITOT SETUP"
 ```
 
 Open the URL, create the administrator, and **save the ingest token shown after
-setup**. The raw token is displayed once; Fanout stores only its hash and cannot
-show it again. If `FANOUT_INGEST_TOKEN` already set the token, setup shows no
+setup**. The raw token is displayed once; Pitot stores only its hash and cannot
+show it again. If `PITOT_INGEST_TOKEN` already set the token, setup shows no
 token and leaves that one in place.
 
 An administrator can create more named tokens on the ingest token page, which
-is `/settings/ingest` on your Fanout instance, or under **Connect telemetry** in
+is `/settings/ingest` on your Pitot instance, or under **Connect telemetry** in
 the account menu. To rotate a token without downtime, create a replacement, move
 the Collector to it, then revoke the old one. See
 [ingest tokens](/docs/get-started/send-telemetry#the-ingest-token).
@@ -62,12 +62,12 @@ installation and rebuild with a fresh data directory before repeating setup.
 ## Signing in afterwards
 
 Local mode has no passwords. Once SMTP is configured, active users receive
-short-lived codes by email. Without SMTP, run `fanout login-link <email>` with
+short-lived codes by email. Without SMTP, run `pitot login-link <email>` with
 the server's environment and data directory to mint a 15-minute, single-use
 link for an existing active user. For Docker, use:
 
 ```sh
-docker exec fanout fanout login-link admin@example.com
+docker exec pitot pitot login-link admin@example.com
 ```
 
 OIDC deployments use the provider's flow instead.
@@ -75,4 +75,4 @@ OIDC deployments use the provider's flow instead.
 ## Next
 
 [Send your first telemetry](/docs/get-started/send-telemetry), then investigate it with
-[Fanout's agent or an MCP client](/docs/get-started/send-telemetry#investigate-the-data).
+[Pitot's agent or an MCP client](/docs/get-started/send-telemetry#investigate-the-data).

@@ -302,8 +302,8 @@ it.each(["error", "invalid"] as const)("keeps the full %s notice and Fix reachab
       for (const observer of observers) for (const target of observer.elements) observer.callback([{target, contentRect: {width: 200, height: 112}} as unknown as ResizeObserverEntry], {} as ResizeObserver);
     });
     const row = host.querySelector<HTMLElement>('[data-panel-error]')!;
-    const action = within(row).getByRole("button", {name: "Ask Fanout to fix it"});
-    expect(action.textContent).toBe("Ask Fanout to fix it");
+    const action = within(row).getByRole("button", {name: "Ask Pitot to fix it"});
+    expect(action.textContent).toBe("Ask Pitot to fix it");
     const text = row.querySelector<HTMLElement>('[data-panel-error-message]')!;
     expect(text.textContent).toBe("Invalid query"); expect(text.title).toBe("Invalid query");
     expect(row.style.overflow).toBe("auto"); expect(row.style.maxHeight).toBe("100%");

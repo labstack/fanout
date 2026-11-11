@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/pitot/internal/engine"
 )
 
 // The physical format and approved relation schemas are fixed for an executor's

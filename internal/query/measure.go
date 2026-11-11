@@ -2,14 +2,14 @@ package query
 
 import (
 	"fmt"
-	"github.com/labstack/fanout/internal/suggest"
+	"github.com/labstack/pitot/internal/suggest"
 	"math"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/labstack/fanout/internal/sqlscan"
+	"github.com/labstack/pitot/internal/sqlscan"
 )
 
 // Measure is one parsed aggregate.

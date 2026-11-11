@@ -47,7 +47,7 @@ func startFakeSMTP(t *testing.T, rcptReply string) (*fakeSMTP, SMTPConfig) {
 			go server.serve(conn)
 		}
 	}()
-	return server, SMTPConfig{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port, User: "user", Pass: "pass", From: "Fanout <noreply@example.com>"}
+	return server, SMTPConfig{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port, User: "user", Pass: "pass", From: "Pitot <noreply@example.com>"}
 }
 
 func (s *fakeSMTP) serve(conn net.Conn) {
@@ -198,13 +198,13 @@ func TestSendAlertKeepsHostileValuesOutOfHeadersAndMarkup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(subject, "[Fanout] Firing: High errors X-Injected: yes on api Bcc:") {
+	if !strings.HasPrefix(subject, "[Pitot] Firing: High errors X-Injected: yes on api Bcc:") {
 		t.Fatalf("subject = %q", subject)
 	}
 	if strings.ContainsAny(subject, "\r\n\u2028\u202e") {
 		t.Fatalf("subject holds control characters: %q", subject)
 	}
-	if got := message.Header.Get("Message-Id"); got != "<0190-delivery@alerts.fanout>" {
+	if got := message.Header.Get("Message-Id"); got != "<0190-delivery@alerts.pitot>" {
 		t.Fatalf("message id = %q", got)
 	}
 

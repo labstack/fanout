@@ -10,8 +10,8 @@ Expected assets (16:10; posters at 1280 × 800, videos at 1280 × 800 or larger)
 
 Encoded videos stay local and are ignored by Git and Docker; PNG posters stay
 in the repository so Astro can optimize them. Published videos live in the
-Cloudflare R2 bucket `fanout` under `videos/`, served at
-`https://assets.fanout.run/videos/`. The bucket holds public assets only, in one
+Cloudflare R2 bucket `pitot` under `videos/`, served at
+`https://assets.pitot.dev/videos/`. The bucket holds public assets only, in one
 folder per file type.
 
 Each slot stays poster-only until both themes have both video formats in
@@ -20,8 +20,8 @@ component follows the site theme, pauses off screen and in hidden tabs, and
 shows only the poster when reduced motion is enabled. The caption names the
 interface and data source; keep it accurate for how each clip was produced.
 
-Set `FANOUT_LANDING_RECORDINGS=1`, `FANOUT_LANDING_BASE_URL` to the existing
-instance URL, and `FANOUT_LANDING_SESSION_COOKIE` to a `name=value` session cookie
+Set `PITOT_LANDING_RECORDINGS=1`, `PITOT_LANDING_BASE_URL` to the existing
+instance URL, and `PITOT_LANDING_SESSION_COOKIE` to a `name=value` session cookie
 in the process environment. Run from `ui/host`:
 
 ```sh
@@ -113,7 +113,7 @@ It writes VP9 WebM and H.264
 MP4 at 1280 × 800 and 30 fps with a two-pass target of about 4 MB per file.
 It extracts each PNG poster from the final encoded frame. Review the clips and
 posters, then upload from the repository root with Wrangler logged in to the
-account that owns `fanout`:
+account that owns `pitot`:
 
 ```sh
 bash site/scripts/upload-clips.sh

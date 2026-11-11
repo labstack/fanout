@@ -21,6 +21,6 @@ export default class FailureReport implements Reporter {
     await rm(this.output, { recursive: true, force: true });
     if (result.status === "passed") return;
     await mkdir(this.output, { recursive: true });
-    await writeFile(join(this.output, "index.html"), `<!doctype html><meta charset="utf-8"><title>Fanout browser smoke</title><style>body{font:16px system-ui;max-width:1100px;margin:32px auto;padding:0 24px}pre{white-space:pre-wrap}article{border-bottom:1px solid #888;padding:16px 0}</style><h1>Fanout browser smoke: ${escape(result.status)}</h1>${this.rows.join("\n")}`);
+    await writeFile(join(this.output, "index.html"), `<!doctype html><meta charset="utf-8"><title>Pitot browser smoke</title><style>body{font:16px system-ui;max-width:1100px;margin:32px auto;padding:0 24px}pre{white-space:pre-wrap}article{border-bottom:1px solid #888;padding:16px 0}</style><h1>Pitot browser smoke: ${escape(result.status)}</h1>${this.rows.join("\n")}`);
   }
 }

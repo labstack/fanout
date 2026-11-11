@@ -26,7 +26,7 @@ export function startMock(failure?:Failure,intents?:EvaluationConfig['prompts'])
   const stats={creates:0,edits:0,posts:0,status_reads:0,version_reads:0,queries:0};
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(req) {
     const path=new URL(req.url).pathname;
-    if(req.headers.get('Fanout-Request')!=='1')return new Response(null,{status:403});
+    if(req.headers.get('Pitot-Request')!=='1')return new Response(null,{status:403});
     if(path.startsWith('/api/agent/threads/')&&failure==='thread_failure')return Response.json({code:'unavailable',message:'Synthetic unavailable thread'},{status:503});
     if(path.startsWith('/api/agent/threads/'))return Response.json({id:path.split('/').at(-1)!,messages:threads.get(path.split('/').at(-1)!)??[],updated_at:'2026-10-01 13:00:00'});
     if(path.startsWith('/api/agent/runs/')&&req.method==='GET'){stats.status_reads++;return Response.json({status:statuses.get(path.split('/').at(-1)!)??'unknown'});}

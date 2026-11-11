@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/queryrows"
 )
 
 func trendKey(values []string) string { raw, _ := json.Marshal(values); return string(raw) }

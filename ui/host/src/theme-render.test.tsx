@@ -2,7 +2,7 @@ import { Badge, Button, MantineProvider, Progress, Table } from "@mantine/core";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { fanoutTheme, fanoutCssVariables } from "../../theme";
+import { pitotTheme, pitotCssVariables } from "../../theme";
 
 /* These render the real components against the real theme, because the two
    design-system defects that reached this branch were both invisible to a
@@ -13,7 +13,7 @@ async function render(node: React.ReactNode) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () => root.render(<MantineProvider theme={fanoutTheme} cssVariablesResolver={fanoutCssVariables} forceColorScheme="dark">{node}</MantineProvider>));
+  await act(async () => root.render(<MantineProvider theme={pitotTheme} cssVariablesResolver={pitotCssVariables} forceColorScheme="dark">{node}</MantineProvider>));
   return { root, container };
 }
 

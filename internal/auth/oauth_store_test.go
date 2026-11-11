@@ -23,7 +23,7 @@ func TestOAuthStoreAuthorizationCodeIsSingleUse(t *testing.T) {
 	raw, err := store.CreateAuthorizationCode(t.Context(), OAuthAuthorizationCode{
 		ClientID: client.ClientID, UserID: user.ID,
 		RedirectURI: "http://localhost:4321/callback", Scope: MCPScopeTelemetryRead,
-		Resource: "https://fanout.example.com/mcp", CodeChallenge: "challenge",
+		Resource: "https://pitot.example.com/mcp", CodeChallenge: "challenge",
 	})
 	if err != nil {
 		t.Fatalf("CreateAuthorizationCode: %v", err)
@@ -52,12 +52,12 @@ func TestOAuthStoreRejectsRetiredStoredGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead+" "+MCPScopeDashboardManage, resource)
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy := "fanout:read fanout:dashboard"
+	legacy := "pitot:read pitot:dashboard"
 	if _, err := sqlite.DB.Exec(`UPDATE oauth_tokens SET scope = ? WHERE family_id IN (SELECT family_id FROM oauth_tokens WHERE token_hash = ?)`, legacy, oauthHash(pair.AccessToken)); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestOAuthStoreRefreshRotationAndReuseRevokesFamily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
@@ -130,7 +130,7 @@ func TestOAuthStoreRefreshGraceAdmitsConcurrentSibling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
@@ -182,7 +182,7 @@ func TestOAuthStoreRefreshGraceRejectsFutureRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
@@ -217,7 +217,7 @@ func TestOAuthStoreRefreshGraceRevokesExpiredReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
@@ -253,7 +253,7 @@ func TestOAuthStoreRefreshGraceDoesNotReviveRevokedFamily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
@@ -281,7 +281,7 @@ func TestRevokeAllSessionsAlsoRevokesOAuthCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatal(err)
@@ -319,7 +319,7 @@ func TestOAuthStoreRejectsWrongAudienceAndSuspendedRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
@@ -354,7 +354,7 @@ func TestOAuthStoreReuseDetectionRunsBeforeExpiryCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
@@ -390,7 +390,7 @@ func TestOAuthStoreRotateDBErrorDoesNotRevokeFamily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
@@ -429,7 +429,7 @@ func TestOAuthStoreVerifyAccessTokenDBErrorIsNotInvalidToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
@@ -463,7 +463,7 @@ func TestOAuthStoreCleanupExpired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	if _, err := store.CreateAuthorizationCode(t.Context(), OAuthAuthorizationCode{
 		ClientID: client.ClientID, UserID: user.ID, RedirectURI: "http://localhost:5555/callback",
 		Scope: MCPScopeTelemetryRead, Resource: resource, CodeChallenge: "challenge",
@@ -529,7 +529,7 @@ func TestOAuthStoreCleanupKeepsLiveFamiliesAndActiveClients(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
-	resource := "https://fanout.example.com/mcp"
+	resource := "https://pitot.example.com/mcp"
 	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
@@ -576,7 +576,7 @@ func TestOAuthStoreExpiredCodeFails(t *testing.T) {
 	client, _ := store.RegisterClient(t.Context(), "Client", "", []string{"http://localhost:1111/callback"})
 	raw, err := store.CreateAuthorizationCode(t.Context(), OAuthAuthorizationCode{
 		ClientID: client.ClientID, UserID: user.ID, RedirectURI: "http://localhost:1111/callback",
-		Scope: MCPScopeTelemetryRead, Resource: "https://fanout.example.com/mcp", CodeChallenge: "challenge",
+		Scope: MCPScopeTelemetryRead, Resource: "https://pitot.example.com/mcp", CodeChallenge: "challenge",
 	})
 	if err != nil {
 		t.Fatalf("CreateAuthorizationCode: %v", err)
@@ -611,7 +611,7 @@ func TestOAuthConnectionsListLiveFamilies(t *testing.T) {
 	}
 	issue := func(client OAuthClient, owner User) OAuthTokenPair {
 		t.Helper()
-		pair, err := store.IssueTokenPair(t.Context(), client.ClientID, owner.ID, MCPScopeTelemetryRead+" "+MCPScopeDashboardManage, "https://fanout.example.com/mcp")
+		pair, err := store.IssueTokenPair(t.Context(), client.ClientID, owner.ID, MCPScopeTelemetryRead+" "+MCPScopeDashboardManage, "https://pitot.example.com/mcp")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -631,7 +631,7 @@ func TestOAuthConnectionsListLiveFamilies(t *testing.T) {
 	newest := register("Claude Code")
 	issue(newest, user)
 	now = now.Add(time.Hour)
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, "https://fanout.example.com/mcp", MCPScopeTelemetryRead); err != nil {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, "https://pitot.example.com/mcp", MCPScopeTelemetryRead); err != nil {
 		t.Fatal(err)
 	}
 	expired := register("Expired")
@@ -693,14 +693,14 @@ func TestOAuthConnectionRevocationIsScopedAndImmediate(t *testing.T) {
 	}
 	issue := func(clientID, userID string) OAuthTokenPair {
 		t.Helper()
-		pair, err := store.IssueTokenPair(t.Context(), clientID, userID, MCPScopeTelemetryRead, "https://fanout.example.com/mcp")
+		pair, err := store.IssueTokenPair(t.Context(), clientID, userID, MCPScopeTelemetryRead, "https://pitot.example.com/mcp")
 		if err != nil {
 			t.Fatal(err)
 		}
 		return pair
 	}
 	pair := issue(client.ClientID, user.ID)
-	sibling, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, "https://fanout.example.com/mcp", "")
+	sibling, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, "https://pitot.example.com/mcp", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -711,7 +711,7 @@ func TestOAuthConnectionRevocationIsScopedAndImmediate(t *testing.T) {
 		t.Helper()
 		raw, err := store.CreateAuthorizationCode(t.Context(), OAuthAuthorizationCode{
 			ClientID: client.ClientID, UserID: userID, RedirectURI: "http://localhost/callback",
-			Scope: MCPScopeTelemetryRead, Resource: "https://fanout.example.com/mcp", CodeChallenge: "challenge",
+			Scope: MCPScopeTelemetryRead, Resource: "https://pitot.example.com/mcp", CodeChallenge: "challenge",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -719,24 +719,24 @@ func TestOAuthConnectionRevocationIsScopedAndImmediate(t *testing.T) {
 		return raw
 	}
 	pendingCode, otherUserCode := code(user.ID), code(other.ID)
-	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, "https://fanout.example.com/mcp"); err != nil {
+	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, "https://pitot.example.com/mcp"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.RevokeConnection(t.Context(), user.ID, client.ClientID, AuditEvent{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, token := range []string{pair.AccessToken, sibling.AccessToken, family.AccessToken} {
-		if _, err := store.VerifyAccessToken(t.Context(), token, "https://fanout.example.com/mcp"); !errors.Is(err, ErrInvalidOAuthToken) {
+		if _, err := store.VerifyAccessToken(t.Context(), token, "https://pitot.example.com/mcp"); !errors.Is(err, ErrInvalidOAuthToken) {
 			t.Fatalf("revoked access = %v", err)
 		}
 	}
 	for _, token := range []string{pair.RefreshToken, sibling.RefreshToken, family.RefreshToken} {
-		if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, token, "https://fanout.example.com/mcp", ""); err == nil {
+		if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, token, "https://pitot.example.com/mcp", ""); err == nil {
 			t.Fatal("disconnected refresh token accepted")
 		}
 	}
 	for _, token := range []string{otherUser.AccessToken, otherClient.AccessToken} {
-		if _, err := store.VerifyAccessToken(t.Context(), token, "https://fanout.example.com/mcp"); err != nil {
+		if _, err := store.VerifyAccessToken(t.Context(), token, "https://pitot.example.com/mcp"); err != nil {
 			t.Fatalf("unrelated access = %v", err)
 		}
 	}
@@ -777,7 +777,7 @@ func TestOAuthConnectionRevocationRollsBackWithAuditFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, "https://fanout.example.com/mcp")
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, "https://pitot.example.com/mcp")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -787,10 +787,10 @@ func TestOAuthConnectionRevocationRollsBackWithAuditFailure(t *testing.T) {
 	if err := store.RevokeConnection(t.Context(), user.ID, client.ClientID, AuditEvent{}); err == nil {
 		t.Fatal("audit failure must fail revocation")
 	}
-	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, "https://fanout.example.com/mcp"); err != nil {
+	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, "https://pitot.example.com/mcp"); err != nil {
 		t.Fatalf("rolled-back access = %v", err)
 	}
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, "https://fanout.example.com/mcp", ""); err != nil {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, "https://pitot.example.com/mcp", ""); err != nil {
 		t.Fatalf("rolled-back refresh = %v", err)
 	}
 }

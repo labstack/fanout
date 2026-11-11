@@ -16,11 +16,11 @@ import (
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/labstack/echo/v5"
 
-	"github.com/labstack/fanout/internal/api"
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/pitot/internal/api"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
 
-	controlstore "github.com/labstack/fanout/internal/store"
+	controlstore "github.com/labstack/pitot/internal/store"
 )
 
 func TestStorePersistsOwnerScopedThread(t *testing.T) {
@@ -56,8 +56,8 @@ func TestStoreReloadsSanitizedRunOutcome(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"provider", fmt.Errorf("%w: private provider body", errProvider), "Fanout could not reach the model provider. Please try again."},
-		{"step limit", errStepLimit, "Fanout reached its step limit before finishing. Try a narrower question."},
+		{"provider", fmt.Errorf("%w: private provider body", errProvider), "Pitot could not reach the model provider. Please try again."},
+		{"step limit", errStepLimit, "Pitot reached its step limit before finishing. Try a narrower question."},
 		{"stopped", context.Canceled, "Stopped"},
 		{"stopped delivery", errors.Join(errAnswerDelivery, context.Canceled), "Stopped"},
 	} {
@@ -553,7 +553,7 @@ func TestThreadRouteHidesOtherOwnersThread(t *testing.T) {
 	mutation := func(method, path, body string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, strings.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("Fanout-Request", "1")
+		request.Header.Set("Pitot-Request", "1")
 		request.AddCookie(cookie)
 		recorder := httptest.NewRecorder()
 		e.ServeHTTP(recorder, request)
@@ -601,7 +601,7 @@ func TestStoreStartRunKeepsStoredHistory(t *testing.T) {
 		{ID: "user-1", Role: agtypes.RoleUser, Content: "health?"},
 		{ID: "assistant-1", Role: agtypes.RoleAssistant, Content: "here it is"},
 		{ID: "activity-1", Role: agtypes.RoleActivity, ActivityType: "mcp-app", Content: map[string]any{
-			"resource_uri": "ui://fanout/panels.html", "tool_name": "query_telemetry", "tool_input": map[string]any{}, "is_error": false,
+			"resource_uri": "ui://pitot/panels.html", "tool_name": "query_telemetry", "tool_input": map[string]any{}, "is_error": false,
 			"tool_result": map[string]any{"dashboard": map[string]any{"version": 1, "name": "Fixture", "panels": []any{map[string]any{"id": "text", "title": "Text", "viz": "text", "content": "Hello"}}}, "results": []any{map[string]any{"id": "text", "status": "ok"}}},
 		}},
 	}

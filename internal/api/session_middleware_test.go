@@ -8,9 +8,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
-	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 func authenticatedSessionCookie(t *testing.T, sessions *auth.BrowserSessions, user auth.User) *http.Cookie {
@@ -54,16 +54,16 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	e.ServeHTTP(recorder, withoutHeader)
 	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("session mutation without Fanout header = %d, want 403", recorder.Code)
+		t.Fatalf("session mutation without Pitot header = %d, want 403", recorder.Code)
 	}
 
 	withHeader := httptest.NewRequest(http.MethodPost, "/api/alerting/rules", nil)
 	withHeader.AddCookie(cookie)
-	withHeader.Header.Set("Fanout-Request", "1")
+	withHeader.Header.Set("Pitot-Request", "1")
 	recorder = httptest.NewRecorder()
 	e.ServeHTTP(recorder, withHeader)
 	if recorder.Code != http.StatusNoContent {
-		t.Fatalf("session mutation with Fanout header = %d, want 204", recorder.Code)
+		t.Fatalf("session mutation with Pitot header = %d, want 204", recorder.Code)
 	}
 
 	metrics := httptest.NewRequest(http.MethodGet, "/metrics", nil)

@@ -4,13 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/labstack/fanout/internal/engine/querytest"
+	"github.com/labstack/pitot/internal/engine/querytest"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/queryrows"
 )
 
 func TestDependenciesKeyedTraversalIsBoundedAndScoped(t *testing.T) {

@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/intelligence"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/intelligence"
 )
 
 const pruneHistDays = 7

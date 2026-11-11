@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 // lower is pure: it emits one SQL string per entry and keeps all stored order.

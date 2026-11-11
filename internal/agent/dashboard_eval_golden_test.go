@@ -12,15 +12,15 @@ import (
 	"time"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/engine/querytest"
-	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/query"
-	controlstore "github.com/labstack/fanout/internal/store"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/dashboard"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/engine/querytest"
+	pitotmcp "github.com/labstack/pitot/internal/mcp"
+	"github.com/labstack/pitot/internal/query"
+	controlstore "github.com/labstack/pitot/internal/store"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 )
 
 // The Go service/executor/encoder own these fixtures. Only volatile IDs,
@@ -55,7 +55,7 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := dashboard.New(db.DB, executor)
-	server := fanoutmcp.NewWithIntelligence(registryQueries{}, service, executor, nil, "test")
+	server := pitotmcp.NewWithIntelligence(registryQueries{}, service, executor, nil, "test")
 	tools, err := NewToolRegistry(t.Context(), server.MCP())
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 	}
 	raw = append(raw, '\n')
 	path := filepath.Join("..", "..", "scripts", "dashboard-eval", "testdata", "server.json")
-	if os.Getenv("FANOUT_EVAL_UPDATE_GOLDENS") == "1" {
+	if os.Getenv("PITOT_EVAL_UPDATE_GOLDENS") == "1" {
 		if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			t.Fatal(err)
 		}

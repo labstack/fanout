@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/query"
-	controlstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/dashboard"
+	"github.com/labstack/pitot/internal/query"
+	controlstore "github.com/labstack/pitot/internal/store"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )

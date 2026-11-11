@@ -19,10 +19,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
-	httpserver "github.com/labstack/fanout/internal/server"
-	"github.com/labstack/fanout/internal/settings"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	httpserver "github.com/labstack/pitot/internal/server"
+	"github.com/labstack/pitot/internal/settings"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
@@ -35,7 +35,7 @@ import (
 // conversion; durable also waits for the production writer's Parquet commit.
 // Client and server share this process: CPU/allocations include both sides.
 // Run: go test -tags transportbench ./internal/ingest -run '^TestTransportComparison$' -v -count=1 -timeout=10m
-// FANOUT_BENCH_PROFILE_DIR writes a CPU profile of each measurement interval
+// PITOT_BENCH_PROFILE_DIR writes a CPU profile of each measurement interval
 // and a post-load heap profile under a separate directory for every subtest.
 func TestTransportComparison(t *testing.T) {
 	t.Logf("environment go=%s os=%s arch=%s CPUs=%d GOMAXPROCS=%d", runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), runtime.GOMAXPROCS(0))
@@ -173,7 +173,7 @@ func runTransportComparison(t *testing.T, mode string, durable bool, concurrency
 	runtime.GC()
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	profileDir := os.Getenv("FANOUT_BENCH_PROFILE_DIR")
+	profileDir := os.Getenv("PITOT_BENCH_PROFILE_DIR")
 	var cpuFile *os.File
 	if profileDir != "" {
 		profileDir = filepath.Join(profileDir, t.Name())

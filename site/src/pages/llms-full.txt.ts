@@ -4,7 +4,7 @@ import { toPlainMarkdown } from "../lib/markdown";
 
 // Every page, concatenated, for an agent that would rather make one request
 // than thirty. Ordered the way a reader would meet the material, because an
-// agent reading top to bottom should meet what Fanout is before it meets a
+// agent reading top to bottom should meet what Pitot is before it meets a
 // settings table.
 //
 // The landing page and docs home share the "index" group, listed explicitly
@@ -37,7 +37,7 @@ export const GET: APIRoute = async () => {
   });
 
   const parts = [
-    "# Fanout — complete documentation",
+    "# Pitot — complete documentation",
     "",
     "One self-hosted binary for OpenTelemetry: OTLP ingest, Parquet storage,",
     "DuckDB queries, alerts, a chat investigator, MCP tools and the browser",

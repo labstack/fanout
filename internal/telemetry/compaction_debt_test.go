@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/pitot/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -34,7 +34,7 @@ func TestMetricsScrapeDoesNotWaitForCatalogLock(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("/metrics waited for the catalog lock")
 	}
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "fanout_compaction_backlog_batches 1\n") {
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "pitot_compaction_backlog_batches 1\n") {
 		t.Fatalf("scrape did not return the cached backlog: %d %s", recorder.Code, recorder.Body.String())
 	}
 }

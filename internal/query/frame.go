@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/observability"
+	"github.com/labstack/pitot/internal/queryrows"
 )
 
 // Frame is a columnar query result: one array of values per column.

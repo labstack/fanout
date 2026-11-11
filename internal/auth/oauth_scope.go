@@ -3,7 +3,7 @@ package auth
 import "strings"
 
 const (
-	// MCPScopeTelemetryRead grants read access to Fanout observability data.
+	// MCPScopeTelemetryRead grants read access to Pitot observability data.
 	MCPScopeTelemetryRead = "telemetry:read"
 	// MCPScopeDashboardManage grants access to manage the authenticated user's dashboards.
 	MCPScopeDashboardManage = "dashboard:manage"

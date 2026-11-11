@@ -8,7 +8,7 @@ const dist = new URL("../dist/", import.meta.url);
 const llms = await readFile(new URL("llms.txt", dist), "utf8");
 const full = await readFile(new URL("llms-full.txt", dist), "utf8");
 const home = await readFile(new URL("docs.html", dist), "utf8");
-assert(home.includes("<title>Documentation · Fanout</title>"), "docs.html: incorrect title");
+assert(home.includes("<title>Documentation · Pitot</title>"), "docs.html: incorrect title");
 for (const title of ["Get started", "Guides", "Reference", "Concepts"]) {
   assert(llms.includes(`## ${title}\n`), `llms.txt: missing ${title} section`);
 }
@@ -30,7 +30,7 @@ async function checkPages(dir, prefix = "") {
       assert(!fileLink, `${url}: links to ${fileLink}; links must use the extensionless path`);
       const alternate = html.match(/<link[^>]+type="text\/markdown"[^>]+href="([^"]+)"/)?.[1];
       assert(alternate, `${url}: missing Markdown alternate`);
-      assert.equal(new URL(alternate, "https://fanout.run").pathname, `${url}.md`,
+      assert.equal(new URL(alternate, "https://pitot.dev").pathname, `${url}.md`,
         `${url}: incorrect Markdown alternate`);
       assert(llms.includes(`${url}.md)`), `${url}: missing from llms.txt`);
       assert(full.includes(`Path: ${url}\n`), `${url}: missing from llms-full.txt`);

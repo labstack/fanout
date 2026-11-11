@@ -9,8 +9,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/intelligence"
+	"github.com/labstack/pitot/internal/dashboard"
+	"github.com/labstack/pitot/internal/intelligence"
 )
 
 // This file exists so the MCP reference can be generated from the server itself
@@ -95,7 +95,7 @@ func DescribeTools(ctx context.Context) ([]ToolDoc, error) {
 		connected <- connection{session: session, err: err}
 	}()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "fanout-docgen", Version: "docgen"}, &mcp.ClientOptions{
+	client := mcp.NewClient(&mcp.Implementation{Name: "pitot-docgen", Version: "docgen"}, &mcp.ClientOptions{
 		Capabilities: &mcp.ClientCapabilities{Extensions: map[string]any{mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}}}},
 	})
 	session, err := client.Connect(ctx, clientTransport, nil)

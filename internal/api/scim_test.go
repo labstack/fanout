@@ -17,9 +17,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
-	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 const (
@@ -28,7 +28,7 @@ const (
 )
 
 func scimTestConfig() config.Config {
-	return config.Config{AuthMode: "oidc", OIDCIssuerURL: testSCIMIssuer, PublicURL: "https://fanout.example.com", SCIMToken: testSCIMToken}
+	return config.Config{AuthMode: "oidc", OIDCIssuerURL: testSCIMIssuer, PublicURL: "https://pitot.example.com", SCIMToken: testSCIMToken}
 }
 
 type scimServer struct {
@@ -130,7 +130,7 @@ func TestSCIMCreateLinksIdentityAndRetrySucceeds(t *testing.T) {
 	if created.ExternalID != "sub-opaque" || created.UserName != "owner@example.com" || !created.Active || created.Roles[0].Value != "admin" {
 		t.Fatalf("created = %+v", created)
 	}
-	wantLocation := "https://fanout.example.com/scim/v2/Users/" + created.ID
+	wantLocation := "https://pitot.example.com/scim/v2/Users/" + created.ID
 	if rec.Header().Get("Location") != wantLocation || created.Meta.Location != wantLocation || created.Meta.ResourceType != "User" {
 		t.Fatalf("location header %q meta %+v", rec.Header().Get("Location"), created.Meta)
 	}
@@ -731,7 +731,7 @@ func TestBrowserSuspensionRevokesMCPTokens(t *testing.T) {
 
 	setStatus := func(status string) {
 		t.Helper()
-		headers := map[string]string{"Content-Type": "application/json", "Fanout-Request": "1"}
+		headers := map[string]string{"Content-Type": "application/json", "Pitot-Request": "1"}
 		rec := serve(t, s.e, http.MethodPatch, "/api/users/"+member.ID+"/status", `{"status":"`+status+`"}`, headers, ownerCookie)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("set status %s = %d %s", status, rec.Code, rec.Body.String())
@@ -755,7 +755,7 @@ func TestReactivationRevokesCredentialsThatOutlivedSuspension(t *testing.T) {
 	}{
 		{"browser route", func(t *testing.T, s *scimServer, member auth.User, ownerCookie *http.Cookie) {
 			t.Helper()
-			headers := map[string]string{"Content-Type": "application/json", "Fanout-Request": "1"}
+			headers := map[string]string{"Content-Type": "application/json", "Pitot-Request": "1"}
 			rec := serve(t, s.e, http.MethodPatch, "/api/users/"+member.ID+"/status", `{"status":"active"}`, headers, ownerCookie)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("reactivate = %d %s", rec.Code, rec.Body.String())

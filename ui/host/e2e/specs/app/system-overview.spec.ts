@@ -17,7 +17,7 @@ test("default system overview shows all six self-observation scenarios within tw
   test.setTimeout(60_000); // Two of the default dashboard's 30-second intervals.
   // Reuse the seed's exact end, so time spent in global setup or other specs
   // cannot turn the live fixtures into stopped sources. Timers still run.
-  const window = JSON.parse(process.env.FANOUT_E2E_PERFORMANCE_WINDOW ?? "null") as { to: string } | null;
+  const window = JSON.parse(process.env.PITOT_E2E_PERFORMANCE_WINDOW ?? "null") as { to: string } | null;
   if (!window) throw new Error("Global setup did not provide the seed window");
   await page.clock.setFixedTime(new Date(window.to));
   await page.addInitScript(theme => localStorage.setItem("mantine-color-scheme-value", theme), test.info().project.use.colorScheme!);

@@ -1,6 +1,6 @@
 ---
 title: How storage works
-description: What Fanout writes to disk, how it is queried, and why each component exists.
+description: What Pitot writes to disk, how it is queried, and why each component exists.
 summary: Atomic Parquet ingestion, indexed trace reads, DuckDB analytics, and SQLite control state.
 read_when:
   - You are sizing disk, or deciding what to back up.
@@ -8,7 +8,7 @@ read_when:
 status: preview
 ---
 
-Fanout retains telemetry as ordinary Parquet files in self-contained atomic
+Pitot retains telemetry as ordinary Parquet files in self-contained atomic
 batch directories. Persistent sidecars index traces, and DuckDB handles SQL,
 broad scans, and rebuildable analytical rollups in the same process.
 Application state (users, sessions, dashboards, alert rules, and agent
@@ -22,7 +22,7 @@ history) lives in SQLite.
 | SQLite | Transactional application and identity state |
 
 <figure class="docs-diagram">
-  <a href="/diagrams/persistence.svg" class="docs-diagram__asset" aria-label="Open the Fanout persistence diagram at full size">
+  <a href="/diagrams/persistence.svg" class="docs-diagram__asset" aria-label="Open the Pitot persistence diagram at full size">
     <img
       src="/diagrams/persistence.svg"
       alt="Telemetry durability and query flow: authenticated OTLP rows pass through group admission, parallel commit workers, and durable publication into immutable Parquet batches; indexed trace reads, DuckDB SQL, retention, and compaction use those batches, while service and edge rollups populate rebuildable query state."
@@ -39,7 +39,7 @@ Concurrent small OTLP requests may share one group-commit batch. Up to four
 commit workers encode independent batches in parallel. Each worker writes all
 present signals and metadata into a staging directory, adds `trace.fidx` when
 spans are present, fsyncs them, and publishes the complete directory with one
-atomic rename. Fanout
+atomic rename. Pitot
 returns success only after every batch belonging to the request is published.
 
 A crash before the rename leaves only an unacknowledged staging directory,
@@ -50,13 +50,13 @@ occurs only after publication and parent-directory fsync complete.
 
 A request whose sender stops waiting (it cancels or its deadline passes) before
 the commit of its batch starts is dropped unwritten and counted in
-`fanout_ingest_abandoned_total`, which also counts requests the server cuts off
+`pitot_ingest_abandoned_total`, which also counts requests the server cuts off
 while shutting down. Its memory reservation is released at once, so the
 sender's retry is admitted and is the only copy. Other
 requests sharing that group commit are unaffected. Once a commit has started it
 completes, so a sender that gives up during it and retries stores those rows
 twice. Delivery is therefore at least once only within that commit window: OTLP
-has no idempotency key that lets Fanout recognize a resent request.
+has no idempotency key that lets Pitot recognize a resent request.
 
 ## One authoritative copy for logs and metrics
 
@@ -122,7 +122,7 @@ string encoding when querying them for a JSON client.
 
 ## Engine and format are pinned
 
-Fanout embeds DuckDB `v2.0.0`, the 2.0 LTS release, with its extensions
+Pitot embeds DuckDB `v2.0.0`, the 2.0 LTS release, with its extensions
 compiled into the binary. It downloads no extensions at runtime. Native source
 builds use `scripts/with-duckdb.sh`, which checks the platform archive and uses
 the matching engine headers; the ordinary `just` build and test recipes invoke
@@ -165,7 +165,7 @@ bad clock therefore cannot pin a batch on disk by emitting a far-future event.
 Retention removes whole files, never single rows, as Prometheus, Tempo, and
 Loki remove whole blocks or chunks. A file expires when its newest row passes
 the cutoff, so rows in a day-merged file can stay up to one day past
-`FANOUT_RETENTION_DAYS`, plus one maintenance interval. Service and edge
+`PITOT_RETENTION_DAYS`, plus one maintenance interval. Service and edge
 rollups expire exactly at the cutoff, so for that last day raw telemetry can
 outlive its rollups.
 
@@ -202,7 +202,7 @@ replacements recompute only affected trace IDs from active contributions.
 A semantic version covers the cache schema and aggregation rules; a version
 change atomically discards all private
 read tables and rebuilds from authoritative format-5 Parquet. The background
-worker processes bounded groups; `fanout_read_cache_pending_batches` reports its
+worker processes bounded groups; `pitot_read_cache_pending_batches` reports its
 trace backlog independently of the service and edge rollups' publication horizon.
 Service-version observations populate their analytical rollup on a separate
 worker, so an analytical-gate wait cannot delay the completed-batch worker.
@@ -216,7 +216,7 @@ Narrow file selections use explicit lists from footer bounds. Broad selections
 use a glob with a captured-batch-ID filter, which excludes files published after
 snapshot capture. Only signals referenced by a query are bound.
 
-`FANOUT_ROLLUP_SKIP_TO_LATEST` skips historical service and edge aggregation.
+`PITOT_ROLLUP_SKIP_TO_LATEST` skips historical service and edge aggregation.
 Completed-batch trace caches still rebuild retained history
 in bounded passes; uncached files remain immediately queryable.
 
@@ -262,14 +262,14 @@ At 512 batches compaction prioritizes eligible generation-0 groups. Below that
 threshold it selects the oldest eligible day and then its highest eligible
 generation. Compaction keeps running under read pressure.
 
-`fanout_compaction_backlog_batches` counts all live generation-0 batches,
-including the exclusions. `fanout_ingest_throttled_total{reason}` counts refused
+`pitot_compaction_backlog_batches` counts all live generation-0 batches,
+including the exclusions. `pitot_ingest_throttled_total{reason}` counts refused
 exports (`debt`, `reads`, or `budget`), and
-`fanout_ingest_admission_rows_per_second` reports the cap (zero means uncapped).
-`fanout_ingest_backpressure_seconds_total` now measures seconds with a cap
+`pitot_ingest_admission_rows_per_second` reports the cap (zero means uncapped).
+`pitot_ingest_backpressure_seconds_total` now measures seconds with a cap
 active, replacing its earlier blocked-writer semantics; those historical values
-are not directly comparable. `fanout_compaction_pass_seconds` and
-`fanout_compaction_retired_batches_total` expose retirement throughput.
+are not directly comparable. `pitot_compaction_pass_seconds` and
+`pitot_compaction_retired_batches_total` expose retirement throughput.
 
 Service dependency traversal reads the complete edge rollup within the selected
 window, including edges outside the topology view's displayed page. It follows

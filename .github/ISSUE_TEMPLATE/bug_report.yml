@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in Fanout OSS
+description: Report a reproducible problem in Pitot OSS
 title: "bug: "
 labels: [bug]
 body:
@@ -9,7 +9,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Fanout version
+      label: Pitot version
       description: Release tag, image digest, or commit SHA.
     validations:
       required: true

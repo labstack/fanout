@@ -15,10 +15,10 @@ import (
 	"time"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/metrics"
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/metrics"
+	"github.com/labstack/pitot/internal/queryrows"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -73,7 +73,7 @@ type Result struct {
 	// without guessing from the first populated bucket.
 	ShiftMS int64 `json:"shift_ms,omitempty"`
 	// Cached marks a result served from the result cache rather than run for
-	// this request; see FANOUT_QUERY_CACHE_TTL.
+	// this request; see PITOT_QUERY_CACHE_TTL.
 	Cached bool `json:"cached,omitempty"`
 	// partial marks a result missing part of what it would show: a sub-read
 	// such as the previous period, annotations, table trends or the metric

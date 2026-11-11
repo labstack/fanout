@@ -1,5 +1,5 @@
 {
-  "name": "@fanout/web",
+  "name": "@pitot/web",
   "private": true,
   "version": "0.2.0",
   "type": "module",
@@ -17,7 +17,7 @@
     "design": "bun run design:apps && storybook dev --host 127.0.0.1 --no-open",
     "design-check": "bun run design:apps && vitest run",
     "design-build": "bun run design:apps && storybook build --output-dir storybook-static",
-    "design:apps": "FANOUT_APPS_OUT=node_modules/.cache/fanout-catalog-apps bun run build:apps"
+    "design:apps": "PITOT_APPS_OUT=node_modules/.cache/pitot-catalog-apps bun run build:apps"
   },
   "dependencies": {
     "@ag-ui/client": "1.0.4",

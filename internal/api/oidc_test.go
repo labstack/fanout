@@ -17,18 +17,18 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v5"
-	appauth "github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
-	appstore "github.com/labstack/fanout/internal/store"
+	appauth "github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 func TestOIDCProvisionPolicy(t *testing.T) {
 	h := &OIDCHandler{cfg: config.Config{
-		OIDCAllowedGroups:  "fanout-users, sre",
+		OIDCAllowedGroups:  "pitot-users, sre",
 		OIDCAllowedDomains: "example.com",
 		OIDCDefaultRole:    "viewer",
 		OIDCOperatorGroups: "operators",
-		OIDCAdminGroups:    "fanout-admins",
+		OIDCAdminGroups:    "pitot-admins",
 	}}
 	if !h.provisionAllowed("person@other.test", []string{"SRE"}) {
 		t.Fatal("allowed group was rejected")
@@ -39,7 +39,7 @@ func TestOIDCProvisionPolicy(t *testing.T) {
 	if h.provisionAllowed("person@other.test", []string{"unrelated"}) {
 		t.Fatal("unknown identity was provisioned")
 	}
-	if role := h.provisionRole([]string{"fanout-admins"}); role != "admin" {
+	if role := h.provisionRole([]string{"pitot-admins"}); role != "admin" {
 		t.Fatalf("admin group role = %q", role)
 	}
 	if role := h.provisionRole([]string{"operators"}); role != "operator" {
@@ -164,7 +164,7 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 			digest := sha256.Sum256([]byte(verifier))
 			pkceVerified = verifier != "" && base64.RawURLEncoding.EncodeToString(digest[:]) == expectedChallenge
 			claims := jwt.MapClaims{
-				"iss": issuer, "sub": "subject-1", "aud": "fanout-client",
+				"iss": issuer, "sub": "subject-1", "aud": "pitot-client",
 				"exp": time.Now().Add(time.Minute).Unix(), "iat": time.Now().Add(-time.Second).Unix(),
 				"nonce": issuedNonce, "email": "admin@example.com", "email_verified": true,
 			}
@@ -201,8 +201,8 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 	e := echo.New()
 	e.Use(echo.WrapMiddleware(sessions.Middleware))
 	cfg := config.Config{
-		AuthMode: "oidc", OIDCIssuerURL: issuer, OIDCClientID: "fanout-client", OIDCClientSecret: "client-secret",
-		PublicURL: "https://fanout.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
+		AuthMode: "oidc", OIDCIssuerURL: issuer, OIDCClientID: "pitot-client", OIDCClientSecret: "client-secret",
+		PublicURL: "https://pitot.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
 	}
 	if _, err := RegisterOIDCRoutes(context.Background(), e, cfg, users, identities, sessions, appauth.NewAuditStore(db.DB)); err != nil {
 		t.Fatalf("RegisterOIDCRoutes: %v", err)
@@ -304,7 +304,7 @@ func runRejectedOIDCCallback(t *testing.T, mutate func(jwt.MapClaims), badKey, k
 			}}})
 		case "/token":
 			claims := jwt.MapClaims{
-				"iss": issuer, "sub": "rejected-subject", "aud": "fanout-client",
+				"iss": issuer, "sub": "rejected-subject", "aud": "pitot-client",
 				"exp": time.Now().Add(time.Minute).Unix(), "iat": time.Now().Add(-time.Second).Unix(),
 				"nonce": issuedNonce, "email": "candidate@example.com", "email_verified": true,
 			}
@@ -350,8 +350,8 @@ func runRejectedOIDCCallback(t *testing.T, mutate func(jwt.MapClaims), badKey, k
 	e := echo.New()
 	e.Use(echo.WrapMiddleware(sessions.Middleware))
 	cfg := config.Config{
-		AuthMode: "oidc", OIDCIssuerURL: issuer, OIDCClientID: "fanout-client", OIDCClientSecret: "client-secret",
-		PublicURL: "https://fanout.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
+		AuthMode: "oidc", OIDCIssuerURL: issuer, OIDCClientID: "pitot-client", OIDCClientSecret: "client-secret",
+		PublicURL: "https://pitot.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
 		OIDCAutoProvision: false,
 	}
 	if _, err := RegisterOIDCRoutes(context.Background(), e, cfg, users, appauth.NewIdentityStore(db.DB), sessions, appauth.NewAuditStore(db.DB)); err != nil {
@@ -498,10 +498,10 @@ func TestResolveUserDowngradesRoleWhenIdPAdminGroupRemoved(t *testing.T) {
 	cfg := config.Config{
 		OIDCEmailVerification: "required",
 		OIDCAllowedGroups:     "trusted",
-		OIDCAdminGroups:       "fanout-admins",
+		OIDCAdminGroups:       "pitot-admins",
 		OIDCDefaultRole:       "viewer",
 	}
-	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "fanout-admins"})
+	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "pitot-admins"})
 	// A second admin keeps the last-active-admin invariant from blocking the downgrade.
 	if _, err := users.CreateWithAudit("other-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
@@ -532,10 +532,10 @@ func TestResolveUserDeniesGroupOverageWhenGroupPolicyConfigured(t *testing.T) {
 	cfg := config.Config{
 		OIDCEmailVerification: "required",
 		OIDCAllowedGroups:     "trusted",
-		OIDCAdminGroups:       "fanout-admins",
+		OIDCAdminGroups:       "pitot-admins",
 		OIDCDefaultRole:       "viewer",
 	}
-	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "fanout-admins"})
+	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "pitot-admins"})
 	if _, err := users.CreateWithAudit("other-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
@@ -624,10 +624,10 @@ func TestResolveUserSkipsRoleReconciliationForSuspendedUser(t *testing.T) {
 	cfg := config.Config{
 		OIDCEmailVerification: "required",
 		OIDCAllowedGroups:     "trusted",
-		OIDCAdminGroups:       "fanout-admins",
+		OIDCAdminGroups:       "pitot-admins",
 		OIDCDefaultRole:       "viewer",
 	}
-	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "fanout-admins"})
+	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "pitot-admins"})
 	if _, err := users.CreateWithAudit("other-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
@@ -694,7 +694,7 @@ func TestResolveUserReconcilesRoleOnTheLinkingLogin(t *testing.T) {
 		cfg: config.Config{
 			OIDCEmailVerification: "required",
 			OIDCAllowedDomains:    "example.com",
-			OIDCAdminGroups:       "fanout-admins",
+			OIDCAdminGroups:       "pitot-admins",
 			OIDCDefaultRole:       "viewer",
 		},
 		users: users, identities: identities, audit: appauth.NewAuditStore(db.DB),
@@ -764,7 +764,7 @@ func TestReconciledRoleChangeIsAttributableToItsSource(t *testing.T) {
 		cfg: config.Config{
 			OIDCEmailVerification: "required",
 			OIDCAllowedGroups:     "trusted",
-			OIDCAdminGroups:       "fanout-admins",
+			OIDCAdminGroups:       "pitot-admins",
 			OIDCDefaultRole:       "viewer",
 		},
 		users: users, identities: identities, audit: appauth.NewAuditStore(db.DB),

@@ -15,10 +15,10 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/dashboard"
-	appmcp "github.com/labstack/fanout/internal/mcp"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/dashboard"
+	appmcp "github.com/labstack/pitot/internal/mcp"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -40,7 +40,7 @@ type mcpHTTPFixture struct {
 
 func newMCPHTTPFixture(t *testing.T) *mcpHTTPFixture {
 	t.Helper()
-	f := &mcpHTTPFixture{state: newTestAuthServerWith(t, config.Config{PublicURL: "https://fanout.example.com"}, auth.SMTPConfig{}), started: make(chan struct{}, 1), cancelled: make(chan error, 1), release: make(chan struct{})}
+	f := &mcpHTTPFixture{state: newTestAuthServerWith(t, config.Config{PublicURL: "https://pitot.example.com"}, auth.SMTPConfig{}), started: make(chan struct{}, 1), cancelled: make(chan error, 1), release: make(chan struct{})}
 	store := auth.NewOAuthStore(f.state.db.DB)
 	var err error
 	f.auth, err = NewMCPAuthorization(store, f.state.users, testMCPResource)
@@ -104,7 +104,7 @@ type mcpBearerTransport struct{ token string }
 
 func (t mcpBearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())
-	r.Host = "fanout.example.com"
+	r.Host = "pitot.example.com"
 	r.Header.Set("Authorization", "Bearer "+t.token)
 	return http.DefaultTransport.RoundTrip(r)
 }
@@ -132,7 +132,7 @@ func (f *mcpHTTPFixture) request(t *testing.T, token, method, body, version, rpc
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.Host = "fanout.example.com"
+	r.Host = "pitot.example.com"
 	r.Header.Set("Authorization", "Bearer "+token)
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json, text/event-stream")
@@ -175,7 +175,7 @@ func TestMCPModernSDKInteropWithOAuth(t *testing.T) {
 	if err != nil || result.IsError || result.Content[0].(*mcp.TextContent).Text != "ok" {
 		t.Fatalf("call=%+v err=%v", result, err)
 	}
-	resource, err := session.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: "ui://fanout/panels.html"})
+	resource, err := session.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: "ui://pitot/panels.html"})
 	if err != nil || len(resource.Contents) != 1 || resource.Contents[0].MIMEType != appmcp.AppMIME || resource.Contents[0].Text == "" {
 		t.Fatalf("resource=%+v err=%v", resource, err)
 	}
@@ -200,11 +200,11 @@ func TestMCPTrustedAndAbsentOriginsProceedWithAuthentication(t *testing.T) {
 	}
 	cookie := f.state.login(t, user)
 	for _, path := range []string{"/mcp", "/api/mcp"} {
-		for _, origin := range []string{"", "https://fanout.example.com"} {
+		for _, origin := range []string{"", "https://pitot.example.com"} {
 			headers := map[string]string{
 				"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
 				"MCP-Protocol-Version": appmcp.ProtocolVersion, "Mcp-Method": "tools/call", "Mcp-Name": "conformance_probe",
-				"Authorization": "Bearer " + f.token, "Fanout-Request": "1",
+				"Authorization": "Bearer " + f.token, "Pitot-Request": "1",
 			}
 			if origin != "" {
 				headers["Origin"] = origin
@@ -382,7 +382,7 @@ func TestBrowserMCPRejectsInitializeWithModernHeader(t *testing.T) {
 	cookie := f.state.login(t, user)
 	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":%q,"capabilities":{},"clientInfo":{"name":"browser","version":"test"}}}`, appmcp.ProtocolVersion)
 	rec := serve(t, f.state.e, "POST", "/api/mcp", body, map[string]string{
-		"Content-Type": "application/json", "Accept": "application/json, text/event-stream", "Fanout-Request": "1",
+		"Content-Type": "application/json", "Accept": "application/json, text/event-stream", "Pitot-Request": "1",
 		"MCP-Protocol-Version": appmcp.ProtocolVersion, "Mcp-Method": "initialize",
 	}, cookie)
 	if rec.Code != http.StatusBadRequest || rec.Header().Get("Mcp-Session-Id") != "" {
@@ -487,7 +487,7 @@ func TestMCPDashboardScopeAcrossEras(t *testing.T) {
 			}
 			response := f.request(t, f.token, "POST", body, version, method, headerName, id)
 			challenge := response.Header.Get("WWW-Authenticate")
-			if response.StatusCode != 403 || !strings.Contains(challenge, `error="insufficient_scope"`) || !strings.Contains(challenge, `scope="telemetry:read dashboard:manage"`) || !strings.Contains(challenge, `resource_metadata="https://fanout.example.com/.well-known/oauth-protected-resource/mcp"`) {
+			if response.StatusCode != 403 || !strings.Contains(challenge, `error="insufficient_scope"`) || !strings.Contains(challenge, `scope="telemetry:read dashboard:manage"`) || !strings.Contains(challenge, `resource_metadata="https://pitot.example.com/.well-known/oauth-protected-resource/mcp"`) {
 				t.Fatalf("%s %s: status=%d challenge=%s", version, name, response.StatusCode, challenge)
 			}
 			if version != appmcp.ProtocolVersion {
@@ -600,7 +600,7 @@ func TestMCPUnauthenticatedChallengeNamesReadScope(t *testing.T) {
 	f := newMCPHTTPFixture(t)
 	response := f.request(t, "", "POST", "", "", "", "")
 	challenge := response.Header.Get("WWW-Authenticate")
-	if response.StatusCode != 401 || !strings.Contains(challenge, `scope="telemetry:read"`) || !strings.Contains(challenge, `resource_metadata="https://fanout.example.com/.well-known/oauth-protected-resource/mcp"`) {
+	if response.StatusCode != 401 || !strings.Contains(challenge, `scope="telemetry:read"`) || !strings.Contains(challenge, `resource_metadata="https://pitot.example.com/.well-known/oauth-protected-resource/mcp"`) {
 		t.Fatalf("status=%d challenge=%s", response.StatusCode, challenge)
 	}
 }
@@ -677,7 +677,7 @@ func TestMCPToolRateLimitAndPrincipalIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer serverSession.Close()
-	client := mcp.NewClient(&mcp.Implementation{Name: "fanout-agent", Version: "test"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "pitot-agent", Version: "test"}, nil)
 	internal, err := client.Connect(t.Context(), clientTransport, &mcp.ClientSessionOptions{ProtocolVersion: appmcp.ProtocolVersion})
 	if err != nil {
 		t.Fatal(err)

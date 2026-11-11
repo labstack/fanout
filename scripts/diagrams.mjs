@@ -44,7 +44,7 @@ async function main() {
   try {
     for (const { source, input, type } of sources) {
       const name = source.slice(0, -".json".length);
-      const temporary = await mkdtemp(join(tmpdir(), "fanout-diagram-"));
+      const temporary = await mkdtemp(join(tmpdir(), "pitot-diagram-"));
       try {
         const html = join(temporary, `${name}.html`);
         const result = spawnSync(process.execPath, [cli, "finalize", type, input, html,
@@ -66,7 +66,7 @@ async function main() {
           if (Array.isArray(receipt?.diagnostics) && receipt.diagnostics.some(
             diagnostic => typeof diagnostic?.code === "string" && diagnostic.code.startsWith("repository-evidence/"),
           )) {
-            console.error("Set DIAGRAMS_EVIDENCE_ROOT to a clone of labstack/fanout that contains the pinned revision.");
+            console.error("Set DIAGRAMS_EVIDENCE_ROOT to a clone of labstack/pitot that contains the pinned revision.");
           }
           throw new Error(`Archify finalize failed for ${source}: ${result.error?.message ?? result.signal ?? `exit ${result.status}`}`);
         }

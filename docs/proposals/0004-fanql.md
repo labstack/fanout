@@ -6,7 +6,7 @@ Pull request: #410 (section 0, FanQL); sections 1 to 5 are not yet built
 
 ## Intent
 
-Fanout must be fully usable when no AI provider is configured (`FANOUT_AI_PROVIDER` empty). Today creating a dashboard, adding a panel, exploring data, searching logs, finding traces and managing alerts all go through chat or MCP. A self-hosted user without a key, or a hosted fanout.run customer who has not entered one, gets read-only dashboards plus SQL edits on existing panels. Chat stays the fastest path when a key exists; it must not be the only path.
+Pitot must be fully usable when no AI provider is configured (`PITOT_AI_PROVIDER` empty). Today creating a dashboard, adding a panel, exploring data, searching logs, finding traces and managing alerts all go through chat or MCP. A self-hosted user without a key, or a hosted pitot.dev customer who has not entered one, gets read-only dashboards plus SQL edits on existing panels. Chat stays the fastest path when a key exists; it must not be the only path.
 
 ## Goals
 
@@ -548,7 +548,7 @@ One line per query. Prefix `-` excludes and includes rows missing the field; `!=
 | 11 | metrics counter rate | timeseries | counter increase per second, not points per second |
 | 12 | metrics gauge, resource attribute | table | `last(value)` is kind-aware; `resource.k` is `resource['k']` |
 
-Comparison claims are descriptive only: over the four reference queries whose output contract is equivalent across FanQL, Fanout SQL, SPL, KQL and Grafana, the FanQL strings total 255 characters against 285 (SPL), 324 (Grafana, with two UI settings), 460 (KQL) and 670 (SQL). These are string sums for typing on a stated dataset, not claims about task completion, learning time or error rates.
+Comparison claims are descriptive only: over the four reference queries whose output contract is equivalent across FanQL, Pitot SQL, SPL, KQL and Grafana, the FanQL strings total 255 characters against 285 (SPL), 324 (Grafana, with two UI settings), 460 (KQL) and 670 (SQL). These are string sums for typing on a stated dataset, not claims about task completion, learning time or error rates.
 
 #### 0.16 Scope: preview and later
 
@@ -611,7 +611,7 @@ Rather than separate renderers, the rail gets **Logs** and **Traces** entries th
 
 1. **No empty dashboards.** The spec keeps its 1–40 panel invariant (`internal/panel/validate.go`). "New dashboard" asks for a name, then opens the Explore editor in a drawer; the dashboard is created with that first panel. Removing the last panel stays refused.
 2. **No template gallery yet.** Only `DefaultSpec()` exists and every owner already has it. Add a "Duplicate dashboard" action instead (new name required); templates become a later content task.
-3. **AI keys stay env-only in Fanout.** Self-hosted: Settings explains `FANOUT_AI_PROVIDER` and the key variables, and how to connect an MCP client. Hosted fanout.run: the customer enters a key on the fanout.run account page, and the control plane renders it into the tenant's environment and redeploys (Onebox Cloud design). Fanout gains no secret storage.
+3. **AI keys stay env-only in Pitot.** Self-hosted: Settings explains `PITOT_AI_PROVIDER` and the key variables, and how to connect an MCP client. Hosted pitot.dev: the customer enters a key on the pitot.dev account page, and the control plane renders it into the tenant's environment and redeploys (Onebox Cloud design). Pitot gains no secret storage.
 4. **UI saves follow the MCP rule that panels must return data,** enforced in the UI: Add panel and Create dashboard are enabled only after a run returned rows without error. Editing an existing panel needs only a run without error, since a healthy panel such as errors by service can be empty right now; this keeps the old SQL editor's behaviour now that the panel editor replaces it. The HTTP API keeps its current behaviour.
 5. **Variables.** The Add-panel drawer opened from a dashboard can reference that dashboard's variables (for example `$service`), and the FanQL editor and the builder's where-editor understand `$name` with the All rule of section 0.6. When saving from Explore into a dashboard that has a variable on the same field, the save dialog offers to replace the literal filter with the variable.
 

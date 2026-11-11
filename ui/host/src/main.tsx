@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { MantineProvider } from "@mantine/core";
 import { router } from "./router";
-import { fanoutTheme, fanoutCssVariables } from "../../theme";
+import { pitotTheme, pitotCssVariables } from "../../theme";
 import "@mantine/core/styles.css";
 import "@labstack/ui/styles.css";
 // The typeface is shipped rather than named: one variable file per family
@@ -17,7 +17,7 @@ import "./dashboards/dashboard.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <MantineProvider theme={fanoutTheme} defaultColorScheme="auto" cssVariablesResolver={fanoutCssVariables}>
+    <MantineProvider theme={pitotTheme} defaultColorScheme="auto" cssVariablesResolver={pitotCssVariables}>
       <RouterProvider router={router} />
     </MantineProvider>
   </StrictMode>,

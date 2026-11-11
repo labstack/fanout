@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/settings"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/settings"
 )
 
 func newConfigServer(t *testing.T, cfg config.Config) (*testAuthServer, *settings.Store) {
@@ -40,7 +40,7 @@ func createTokenRequest(t *testing.T, s *testAuthServer, cookie *http.Cookie, na
 	}
 	req := sessionRequest(http.MethodPost, "/api/settings/ingest/tokens", strings.NewReader(string(body)), cookie)
 	req.Header.Set("Content-Type", "application/json")
-	req.Host = "fanout.example.com:7520"
+	req.Host = "pitot.example.com:7520"
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)
 	return rec
@@ -81,7 +81,7 @@ func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
 	admin, _ := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	cookie := s.login(t, admin)
 	req := sessionRequest(http.MethodGet, "/api/settings/ingest", nil, cookie)
-	req.Host = "fanout.example.com:7520"
+	req.Host = "pitot.example.com:7520"
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -91,7 +91,7 @@ func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if resp.TokenRequired || resp.SuggestedEndpoint != "http://fanout.example.com:7520" || resp.HeaderName != "Authorization" {
+	if resp.TokenRequired || resp.SuggestedEndpoint != "http://pitot.example.com:7520" || resp.HeaderName != "Authorization" {
 		t.Fatalf("response = %+v", resp)
 	}
 }
@@ -250,9 +250,9 @@ func TestSuggestedIngestEndpoint(t *testing.T) {
 		host string
 		want string
 	}{
-		{"public origin", config.Config{Addr: ":7520", PublicURL: "https://fanout.example.com/"}, "internal:7520", "https://fanout.example.com"},
+		{"public origin", config.Config{Addr: ":7520", PublicURL: "https://pitot.example.com/"}, "internal:7520", "https://pitot.example.com"},
 		{"request port", config.Config{Addr: ":7520"}, "localhost:8080", "http://localhost:8080"},
-		{"direct TLS", config.Config{TLSCertFile: "cert", TLSKeyFile: "key"}, "fanout.example.com:8443", "https://fanout.example.com:8443"},
+		{"direct TLS", config.Config{TLSCertFile: "cert", TLSKeyFile: "key"}, "pitot.example.com:8443", "https://pitot.example.com:8443"},
 		{"IPv6", config.Config{}, "[2001:db8::1]:7520", "http://[2001:db8::1]:7520"},
 		{"missing host", config.Config{Addr: ":8080"}, "", "http://localhost:8080"},
 		{"loopback bind", config.Config{Addr: "127.0.0.1:8080"}, "", "http://127.0.0.1:8080"},

@@ -65,7 +65,7 @@ function collectorConfig(endpoint: string, header: string, tlsConfigured: boolea
   }
   const insecure = overTLS(endpoint, tlsConfigured) ? "" : "\n    tls:\n      insecure: true";
   return `exporters:
-  otlp/fanout:
+  otlp/pitot:
     endpoint: "${endpoint}"
     headers:
       ${header}: "Bearer \${env:INGEST_TOKEN}"${insecure}
@@ -73,11 +73,11 @@ function collectorConfig(endpoint: string, header: string, tlsConfigured: boolea
 service:
   pipelines:
     traces:
-      exporters: [otlp/fanout]
+      exporters: [otlp/pitot]
     logs:
-      exporters: [otlp/fanout]
+      exporters: [otlp/pitot]
     metrics:
-      exporters: [otlp/fanout]`;
+      exporters: [otlp/pitot]`;
 }
 
 function Field({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -106,7 +106,7 @@ function lastUsedLabel(token: IngestToken) {
 function CreatedToken({ created, config, onDone }: { created: { name: string; value: string }; config: string; onDone: () => void }) {
   return <Paper withBorder radius="md" p="lg">
     <Stack gap="sm">
-      <Notice tone="warning" title="Save this token now">Fanout shows it only here and stores only a digest. Close this page or choose Done and the value is gone; creating another token is the only way back.</Notice>
+      <Notice tone="warning" title="Save this token now">Pitot shows it only here and stores only a digest. Close this page or choose Done and the value is gone; creating another token is the only way back.</Notice>
       <Text size="sm" fw={600}>{created.name}</Text>
       <Field label="Token" value={created.value} />
       <Stack gap={4}>
@@ -163,10 +163,10 @@ function IngestTokens({ hasToken, config }: { hasToken: boolean; config: string 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: tokenName }),
-      }).catch(() => { throw new Error("Fanout could not be reached. A token may still have been created; reload this page before trying again."); });
+      }).catch(() => { throw new Error("Pitot could not be reached. A token may still have been created; reload this page before trying again."); });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({})) as { message?: string };
-        throw new Error(payload.message ?? "Fanout could not create the token. Try again.");
+        throw new Error(payload.message ?? "Pitot could not create the token. Try again.");
       }
       return response.json() as Promise<CreatedIngestToken>;
     },
@@ -181,9 +181,9 @@ function IngestTokens({ hasToken, config }: { hasToken: boolean; config: string 
     onMutate: () => queryClient.cancelQueries({ queryKey: ingestTokensQueryKey, exact: true }),
     mutationFn: async (token: IngestToken) => {
       const response = await authorizedFetch(`/api/settings/ingest/tokens/${encodeURIComponent(token.id)}/revoke`, { method: "POST" })
-        .catch(() => { throw new Error("Fanout could not be reached. Reload this page to see whether the token was revoked."); });
+        .catch(() => { throw new Error("Pitot could not be reached. Reload this page to see whether the token was revoked."); });
       if (response.status === 404) throw new Error("That token was already revoked. Reload this page.");
-      if (!response.ok) throw new Error("Fanout could not revoke the token. Try again.");
+      if (!response.ok) throw new Error("Pitot could not revoke the token. Try again.");
     },
     onSuccess: () => {
       setRevoking(null);
@@ -226,7 +226,7 @@ function IngestTokens({ hasToken, config }: { hasToken: boolean; config: string 
           ? tokens.isLoading
             ? <DataState state="loading" loadingLabel="Loading ingest tokens" skeleton={<LoadingSkeleton shape="agents" rows={3} />} />
             : <Stack gap="sm" align="flex-start">
-                <Notice tone="danger">Fanout could not load the ingest tokens.</Notice>
+                <Notice tone="danger">Pitot could not load the ingest tokens.</Notice>
                 <Button size="compact-sm" variant="light" onClick={() => void tokens.refetch()}>Try again</Button>
               </Stack>
           : active.length === 0
@@ -254,7 +254,7 @@ export function ConnectTelemetry() {
   if (!settings.data) {
     return settings.isLoading
       ? <DataState state="loading" loadingLabel="Loading connection details" skeleton={<LoadingSkeleton shape="settings" />} />
-      : <DataState state="error" error={{ message: "Fanout could not load this workspace's connection details.", onRetry: () => void settings.refetch() }} />;
+      : <DataState state="error" error={{ message: "Pitot could not load this workspace's connection details.", onRetry: () => void settings.refetch() }} />;
   }
 
   const { suggested_endpoint: suggestedEndpoint, header_name: header, tls_configured: tlsConfigured, token_required: hasToken } = settings.data;
@@ -282,9 +282,9 @@ export function ConnectTelemetry() {
               </Tooltip>}
             </CopyButton>
           </Group>
-          <Text c="dimmed" size="xs">{overTLS(endpoint, tlsConfigured) ? "OTLP over gRPC, secured with TLS." : "OTLP over gRPC. Fanout serves this endpoint in plaintext, so an exporter needs tls.insecure unless a proxy in front of it terminates TLS."} Edit this when collectors reach Fanout through another hostname.</Text>
+          <Text c="dimmed" size="xs">{overTLS(endpoint, tlsConfigured) ? "OTLP over gRPC, secured with TLS." : "OTLP over gRPC. Pitot serves this endpoint in plaintext, so an exporter needs tls.insecure unless a proxy in front of it terminates TLS."} Edit this when collectors reach Pitot through another hostname.</Text>
         </Stack>
-        <Field label="Authorization" value={authorization} hint="Send one of your workspace's ingest tokens. Fanout stores only a digest of each, so it cannot show you an existing one." />
+        <Field label="Authorization" value={authorization} hint="Send one of your workspace's ingest tokens. Pitot stores only a digest of each, so it cannot show you an existing one." />
       </Stack>
     </Paper>
 

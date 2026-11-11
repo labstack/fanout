@@ -1,15 +1,15 @@
 ---
 title: Data layout
-description: Every path under a Fanout data directory and what it holds.
-summary: The exact contents of FANOUT_DATA_DIR, and why the directory is one unit.
+description: Every path under a Pitot data directory and what it holds.
+summary: The exact contents of PITOT_DATA_DIR, and why the directory is one unit.
 read_when:
   - You are sizing disk or deciding what to back up.
   - You are inspecting an instance's files and want to know what you are looking at.
 status: preview
 ---
 
-Everything Fanout persists lives under `FANOUT_DATA_DIR` (`./data` by default,
-`/var/lib/fanout/data` in the container).
+Everything Pitot persists lives under `PITOT_DATA_DIR` (`./data` by default,
+`/var/lib/pitot/data` in the container).
 
 | Path | Holds |
 |---|---|
@@ -17,7 +17,7 @@ Everything Fanout persists lives under `FANOUT_DATA_DIR` (`./data` by default,
 | `telemetry/parquet/batches/_schema.batch/` | Empty schema anchors that keep every DuckDB view queryable |
 | `telemetry/parquet/batches/*.retired/` | Replaced or expired batches being deleted; startup removes any left by a crash |
 | `telemetry/parquet/batches/*.retired-*/` | Compaction inputs from releases before deferred deletion; a live marker protects its own set |
-| `telemetry/parquet/batches/*.quarantined-*/` | Unreadable batches explicitly set aside by `fanout repair quarantine`; preserved but not queryable |
+| `telemetry/parquet/batches/*.quarantined-*/` | Unreadable batches explicitly set aside by `pitot repair quarantine`; preserved but not queryable |
 | `telemetry/parquet/staging/` | Unacknowledged writes being prepared for atomic publication |
 | `telemetry/compaction/` | Prepared replacement batches during compaction |
 | `telemetry/COMPACTION.json` | Durable marker for an interrupted compaction swap. Present only while one is unresolved, and blocks startup until it is — see [troubleshoot](/docs/guides/troubleshooting) |
@@ -49,21 +49,21 @@ works](/docs/concepts/storage) covers the reasoning and the write path.
 
 ## `query/tmp/`
 
-DuckDB spills here when a query needs more memory than `FANOUT_DUCKDB_MEMORY`
+DuckDB spills here when a query needs more memory than `PITOT_DUCKDB_MEMORY`
 allows. It is regenerated as needed and holds nothing durable, but it does need
 space: a query against a wide time range can spill substantially, and a full
 disk causes the query to fail.
 
 ## Sizing
 
-`FANOUT_RETENTION_DAYS` controls retention, with expiry applied on
+`PITOT_RETENTION_DAYS` controls retention, with expiry applied on
 the maintenance cycle rather than the moment you change it. Expiry removes whole
 files, so data can stay up to one day past the retention period. File count matters
 as much as byte count for query latency, which is what the compaction pass exists to
 bound. [Tune retention](/docs/guides/retention) covers both.
 
 :::caution[Do not edit these files]
-Fanout owns this directory. Editing control SQLite, DuckDB query state, or
+Pitot owns this directory. Editing control SQLite, DuckDB query state, or
 telemetry batches directly can violate application and storage invariants. Use
 the documented commands and APIs instead.
 :::

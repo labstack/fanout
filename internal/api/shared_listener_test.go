@@ -2,16 +2,16 @@ package api
 
 import (
 	"context"
-	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/pitot/internal/auth"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/ingest"
-	httpserver "github.com/labstack/fanout/internal/server"
-	"github.com/labstack/fanout/internal/settings"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/ingest"
+	httpserver "github.com/labstack/pitot/internal/server"
+	"github.com/labstack/pitot/internal/settings"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	"google.golang.org/grpc"
 )
 

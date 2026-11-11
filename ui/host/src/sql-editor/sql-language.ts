@@ -3,7 +3,7 @@ import { completeFromList } from "@codemirror/autocomplete";
 import type { TelemetrySchema } from "./schema";
 
 // PostgreSQL's quoting, casts and window syntax are the closest base for
-// DuckDB. These additions cover Fanout's panel macros and analytical SQL.
+// DuckDB. These additions cover Pitot's panel macros and analytical SQL.
 export const duckDB = SQLDialect.define({
   ...PostgreSQL.spec,
   keywords: `${PostgreSQL.spec.keywords} qualify exclude replace pivot unpivot summarize asof positional semi anti union by name columns sample using key`,

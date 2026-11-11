@@ -20,10 +20,10 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/echo/v5"
 
-	appauth "github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
-	appstore "github.com/labstack/fanout/internal/store"
+	appauth "github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 var fastOIDCDiscovery = oidcDiscoveryTiming{attempt: 5 * time.Second, initial: 5 * time.Millisecond, max: 20 * time.Millisecond}
@@ -86,8 +86,8 @@ func newOIDCDiscoveryFixture(t *testing.T, issuer string) *oidcDiscoveryFixture 
 	f := &oidcDiscoveryFixture{
 		echo: echo.New(),
 		cfg: config.Config{
-			AuthMode: "oidc", OIDCIssuerURL: issuer, OIDCClientID: "fanout-client", OIDCClientSecret: "client-secret",
-			PublicURL: "https://fanout.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
+			AuthMode: "oidc", OIDCIssuerURL: issuer, OIDCClientID: "pitot-client", OIDCClientSecret: "client-secret",
+			PublicURL: "https://pitot.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
 			DataDir: os.TempDir(),
 		},
 		users:    appauth.NewUserStore(db.DB),

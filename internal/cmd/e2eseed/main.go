@@ -28,7 +28,7 @@ import (
 )
 
 func main() {
-	endpoint := flag.String("endpoint", "", "Disposable Fanout base URL")
+	endpoint := flag.String("endpoint", "", "Disposable Pitot base URL")
 	tokenFile := flag.String("token-file", "", "Temporary ingest credential file")
 	flag.Parse()
 	if err := run(*endpoint, *tokenFile); err != nil {

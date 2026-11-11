@@ -21,8 +21,8 @@ import (
 	"github.com/labstack/echo/v5"
 	"golang.org/x/oauth2"
 
-	appauth "github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
+	appauth "github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
 )
 
 const oidcFlowTTL = 10 * time.Minute

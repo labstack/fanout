@@ -6,14 +6,14 @@ export const editedSQL = "SELECT count(*) + 1 AS total FROM spans WHERE $__windo
 
 /** Own dashboard per test: parallel saves never mutate another spec's fixture. */
 export async function openSqlDashboard(page: Page, request: APIRequestContext, info: TestInfo) {
-  const window = JSON.parse(process.env.FANOUT_E2E_PERFORMANCE_WINDOW ?? "null") as { from: string; to: string } | null;
+  const window = JSON.parse(process.env.PITOT_E2E_PERFORMANCE_WINDOW ?? "null") as { from: string; to: string } | null;
   const spec: DashboardSpec = {
     version: 1, name: `SQL editor ${info.project.name} ${info.testId} ${info.retry}`,
     time: window ? { ...window, refresh: "off" } : { range: "3h", refresh: "off" },
     variables: [{ name: "service", kind: "custom", options: ["checkout", "frontend"], default: "checkout" }],
     panels: [{ id: "sql_count", title: "SQL requests", viz: "stat", unit: "count", sql: initialSQL, width: 6 }, { id: "notes", title: "Notes", viz: "text", content: "Keep this panel unchanged", width: 6 }],
   };
-  const response = await request.post("/api/dashboards", { headers: { "Fanout-Request": "1" }, data: { spec } });
+  const response = await request.post("/api/dashboards", { headers: { "Pitot-Request": "1" }, data: { spec } });
   expect(response.status()).toBe(201);
   const record = await response.json() as { id: string; version: number; spec: DashboardSpec };
   await page.addInitScript(theme => localStorage.setItem("mantine-color-scheme-value", theme), info.project.use.colorScheme ?? "light");
@@ -21,7 +21,7 @@ export async function openSqlDashboard(page: Page, request: APIRequestContext, i
   const card = page.locator('.mantine-Paper-root[data-panel="sql_count"]');
   await expect(card.locator("[data-stat-value]")).toBeVisible();
   return { record, card, cleanup: async () => {
-    const deleted = await request.delete(`/api/dashboards/${record.id}`, { headers: { "Fanout-Request": "1", "Fanout-Confirm-Delete": record.id } }).catch(() => undefined);
+    const deleted = await request.delete(`/api/dashboards/${record.id}`, { headers: { "Pitot-Request": "1", "Pitot-Confirm-Delete": record.id } }).catch(() => undefined);
     // Record cleanup failures without replacing an assertion already unwinding
     // through the caller's finally block, including when the request rejects.
     expect.soft(deleted?.ok(), `Delete SQL dashboard ${record.id}: ${deleted ? `HTTP ${deleted.status()}` : "request failed"}`).toBe(true);

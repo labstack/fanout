@@ -107,15 +107,15 @@ async function assertInitial(page: Page, observed: ReturnType<typeof observe>) {
 }
 
 async function freshContext(browser: Browser) {
-  const baseURL = process.env.FANOUT_E2E_BASE_URL;
-  const storageState = process.env.FANOUT_E2E_STORAGE_STATE;
-  if (!baseURL || !storageState || !process.env.FANOUT_E2E_PERFORMANCE_ID) throw new Error("Global performance setup missing");
+  const baseURL = process.env.PITOT_E2E_BASE_URL;
+  const storageState = process.env.PITOT_E2E_STORAGE_STATE;
+  if (!baseURL || !storageState || !process.env.PITOT_E2E_PERFORMANCE_ID) throw new Error("Global performance setup missing");
   return browser.newContext({ baseURL, storageState, viewport, colorScheme: test.info().project.use.colorScheme });
 }
 
 async function open(page: Page) {
   await page.addInitScript(theme => localStorage.setItem("mantine-color-scheme-value", theme), test.info().project.use.colorScheme!);
-  await page.goto(`/dashboards/${process.env.FANOUT_E2E_PERFORMANCE_ID}`, { waitUntil: "commit" });
+  await page.goto(`/dashboards/${process.env.PITOT_E2E_PERFORMANCE_ID}`, { waitUntil: "commit" });
   const timestamp = await page.waitForFunction(allPanelsPainted, spec.panels, { polling: "raf" });
   const paintedAt = await timestamp.jsonValue() as number;
   await timestamp.dispose();
@@ -160,15 +160,15 @@ test.describe.serial("twelve panels over twenty-four hours", () => {
     const render_p95_ms = p95(samples.map(sample => sample.render_ms));
     const measurement = { fixture: "performance.json", fixture_version: spec.version, seed: 13, spans: 8640, logs: 8640,
       fixture_sha256: createHash("sha256").update(JSON.stringify(spec)).digest("hex"),
-      server: "global-setup disposable Fanout binary; warmed seeded query engine",
+      server: "global-setup disposable Pitot binary; warmed seeded query engine",
       candidate_sha: process.env.GITHUB_SHA ?? null, ci: Boolean(process.env.CI),
-      dashboard_id: process.env.FANOUT_E2E_PERFORMANCE_ID, window: JSON.parse(process.env.FANOUT_E2E_PERFORMANCE_WINDOW ?? "null"),
+      dashboard_id: process.env.PITOT_E2E_PERFORMANCE_ID, window: JSON.parse(process.env.PITOT_E2E_PERFORMANCE_WINDOW ?? "null"),
       theme: test.info().project.use.colorScheme, viewport, browser: test.info().project.use.channel,
       method: "navigation time origin to in-page RAF all-twelve visible nonblank paint; fonts and two ready frames",
       samples, render_p95_ms, local_target_ms: 1500, meets_local_target: render_p95_ms <= 1500, ci_ceiling_ms: CI_RENDER_CEILING_MS };
     await attach("performance.json", measurement);
     // Compact line for three-run calibration; full raw evidence is attached.
-    console.log(`FANOUT_PERFORMANCE ${JSON.stringify({ theme: measurement.theme, samples: samples.length, render_p95_ms,
+    console.log(`PITOT_PERFORMANCE ${JSON.stringify({ theme: measurement.theme, samples: samples.length, render_p95_ms,
       local_target_ms: 1500, ci_ceiling_ms: CI_RENDER_CEILING_MS })}`);
     if (!process.env.CI || CI_RENDER_CEILING_MS === null) return;
     expect(Number.isFinite(CI_RENDER_CEILING_MS) && CI_RENDER_CEILING_MS > 0, "Valid calibrated CI ceiling").toBe(true);

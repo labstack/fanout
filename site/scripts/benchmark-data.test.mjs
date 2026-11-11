@@ -13,8 +13,8 @@ function fixture() {
   });
   const sustained = trial("mixed", 1, 100, 4);
   sustained.settings = { ...sustained.settings, name: "mixed-sustained", kind: "sustained" };
-  const report = { schema_version: "fanout-bench/v1", build: {
-    fanout_version: "v2026.10.8-alpha", fanout_artifact: `https://example.test/artifact#sha256=${"a".repeat(64)}`,
+  const report = { schema_version: "pitot-bench/v1", build: {
+    pitot_version: "v2026.10.8-alpha", pitot_artifact: `https://example.test/artifact#sha256=${"a".repeat(64)}`,
     harness_commit: "b".repeat(40), telemetrygen_version: "v0.157.0",
   }, host: { description: "Hetzner ccx33", generator_description: "Hetzner ccx33",
     cpu_model: "AMD EPYC", logical_cpus: 8, memory_bytes: 32e9 }, settings: { repeat: 2, batch_size: 1000 },
@@ -45,7 +45,7 @@ test("trailing five-second rates start at the first full window and use the late
   assert.equal(result.sweeps.mixed[0].median, 100);
   assert.equal(result.sweeps.mixed[0].min, 80);
   assert.equal(result.sweeps.mixed[0].max, 120);
-  assert.equal(result.sweeps.mixed[0].fanout_cpu_median, 4);
+  assert.equal(result.sweeps.mixed[0].pitot_cpu_median, 4);
   assert.equal(result.sweeps.mixed[0].generator_cpu_median, 2);
   assert.equal(result.all_gates_passed, true);
 });

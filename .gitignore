@@ -62,6 +62,6 @@ cover.out
 
 # Ad-hoc output from `go build` without -o (named after the package).
 /bench
-/fanout
-/fanout-docgen
+/pitot
+/pitot-docgen
 .wrangler/

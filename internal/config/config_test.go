@@ -15,12 +15,12 @@ import (
 
 func validEnvironment() []string {
 	return []string{
-		"FANOUT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef",
+		"PITOT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef",
 		"ANTHROPIC_API_KEY=sk-test",
-		"FANOUT_SMTP_HOST=smtp.example.com",
-		"FANOUT_SMTP_USERNAME=user",
-		"FANOUT_SMTP_PASSWORD=pass",
-		"FANOUT_SMTP_FROM=Fanout <noreply@example.com>",
+		"PITOT_SMTP_HOST=smtp.example.com",
+		"PITOT_SMTP_USERNAME=user",
+		"PITOT_SMTP_PASSWORD=pass",
+		"PITOT_SMTP_FROM=Pitot <noreply@example.com>",
 	}
 }
 
@@ -39,9 +39,9 @@ func TestLoadReturnsDefaults(t *testing.T) {
 
 func TestLoadTypedEnvironmentValues(t *testing.T) {
 	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
-		"FANOUT_ADDR=:9000", "FANOUT_MCP_ENABLED=false", "FANOUT_METRICS_PUBLIC=true",
-		"FANOUT_SESSION_IDLE_TTL=10h", "FANOUT_SELF_SIGNUP=true", "FANOUT_RETENTION_DAYS=0",
-		"FANOUT_ROLLUP_INTERVAL=5m", "FANOUT_MAINTENANCE_INTERVAL=2h", "FANOUT_ALERTS_EVALUATION_INTERVAL=45s",
+		"PITOT_ADDR=:9000", "PITOT_MCP_ENABLED=false", "PITOT_METRICS_PUBLIC=true",
+		"PITOT_SESSION_IDLE_TTL=10h", "PITOT_SELF_SIGNUP=true", "PITOT_RETENTION_DAYS=0",
+		"PITOT_ROLLUP_INTERVAL=5m", "PITOT_MAINTENANCE_INTERVAL=2h", "PITOT_ALERTS_EVALUATION_INTERVAL=45s",
 	)})
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func TestLoadTypedEnvironmentValues(t *testing.T) {
 }
 
 func TestLoadTreatsEmptyEnvironmentValuesAsAbsent(t *testing.T) {
-	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_ADDR=", "FANOUT_MCP_ENABLED=", "FANOUT_RETENTION_DAYS=", "FANOUT_AUTH_CODE_SECRET_FILE=")})
+	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), "PITOT_ADDR=", "PITOT_MCP_ENABLED=", "PITOT_RETENTION_DAYS=", "PITOT_AUTH_CODE_SECRET_FILE=")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestConfigurationSchemaUsesUnitBearingDurations(t *testing.T) {
 }
 
 func TestLoadRejectsUnknownAndMalformedEnvironment(t *testing.T) {
-	for _, entry := range []string{"FANOUT_HTPP_ADDR=:1111", "FANOUT_SERVICE_PORTAL=7520", "FANOUT_ADDR", "FANOUT_ADDR_FILE=/unused", "FANOUT_UNKNOWN_SETTING=synthetic-private-value"} {
+	for _, entry := range []string{"PITOT_HTPP_ADDR=:1111", "PITOT_SERVICE_PORTAL=7520", "PITOT_ADDR", "PITOT_ADDR_FILE=/unused", "PITOT_UNKNOWN_SETTING=synthetic-private-value"} {
 		_, err := Load(LoadOptions{Environ: append(validEnvironment(), entry)})
 		name, _, _ := strings.Cut(entry, "=")
 		if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), "synthetic-private-value") {
@@ -87,7 +87,7 @@ func TestLoadRejectsUnknownAndMalformedEnvironment(t *testing.T) {
 }
 
 func TestLoadRejectsDuplicateEnvironmentNames(t *testing.T) {
-	for _, entry := range []string{"FANOUT_ADDR=", "ANTHROPIC_API_KEY=test", "FANOUT_METRICS_TOKEN_FILE="} {
+	for _, entry := range []string{"PITOT_ADDR=", "ANTHROPIC_API_KEY=test", "PITOT_METRICS_TOKEN_FILE="} {
 		name, _, _ := strings.Cut(entry, "=")
 		_, err := Load(LoadOptions{Environ: []string{entry, entry}})
 		if err == nil || !strings.Contains(err.Error(), "duplicate") || !strings.Contains(err.Error(), name) {
@@ -97,7 +97,7 @@ func TestLoadRejectsDuplicateEnvironmentNames(t *testing.T) {
 }
 
 func TestLoadIgnoresPlatformAndUnrelatedEnvironment(t *testing.T) {
-	env := append(validEnvironment(), "FANOUT_SERVICE_HOST=10.0.0.1", "FANOUT_SERVICE_PORT=7520", "FANOUT_SERVICE_PORT_HTTP=7520", "FANOUT_PORT=tcp://10.0.0.1:7520", "FANOUT_PORT_7520_TCP_ADDR=10.0.0.1", "OTHER_APP_SETTING=value", "OPENAI_MODEL=other-model")
+	env := append(validEnvironment(), "PITOT_SERVICE_HOST=10.0.0.1", "PITOT_SERVICE_PORT=7520", "PITOT_SERVICE_PORT_HTTP=7520", "PITOT_PORT=tcp://10.0.0.1:7520", "PITOT_PORT_7520_TCP_ADDR=10.0.0.1", "OTHER_APP_SETTING=value", "OPENAI_MODEL=other-model")
 	if _, err := Load(LoadOptions{Environ: env}); err != nil {
 		t.Fatal(err)
 	}
@@ -105,9 +105,9 @@ func TestLoadIgnoresPlatformAndUnrelatedEnvironment(t *testing.T) {
 
 func TestLoadRejectsInvalidTypedValuesWithoutLeakingValues(t *testing.T) {
 	for _, entry := range []string{
-		"FANOUT_ROLLUP_INTERVAL=private-value", "FANOUT_SMTP_PORT=25.9", "FANOUT_MCP_ENABLED=off", "FANOUT_RETENTION_DAYS=999999999999999999999999999",
-		"FANOUT_INGEST_BATCH_SIZE=0", "FANOUT_DUCKDB_MAX_CONNECTIONS=-3", "FANOUT_DUCKDB_THREADS=-4",
-		"FANOUT_ROLLUP_INTERVAL=999ms", "FANOUT_MAINTENANCE_INTERVAL=-5s", "FANOUT_ALERTS_EVALUATION_INTERVAL=0s",
+		"PITOT_ROLLUP_INTERVAL=private-value", "PITOT_SMTP_PORT=25.9", "PITOT_MCP_ENABLED=off", "PITOT_RETENTION_DAYS=999999999999999999999999999",
+		"PITOT_INGEST_BATCH_SIZE=0", "PITOT_DUCKDB_MAX_CONNECTIONS=-3", "PITOT_DUCKDB_THREADS=-4",
+		"PITOT_ROLLUP_INTERVAL=999ms", "PITOT_MAINTENANCE_INTERVAL=-5s", "PITOT_ALERTS_EVALUATION_INTERVAL=0s",
 	} {
 		env := validEnvironment()
 		name, _, _ := strings.Cut(entry, "=")
@@ -126,7 +126,7 @@ func TestLoadRejectsInvalidTypedValuesWithoutLeakingValues(t *testing.T) {
 
 func TestLoadIgnoresDotenvInputs(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("FANOUT_ADDR=:9999\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("PITOT_ADDR=:9999\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
@@ -140,7 +140,7 @@ func TestLoadIgnoresDotenvInputs(t *testing.T) {
 }
 
 func TestLoadSecretFiles(t *testing.T) {
-	names := []string{"FANOUT_AUTH_CODE_SECRET", "FANOUT_OIDC_CLIENT_SECRET", "FANOUT_SMTP_PASSWORD", "FANOUT_METRICS_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"}
+	names := []string{"PITOT_AUTH_CODE_SECRET", "PITOT_OIDC_CLIENT_SECRET", "PITOT_SMTP_PASSWORD", "PITOT_METRICS_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"}
 	specs, err := configFieldSpecs()
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func TestLoadSecretFiles(t *testing.T) {
 				}
 				env = append(env, name+"=", name+"_FILE="+path)
 				if provider := providerForEnvironment(name); provider != "" {
-					env = append(env, "FANOUT_AI_PROVIDER="+provider)
+					env = append(env, "PITOT_AI_PROVIDER="+provider)
 				}
 				cfg, err := Load(LoadOptions{Environ: env})
 				if err != nil {
@@ -187,7 +187,7 @@ func TestLoadSecretFiles(t *testing.T) {
 }
 
 func TestLoadRejectsConflictingOrInvalidSecretFiles(t *testing.T) {
-	const name = "FANOUT_METRICS_TOKEN"
+	const name = "PITOT_METRICS_TOKEN"
 	const secret = "synthetic-private-value"
 	path := filepath.Join(t.TempDir(), "secret")
 	for _, content := range []string{"", "\n", "\r\n", secret} {
@@ -213,7 +213,7 @@ func TestLoadRejectsConflictingOrInvalidSecretFiles(t *testing.T) {
 
 func TestMCPResourceURL(t *testing.T) {
 	for _, tc := range []struct{ publicURL, want string }{
-		{"", "https://localhost:7520/mcp"}, {"https://fanout.example.com", "https://fanout.example.com/mcp"}, {"  https://fanout.example.com/  ", "https://fanout.example.com/mcp"},
+		{"", "https://localhost:7520/mcp"}, {"https://pitot.example.com", "https://pitot.example.com/mcp"}, {"  https://pitot.example.com/  ", "https://pitot.example.com/mcp"},
 	} {
 		if got := (Config{PublicURL: tc.publicURL}).MCPResourceURL(); got != tc.want {
 			t.Fatalf("MCPResourceURL = %s, want %s", got, tc.want)
@@ -238,7 +238,7 @@ func TestValidate(t *testing.T) {
 		SMTPPort:                587,
 		SMTPUser:                "user",
 		SMTPPass:                "pass",
-		SMTPFrom:                "Fanout <noreply@example.com>",
+		SMTPFrom:                "Pitot <noreply@example.com>",
 		AuthMode:                "local",
 		AuthCodeSecret:          "0123456789abcdef0123456789abcdef",
 		SessionIdleTTL:          12 * time.Hour,
@@ -283,7 +283,7 @@ func TestValidate(t *testing.T) {
 			c.OIDCIssuerURL = "https://id.example.com"
 			c.OIDCClientID = "client"
 			c.OIDCClientSecret = "secret"
-			c.PublicURL = "https://fanout.example.com"
+			c.PublicURL = "https://pitot.example.com"
 		}},
 		{"session idle zero", func(c *Config) { c.SessionIdleTTL = 0 }},
 		{"session idle too short", func(c *Config) { c.SessionIdleTTL = time.Minute }},
@@ -345,12 +345,12 @@ func TestValidate(t *testing.T) {
 		c.AuthCodeSecret = ""
 		c.SMTPHost, c.SMTPUser, c.SMTPPass, c.SMTPFrom = "", "", "", ""
 		c.OIDCIssuerURL = "https://id.example.com"
-		c.OIDCClientID = "fanout"
+		c.OIDCClientID = "pitot"
 		c.OIDCClientSecret = "secret"
 		c.OIDCEmailClaim = "email"
 		c.OIDCEmailVerification = "required"
 		c.OIDCDefaultRole = "viewer"
-		c.PublicURL = "https://fanout.example.com"
+		c.PublicURL = "https://pitot.example.com"
 		if err := c.Validate(); err != nil {
 			t.Fatalf("OIDC config should pass: %v", err)
 		}
@@ -360,19 +360,19 @@ func TestValidate(t *testing.T) {
 		c := valid
 		c.AuthMode = "oidc"
 		c.OIDCIssuerURL = "https://id.example.com"
-		c.OIDCClientID = "fanout"
+		c.OIDCClientID = "pitot"
 		c.OIDCClientSecret = "secret"
 		c.OIDCEmailClaim = "email"
 		c.OIDCEmailVerification = "required"
 		c.OIDCDefaultRole = "viewer"
-		c.PublicURL = "https://fanout.example.com"
+		c.PublicURL = "https://pitot.example.com"
 		for _, secret := range []string{"", "short"} {
 			c.AuthCodeSecret = secret
 			if err := c.Validate(); err != nil {
 				t.Fatalf("secret %q should not fail OIDC startup: %v", secret, err)
 			}
 			err := c.ValidateLoginLinkSecret()
-			if err == nil || !strings.Contains(err.Error(), "FANOUT_AUTH_CODE_SECRET") {
+			if err == nil || !strings.Contains(err.Error(), "PITOT_AUTH_CODE_SECRET") {
 				t.Fatalf("secret %q: ValidateLoginLinkSecret = %v, want an error naming the variable", secret, err)
 			}
 		}
@@ -387,14 +387,14 @@ func TestValidate(t *testing.T) {
 		c.AuthMode = "oidc"
 		c.AuthCodeSecret = ""
 		c.OIDCIssuerURL = "https://id.example.com"
-		c.OIDCClientID = "fanout"
+		c.OIDCClientID = "pitot"
 		c.OIDCClientSecret = "secret"
 		c.OIDCEmailClaim = "email"
 		c.OIDCEmailVerification = "required"
 		c.OIDCAutoProvision = true
 		c.OIDCAllowedDomains = "*"
 		c.OIDCDefaultRole = "viewer"
-		c.PublicURL = "https://fanout.example.com"
+		c.PublicURL = "https://pitot.example.com"
 		if err := c.Validate(); err != nil {
 			t.Fatalf("verified email wildcard should pass: %v", err)
 		}
@@ -408,23 +408,23 @@ func TestValidate(t *testing.T) {
 	t.Run("MCP derives its HTTPS resource from the public origin", func(t *testing.T) {
 		c := valid
 		c.MCPEnabled = true
-		c.PublicURL = "https://fanout.example.com"
+		c.PublicURL = "https://pitot.example.com"
 		if err := c.Validate(); err != nil {
 			t.Fatalf("HTTPS public origin should pass: %v", err)
 		}
-		if got := c.MCPResourceURL(); got != "https://fanout.example.com/mcp" {
+		if got := c.MCPResourceURL(); got != "https://pitot.example.com/mcp" {
 			t.Fatalf("MCPResourceURL() = %q", got)
 		}
 
 		for _, invalid := range []string{
-			"http://fanout.example.com",
-			"https://user@fanout.example.com",
-			"https://fanout.example.com/base",
-			"https://fanout.example.com?tenant=one",
+			"http://pitot.example.com",
+			"https://user@pitot.example.com",
+			"https://pitot.example.com/base",
+			"https://pitot.example.com?tenant=one",
 		} {
 			c.PublicURL = invalid
 			if err := c.Validate(); err == nil {
-				t.Errorf("FANOUT_PUBLIC_URL %q should be rejected with MCP enabled", invalid)
+				t.Errorf("PITOT_PUBLIC_URL %q should be rejected with MCP enabled", invalid)
 			}
 		}
 	})
@@ -440,7 +440,7 @@ func TestValidate(t *testing.T) {
 			t.Error("TLSEnabled = false, want true")
 		}
 		if c.ClientCertificatesRequired() {
-			t.Error("ClientCertificatesRequired = true without FANOUT_TLS_CLIENT_CA_FILE")
+			t.Error("ClientCertificatesRequired = true without PITOT_TLS_CLIENT_CA_FILE")
 		}
 	})
 
@@ -469,16 +469,16 @@ func TestFieldSpecsRejectInvalidSchemas(t *testing.T) {
 		{
 			name: "secret file name collision",
 			typ: reflect.TypeOf(struct {
-				A string `env:"FANOUT_SECRET" secret:"true"`
-				B string `env:"FANOUT_SECRET_FILE"`
+				A string `env:"PITOT_SECRET" secret:"true"`
+				B string `env:"PITOT_SECRET_FILE"`
 			}{}),
 			want: "share environment variable",
 		},
 		{
 			name: "duplicate environment",
 			typ: reflect.TypeOf(struct {
-				A string `env:"FANOUT_SAME"`
-				B string `env:"FANOUT_SAME"`
+				A string `env:"PITOT_SAME"`
+				B string `env:"PITOT_SAME"`
 			}{}),
 			want: "share environment variable",
 		},
@@ -514,8 +514,8 @@ func TestSecureCookies(t *testing.T) {
 		want bool
 	}{
 		{name: "plain HTTP", cfg: Config{}, want: false},
-		{name: "external HTTPS", cfg: Config{PublicURL: "https://fanout.example.com"}, want: true},
-		{name: "external HTTP", cfg: Config{PublicURL: "http://fanout.example.com"}, want: false},
+		{name: "external HTTPS", cfg: Config{PublicURL: "https://pitot.example.com"}, want: true},
+		{name: "external HTTP", cfg: Config{PublicURL: "http://pitot.example.com"}, want: false},
 		{name: "local TLS", cfg: Config{TLSCertFile: "server.pem", TLSKeyFile: "server-key.pem"}, want: true},
 	}
 	for _, tc := range cases {
@@ -528,7 +528,7 @@ func TestSecureCookies(t *testing.T) {
 }
 
 func TestLogStartupWarnsWhenNoPathCanAddUsers(t *testing.T) {
-	const group = "fanout-admins-group-name"
+	const group = "pitot-admins-group-name"
 	const token = "scim-token-value-0123456789abcdef0123"
 	for _, tc := range []struct {
 		name string
@@ -552,7 +552,7 @@ func TestLogStartupWarnsWhenNoPathCanAddUsers(t *testing.T) {
 			tc.cfg.LogStartup()
 
 			output := logs.String()
-			if got := strings.Contains(output, "FANOUT_OIDC_AUTO_PROVISION"); got != tc.want {
+			if got := strings.Contains(output, "PITOT_OIDC_AUTO_PROVISION"); got != tc.want {
 				t.Fatalf("warning present = %v, want %v; logs: %s", got, tc.want, output)
 			}
 			if strings.Contains(output, group) || strings.Contains(output, token) {
@@ -565,12 +565,12 @@ func TestLogStartupWarnsWhenNoPathCanAddUsers(t *testing.T) {
 // The combination is a warning so that existing installations still start.
 func TestLoadAcceptsRoleMappingWithoutProvisioning(t *testing.T) {
 	env := append(validEnvironment(),
-		"FANOUT_AUTH_MODE=oidc",
-		"FANOUT_OIDC_ISSUER_URL=https://issuer.example.com",
-		"FANOUT_OIDC_CLIENT_ID=client",
-		"FANOUT_OIDC_CLIENT_SECRET=secret",
-		"FANOUT_PUBLIC_URL=https://fanout.example.com",
-		"FANOUT_OIDC_ADMIN_GROUPS=fanout-admins",
+		"PITOT_AUTH_MODE=oidc",
+		"PITOT_OIDC_ISSUER_URL=https://issuer.example.com",
+		"PITOT_OIDC_CLIENT_ID=client",
+		"PITOT_OIDC_CLIENT_SECRET=secret",
+		"PITOT_PUBLIC_URL=https://pitot.example.com",
+		"PITOT_OIDC_ADMIN_GROUPS=pitot-admins",
 	)
 	cfg, err := Load(LoadOptions{Environ: env})
 	if err != nil {
@@ -604,7 +604,7 @@ func TestLogStartupWarnsAboutUnusableBreakGlassSecret(t *testing.T) {
 			Config{AuthMode: tc.mode, AuthCodeSecret: tc.secret}.LogStartup()
 
 			output := logs.String()
-			got := strings.Contains(output, "FANOUT_AUTH_CODE_SECRET") && strings.Contains(output, "break-glass")
+			got := strings.Contains(output, "PITOT_AUTH_CODE_SECRET") && strings.Contains(output, "break-glass")
 			if got != tc.want {
 				t.Fatalf("warning present = %v, want %v; logs: %s", got, tc.want, output)
 			}
@@ -616,7 +616,7 @@ func TestLogStartupWarnsAboutUnusableBreakGlassSecret(t *testing.T) {
 }
 
 func TestLoadIngestToken(t *testing.T) {
-	const name = "FANOUT_INGEST_TOKEN"
+	const name = "PITOT_INGEST_TOKEN"
 	valid := "foi_" + strings.Repeat("A", 43)
 
 	t.Run("absent by default", func(t *testing.T) {
@@ -693,7 +693,7 @@ func TestLoadIngestToken(t *testing.T) {
 }
 
 func TestAlertEmailSettings(t *testing.T) {
-	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_ALERTS_EMAIL_DEFAULT_TO=Oncall@example.com, b@example.com")})
+	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), "PITOT_ALERTS_EMAIL_DEFAULT_TO=Oncall@example.com, b@example.com")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,9 +710,9 @@ func TestAlertEmailSettings(t *testing.T) {
 		env  []string
 		want string
 	}{
-		{"invalid address", append(validEnvironment(), "FANOUT_ALERTS_EMAIL_DEFAULT_TO=nope"), "FANOUT_ALERTS_EMAIL_DEFAULT_TO"},
-		{"negative limit", append(validEnvironment(), "FANOUT_ALERTS_EMAIL_HOURLY_LIMIT=-1"), "FANOUT_ALERTS_EMAIL_HOURLY_LIMIT"},
-		{"no SMTP", []string{"FANOUT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef", "ANTHROPIC_API_KEY=sk-test", "FANOUT_ALERTS_EMAIL_DEFAULT_TO=a@example.com"}, "requires SMTP"},
+		{"invalid address", append(validEnvironment(), "PITOT_ALERTS_EMAIL_DEFAULT_TO=nope"), "PITOT_ALERTS_EMAIL_DEFAULT_TO"},
+		{"negative limit", append(validEnvironment(), "PITOT_ALERTS_EMAIL_HOURLY_LIMIT=-1"), "PITOT_ALERTS_EMAIL_HOURLY_LIMIT"},
+		{"no SMTP", []string{"PITOT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef", "ANTHROPIC_API_KEY=sk-test", "PITOT_ALERTS_EMAIL_DEFAULT_TO=a@example.com"}, "requires SMTP"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := Load(LoadOptions{Environ: tc.env}); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -723,14 +723,14 @@ func TestAlertEmailSettings(t *testing.T) {
 }
 
 func TestLoadSCIMToken(t *testing.T) {
-	const name = "FANOUT_SCIM_TOKEN"
+	const name = "PITOT_SCIM_TOKEN"
 	valid := strings.Repeat("s", 32)
 	oidc := append(validEnvironment(),
-		"FANOUT_AUTH_MODE=oidc",
-		"FANOUT_OIDC_ISSUER_URL=https://issuer.example.com",
-		"FANOUT_OIDC_CLIENT_ID=client",
-		"FANOUT_OIDC_CLIENT_SECRET=secret",
-		"FANOUT_PUBLIC_URL=https://fanout.example.com",
+		"PITOT_AUTH_MODE=oidc",
+		"PITOT_OIDC_ISSUER_URL=https://issuer.example.com",
+		"PITOT_OIDC_CLIENT_ID=client",
+		"PITOT_OIDC_CLIENT_SECRET=secret",
+		"PITOT_PUBLIC_URL=https://pitot.example.com",
 	)
 
 	t.Run("absent by default", func(t *testing.T) {
@@ -769,7 +769,7 @@ func TestLoadSCIMToken(t *testing.T) {
 
 	t.Run("requires OIDC mode", func(t *testing.T) {
 		_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"="+valid)})
-		if err == nil || !strings.Contains(err.Error(), "FANOUT_AUTH_MODE=oidc") {
+		if err == nil || !strings.Contains(err.Error(), "PITOT_AUTH_MODE=oidc") {
 			t.Fatalf("Load = %v", err)
 		}
 	})
@@ -781,5 +781,98 @@ func TestLoadSCIMToken(t *testing.T) {
 				t.Fatalf("Load = %v", err)
 			}
 		})
+	}
+}
+
+func TestLegacyEnvironmentCompatibility(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		env      []string
+		want     string
+		warnings int
+	}{
+		{"fallback", []string{"FANOUT_ADDR=:9001", "FANOUT_RETENTION_DAYS=9"}, ":9001", 1},
+		{"primary wins", []string{"FANOUT_ADDR=:9001", "PITOT_ADDR=:9002"}, ":9002", 0},
+		{"empty primary blocks fallback", []string{"FANOUT_ADDR=:9001", "PITOT_ADDR="}, DefaultAddr, 0},
+		{"empty legacy uses default", []string{"FANOUT_ADDR="}, DefaultAddr, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), test.env...)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Addr != test.want {
+				t.Fatalf("address = %q, want %q", cfg.Addr, test.want)
+			}
+			if strings.Count(logs.String(), "deprecated environment variables") != test.warnings {
+				t.Fatalf("unexpected warning count: %s", logs.String())
+			}
+			if test.warnings > 0 && !strings.Contains(logs.String(), "FANOUT_ADDR, FANOUT_RETENTION_DAYS") {
+				t.Fatal("warning must list every used name")
+			}
+			if strings.Contains(logs.String(), ":9001") {
+				t.Fatal("warning leaked a value")
+			}
+		})
+	}
+}
+
+func TestLegacySecretFileCompatibility(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth-secret")
+	value := strings.Repeat("z", 32)
+	if err := os.WriteFile(path, []byte(value+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	cfg, err := Load(LoadOptions{Environ: []string{"FANOUT_AUTH_CODE_SECRET_FILE=" + path}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthCodeSecret != value {
+		t.Fatal("legacy secret file was not loaded")
+	}
+	if !strings.Contains(logs.String(), "FANOUT_AUTH_CODE_SECRET_FILE") || strings.Contains(logs.String(), path) || strings.Contains(logs.String(), value) {
+		t.Fatal("warning must contain only the variable name")
+	}
+	_, err = Load(LoadOptions{Environ: []string{"FANOUT_AUTH_CODE_SECRET_FILE=" + path, "PITOT_AUTH_CODE_SECRET=" + value}})
+	if err == nil {
+		t.Fatal("mixed value and file forms must still conflict")
+	}
+}
+
+func TestLegacySchemaAliasesCoverEveryOwnedSetting(t *testing.T) {
+	specs, err := configFieldSpecs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range specs {
+		if !strings.HasPrefix(spec.env, "PITOT_") {
+			continue
+		}
+		names := []string{spec.env}
+		if spec.secret {
+			names = append(names, spec.env+"_FILE")
+		}
+		for _, name := range names {
+			legacy := strings.Replace(name, "PITOT_", "FANOUT_", 1)
+			got := ResolveEnvironment([]string{legacy + "="})
+			if !reflect.DeepEqual(got, []string{name + "="}) {
+				t.Fatalf("alias missing for %s", name)
+			}
+		}
+	}
+}
+
+func TestControlDatabaseKeepsLegacyFilename(t *testing.T) {
+	cfg := Config{DataDir: t.TempDir()}
+	if filepath.Base(cfg.ControlSQLitePath()) != "fanout.sqlite" {
+		t.Fatal("rename must preserve the existing control database")
 	}
 }

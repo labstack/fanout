@@ -3,7 +3,7 @@ package annotations
 import (
 	"context"
 	"errors"
-	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/pitot/internal/queryrows"
 	"testing"
 	"time"
 )

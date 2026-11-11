@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/fanout/internal/db/generated"
-	appid "github.com/labstack/fanout/internal/id"
-	"github.com/labstack/fanout/internal/secret"
+	"github.com/labstack/pitot/internal/db/generated"
+	appid "github.com/labstack/pitot/internal/id"
+	"github.com/labstack/pitot/internal/secret"
 )
 
 const (
@@ -24,16 +24,16 @@ const (
 	maxAttempts      = 3
 	purposeEmailCode = "email_code"
 	purposeLoginLink = "login_link"
-	// purposeBreakGlassLink marks a link minted by `fanout login-link
+	// purposeBreakGlassLink marks a link minted by `pitot login-link
 	// --break-glass`. It is the only credential the OIDC-mode link route accepts,
 	// and ordinary link verification never matches it.
 	purposeBreakGlassLink = "break_glass_login_link"
 )
 
 // ErrCodeSecretRequired reports a sign-in credential operation attempted
-// without FANOUT_AUTH_CODE_SECRET. An empty HMAC key would make stored hashes
+// without PITOT_AUTH_CODE_SECRET. An empty HMAC key would make stored hashes
 // computable from the credential alone.
-var ErrCodeSecretRequired = errors.New("auth: FANOUT_AUTH_CODE_SECRET is required for sign-in credentials")
+var ErrCodeSecretRequired = errors.New("auth: PITOT_AUTH_CODE_SECRET is required for sign-in credentials")
 
 // GenerateCode returns a random 6-digit code.
 func GenerateCode() (string, error) {

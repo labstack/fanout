@@ -1,6 +1,6 @@
 /* Outbound destinations, in one place because they are the only URLs the
  * product hard-codes. The pages live in this repository under site/, published
- * to https://fanout.run by Cloudflare Pages. Documentation lives under /docs;
+ * to https://pitot.dev by Cloudflare Pages. Documentation lives under /docs;
  * the marketing landing page stays at the site root.
  *
  * There is deliberately no link to the source repository or the vendor site in
@@ -9,10 +9,10 @@
  * using the product. They belong on the marketing site. */
 export const docs = {
   /** Where an operator starts reading, not the marketing page above it. */
-  home: "https://fanout.run/docs",
+  home: "https://pitot.dev/docs",
   /** Sending telemetry: endpoint, authentication, collector and SDK setup. */
-  ingest: "https://fanout.run/docs/get-started/send-telemetry",
-  connect: "https://fanout.run/docs/guides/mcp",
+  ingest: "https://pitot.dev/docs/get-started/send-telemetry",
+  connect: "https://pitot.dev/docs/guides/mcp",
   /** Who owns accounts and roles when an identity provider is configured. */
-  authentication: "https://fanout.run/docs/concepts/authentication",
+  authentication: "https://pitot.dev/docs/concepts/authentication",
 } as const;

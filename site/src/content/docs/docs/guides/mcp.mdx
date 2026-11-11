@@ -1,6 +1,6 @@
 ---
 title: Connect an agent over MCP
-description: Point an MCP client at a Fanout instance, and configure the instance so tokens bind correctly.
+description: Point an MCP client at a Pitot instance, and configure the instance so tokens bind correctly.
 summary: The OAuth flow an MCP client uses, the two scopes, and the one setting that has to be right before any of it works.
 read_when:
   - You are connecting Claude Code or another MCP client to an instance.
@@ -8,7 +8,7 @@ read_when:
 status: preview
 ---
 
-Fanout serves MCP at `/mcp` for external agents. Its [tools](/docs/reference/mcp)
+Pitot serves MCP at `/mcp` for external agents. Its [tools](/docs/reference/mcp)
 query telemetry and manage the authenticated user's dashboards. The browser
 client and built-in agent use the same typed query results.
 
@@ -16,30 +16,30 @@ client and built-in agent use the same typed query results.
 panel previews, targeted edits and saved-version restore through chat or MCP.
 
 You need a running instance with an HTTPS address first:
-[install Fanout](/docs/get-started/install), finish [first boot](/docs/get-started/first-boot), then
+[install Pitot](/docs/get-started/install), finish [first boot](/docs/get-started/first-boot), then
 [serve it over TLS](/docs/guides/tls), directly or behind a proxy. That HTTPS
 origin is the URL your MCP client connects to.
 
 ## Set the public URL first
 
 ```sh
-export FANOUT_PUBLIC_URL=https://fanout.example.com
+export PITOT_PUBLIC_URL=https://pitot.example.com
 ```
 
-Fanout derives the MCP resource URI from this canonical, externally
+Pitot derives the MCP resource URI from this canonical, externally
 reachable origin that clients are issued tokens against. It must be HTTPS, and
 it must stay **stable across restarts**: tokens carry the derived resource as
 their audience, so changing it invalidates every one already issued.
 
-`FANOUT_PUBLIC_URL` is the only public-origin setting; see
-[server settings](/docs/reference/configuration/server#fanout_public_url).
+`PITOT_PUBLIC_URL` is the only public-origin setting; see
+[server settings](/docs/reference/configuration/server#pitot_public_url).
 
-Set `FANOUT_MCP_ENABLED=false` to turn the endpoint off entirely; it defaults
+Set `PITOT_MCP_ENABLED=false` to turn the endpoint off entirely; it defaults
 to `true`.
 
 ## What the client does
 
-Fanout implements the standard remote-MCP OAuth flow, so a compliant client
+Pitot implements the standard remote-MCP OAuth flow, so a compliant client
 needs only the URL:
 
 1. Discovers the endpoints from
@@ -54,10 +54,10 @@ account without delegating your first-party account role.
 
 ### Claude Code
 
-Add Fanout as a remote MCP server:
+Add Pitot as a remote MCP server:
 
 ```sh
-claude mcp add --transport http fanout https://fanout.example.com/mcp
+claude mcp add --transport http pitot https://pitot.example.com/mcp
 ```
 
 Use your instance's public URL, then authorize the connection in your browser.
@@ -67,14 +67,14 @@ Use your instance's public URL, then authorize the connection in your browser.
 Codex is a verified client. Add the Streamable HTTP server, then sign in:
 
 ```sh
-codex mcp add fanout --url https://fanout.example.com/mcp
-codex mcp login fanout
+codex mcp add pitot --url https://pitot.example.com/mcp
+codex mcp login pitot
 ```
 
 Complete authorization in your browser. Use `codex mcp list` to check the
 registration. See the [official Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
-Other MCP clients are untested. They need Streamable HTTP and Fanout's OAuth
+Other MCP clients are untested. They need Streamable HTTP and Pitot's OAuth
 flow; use their own setup instructions.
 
 ### Disconnect an agent
@@ -90,7 +90,7 @@ with `POST /api/users/{id}/access/revoke`.
 
 ## Protocol
 
-Fanout serves modern and legacy MCP clients concurrently over Streamable HTTP
+Pitot serves modern and legacy MCP clients concurrently over Streamable HTTP
 on `/mcp`. Modern `2026-07-28` requests carry per-request metadata and
 `MCP-Protocol-Version: 2026-07-28`, with no session or `initialize` handshake.
 Legacy clients use `initialize` to negotiate `2025-11-25` or `2025-06-18` and
@@ -101,7 +101,7 @@ Versions `2025-03-26` and `2024-11-05` are not served. The browser's `/api/mcp`
 route uses only the modern protocol.
 
 On `/mcp` and `/api/mcp`, an `Origin` header must exactly match the RFC 6454
-serialization of `FANOUT_PUBLIC_URL`. Malformed or untrusted origins receive
+serialization of `PITOT_PUBLIC_URL`. Malformed or untrusted origins receive
 `403` before authentication. Without a public URL, only same-authority loopback
 origins are accepted. Requests without `Origin` pass this check.
 
@@ -128,12 +128,12 @@ HTTP API; there is no MCP delete tool.
 ## What the agent can and cannot do
 
 It acts on your behalf, but its delegated authority comes from the scopes you
-approve rather than your account role. Fanout also checks that your current
+approve rather than your account role. Pitot also checks that your current
 account capabilities still permit those scopes. Two consequences:
 
 - Dashboard tools are owner-scoped. An agent can manage your dashboards and
   cannot touch anyone else's.
-- `agent:run` is not involved here. That capability gates Fanout's *own* built-in
+- `agent:run` is not involved here. That capability gates Pitot's *own* built-in
   agent; an external MCP client is a separate path.
 
 There is no tool that writes telemetry, edits configuration, manages users or
@@ -141,8 +141,8 @@ changes alert rules.
 
 ## Behind a proxy
 
-If TLS terminates at a reverse proxy, `FANOUT_PUBLIC_URL` must be the externally
-visible HTTPS origin rather than the internal address Fanout is listening on. [Terminate TLS](/docs/guides/tls) covers the rest of that setup.
+If TLS terminates at a reverse proxy, `PITOT_PUBLIC_URL` must be the externally
+visible HTTPS origin rather than the internal address Pitot is listening on. [Terminate TLS](/docs/guides/tls) covers the rest of that setup.
 
 ## Checking it
 
@@ -150,8 +150,8 @@ visible HTTPS origin rather than the internal address Fanout is listening on. [T
 tells you whether discovery is answering and what resource it advertises:
 
 ```sh
-curl -s https://fanout.example.com/.well-known/oauth-protected-resource
+curl -s https://pitot.example.com/.well-known/oauth-protected-resource
 ```
 
 If the resource in that document is not the URL your client is calling, fix
-`FANOUT_PUBLIC_URL` before debugging anything else.
+`PITOT_PUBLIC_URL` before debugging anything else.

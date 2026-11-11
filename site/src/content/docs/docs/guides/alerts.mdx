@@ -9,7 +9,7 @@ status: preview
 ---
 
 The alert engine runs inside the binary and is on by default. It evaluates
-persisted rules every `FANOUT_ALERTS_EVALUATION_INTERVAL` (30s) against service
+persisted rules every `PITOT_ALERTS_EVALUATION_INTERVAL` (30s) against service
 rollups, and delivers by webhook, by email, or both.
 
 ## Create and manage a rule
@@ -37,7 +37,7 @@ Its values can differ from the rule's rollups. Explore shows error rate as a
 percent: `0.05` in a rule is `5` there.
 
 Read current states and delivery results under **History**.
-`FANOUT_ALERTS_HISTORY_DAYS` sets resolved-history retention in days (default 7).
+`PITOT_ALERTS_HISTORY_DAYS` sets resolved-history retention in days (default 7).
 
 Viewers can read rules and history, without a rule's delivery settings: webhook
 URL, headers and template, email recipients, and email failure detail are returned
@@ -112,12 +112,12 @@ namespaces are evaluated together.
 
 ## Email delivery
 
-Email uses the [SMTP settings](/docs/reference/configuration/smtp) Fanout already
+Email uses the [SMTP settings](/docs/reference/configuration/smtp) Pitot already
 uses for sign-in codes. Without SMTP the option is disabled in the rule form, and
 the API rejects `email_recipients` with the code `email_unavailable`.
 `GET /api/alerting/email` reports whether email is available.
 
-Set `FANOUT_ALERTS_EMAIL_DEFAULT_TO` to a comma-separated list of addresses to
+Set `PITOT_ALERTS_EMAIL_DEFAULT_TO` to a comma-separated list of addresses to
 give every rule a destination. It applies only to a rule with no webhook and no
 recipients of its own, including rules created before email existed. A rule with
 a webhook and no recipients stays webhook-only.
@@ -131,24 +131,24 @@ name. They are stored in lowercase and a rule can have up to 10.
 ### Retries and restarts
 
 A notification is queued in the control database in the same transaction as the
-alert's state change, with one row per recipient. Fanout makes up to five
+alert's state change, with one row per recipient. Pitot makes up to five
 attempts, waiting 1, 5, 15, then 30 minutes between them. Connection failures,
 including a connection lost partway through a session, and 4xx SMTP replies are
 retried. A 5xx reply or an unusable address fails at once. Once the server has
 accepted a message, a failure while closing the session does not count against
-it. Before a retry, Fanout drops a recipient no longer on the rule, and deleting
+it. Before a retry, Pitot drops a recipient no longer on the rule, and deleting
 a rule cancels its queued mail.
 
-Delivery is at least once. A restart resumes queued mail. If Fanout stops or the
+Delivery is at least once. A restart resumes queued mail. If Pitot stops or the
 worker panics while a message is being handed to the mail server, or a connection
-drops before the server confirms it, Fanout cannot tell whether the server took
+drops before the server confirms it, Pitot cannot tell whether the server took
 it, so it sends the message again. The repeat has the same `Message-ID`. The same
 happens after a restart if the database could not record an accepted message
-before Fanout stopped.
+before Pitot stopped.
 
 ### The hourly limit
 
-`FANOUT_ALERTS_EMAIL_HOURLY_LIMIT` (default 30) caps the alert emails sent to one
+`PITOT_ALERTS_EMAIL_HOURLY_LIMIT` (default 30) caps the alert emails sent to one
 address in any rolling hour, across all rules. The count is stored apart from
 rules, so neither a restart nor deleting a rule resets it. The last email within the limit says that the limit has been
 reached. Notifications over the limit are suppressed: they are dropped, never
@@ -217,7 +217,7 @@ This uses the built-in `printf` function; no JSON template helper is registered.
 `text/template` does not automatically escape values for JSON. With this example,
 use names without control characters other than tabs and line breaks.
 
-Fanout sends a POST with `Content-Type: application/json` unless custom headers
+Pitot sends a POST with `Content-Type: application/json` unless custom headers
 override it. Each attempt has a 10-second total timeout and a 5-second response
 header timeout. Delivery makes up to three attempts, waiting 2 then 4 seconds
 before retries; 4xx responses are not retried.

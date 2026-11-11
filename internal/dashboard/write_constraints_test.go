@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 	"strings"
 	"sync"
 	"testing"

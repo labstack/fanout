@@ -24,7 +24,7 @@ type Provenance struct {
 // Result is the canonical query envelope shared by REST and MCP.
 // Summary is deliberately compact model context; Data remains authoritative.
 // UI selection is deliberately absent: MCP Apps link tools to UI resources
-// through standard tool metadata rather than a Fanout-specific view registry.
+// through standard tool metadata rather than a Pitot-specific view registry.
 type Result[T any] struct {
 	Summary    string     `json:"summary"`
 	Data       T          `json:"data"`

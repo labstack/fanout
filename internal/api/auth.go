@@ -11,9 +11,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/settings"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/settings"
 )
 
 type setupCredential interface {
@@ -108,11 +108,11 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	case auth.SetupStatusExpired:
 		slog.Warn("auth: setup rejected", "reason", "expired")
 		jitter()
-		return echo.NewHTTPError(http.StatusGone, "setup token expired; restart Fanout to generate a new one")
+		return echo.NewHTTPError(http.StatusGone, "setup token expired; restart Pitot to generate a new one")
 	case auth.SetupStatusUnset:
 		slog.Warn("auth: setup rejected", "reason", "unset")
 		jitter()
-		return echo.NewHTTPError(http.StatusGone, "setup window is closed; restart Fanout to reopen it")
+		return echo.NewHTTPError(http.StatusGone, "setup window is closed; restart Pitot to reopen it")
 	default:
 		slog.Warn("auth: setup rejected", "reason", "wrong")
 		jitter()

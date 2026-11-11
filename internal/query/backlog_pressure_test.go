@@ -20,22 +20,22 @@ import (
 	"time"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
-	"github.com/labstack/fanout/internal/annotations"
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/telemetry"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/pitot/internal/annotations"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/engine"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/telemetry"
+	telemetrystore "github.com/labstack/pitot/internal/telemetry/store"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 // The deadline includes seeding. All disposable files stay in the private workspace.
 func pressureBatches(t *testing.T) int {
 	t.Helper()
-	if raw := os.Getenv("FANOUT_BACKLOG_BATCHES"); raw != "" {
+	if raw := os.Getenv("PITOT_BACKLOG_BATCHES"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 {
-			t.Fatalf("invalid FANOUT_BACKLOG_BATCHES %q", raw)
+			t.Fatalf("invalid PITOT_BACKLOG_BATCHES %q", raw)
 		}
 		return n
 	}
@@ -43,10 +43,10 @@ func pressureBatches(t *testing.T) int {
 }
 func pressureDuration(t *testing.T) time.Duration {
 	t.Helper()
-	if raw := os.Getenv("FANOUT_BACKLOG_DURATION"); raw != "" {
+	if raw := os.Getenv("PITOT_BACKLOG_DURATION"); raw != "" {
 		d, err := time.ParseDuration(raw)
 		if err != nil || d <= 0 {
-			t.Fatalf("invalid FANOUT_BACKLOG_DURATION %q", raw)
+			t.Fatalf("invalid PITOT_BACKLOG_DURATION %q", raw)
 		}
 		return d
 	}
@@ -200,7 +200,7 @@ func pressureDiagnostics(ctx context.Context, t *testing.T, d *engine.Duck, repo
 		return
 	}
 	for _, f := range families {
-		if f.GetName() == "fanout_write_gate_wait_seconds" || f.GetName() == "fanout_write_gate_hold_seconds" {
+		if f.GetName() == "pitot_write_gate_wait_seconds" || f.GetName() == "pitot_write_gate_hold_seconds" {
 			for _, m := range f.Metric {
 				t.Logf("gate phase=%s metric=%s labels=%v count=%d seconds_sum=%.6f", phase, f.GetName(), m.Label, m.GetHistogram().GetSampleCount(), m.GetHistogram().GetSampleSum())
 			}

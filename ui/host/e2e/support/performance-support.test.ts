@@ -35,11 +35,11 @@ it("waits for exact seeded totals and twelve unique populated terminal results",
 
 describe("in-page paint completion", () => {
   const panels = [{ id: "stat", viz: "stat" }, { id: "table", viz: "table" }, { id: "chart", viz: "timeseries" }];
-  const state = window as typeof window & { __fanoutPerformanceReadyFrames?: number };
+  const state = window as typeof window & { __pitotPerformanceReadyFrames?: number };
   const fontsDescriptor = Object.getOwnPropertyDescriptor(document, "fonts");
   let alpha: number, clipped: boolean, transparent: boolean;
   beforeEach(() => {
-    delete state.__fanoutPerformanceReadyFrames;
+    delete state.__pitotPerformanceReadyFrames;
     alpha = 255; clipped = transparent = false;
     Object.defineProperty(document, "fonts", { configurable: true, value: { status: "loaded" } });
     vi.stubGlobal("innerWidth", 1440); vi.stubGlobal("innerHeight", 3000);
@@ -57,7 +57,7 @@ describe("in-page paint completion", () => {
     vi.restoreAllMocks(); vi.unstubAllGlobals();
     if (fontsDescriptor) Object.defineProperty(document, "fonts", fontsDescriptor);
     else Reflect.deleteProperty(document, "fonts");
-    delete state.__fanoutPerformanceReadyFrames;
+    delete state.__pitotPerformanceReadyFrames;
     document.body.innerHTML = "";
   });
   it("returns an in-page timestamp only after two consecutive ready frames", () => {
@@ -65,7 +65,7 @@ describe("in-page paint completion", () => {
     expect(allPanelsPainted(panels)).toEqual(expect.any(Number));
     document.querySelector("[data-stat-value]")!.remove();
     expect(allPanelsPainted(panels)).toBe(false);
-    expect(state.__fanoutPerformanceReadyFrames).toBe(0);
+    expect(state.__pitotPerformanceReadyFrames).toBe(0);
   });
   it("rejects blank canvases, clipping, transparent ancestors, loaders and errors", () => {
     alpha = 0; expect(allPanelsPainted(panels)).toBe(false);

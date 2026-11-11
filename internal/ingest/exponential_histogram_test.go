@@ -7,8 +7,8 @@ import (
 	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 
-	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/config"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // Exponential histograms are stored as sent: scale, zero bucket, offsets and

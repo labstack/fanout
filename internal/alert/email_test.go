@@ -16,7 +16,7 @@ import (
 
 	mail "github.com/wneessen/go-mail"
 
-	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/pitot/internal/auth"
 )
 
 // outbox records sends and fails them on demand.

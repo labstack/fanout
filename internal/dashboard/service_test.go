@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/labstack/fanout/internal/query"
-	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/query"
+	appstore "github.com/labstack/pitot/internal/store"
 )
 
 // structural validates without DuckDB; filter checks are covered in

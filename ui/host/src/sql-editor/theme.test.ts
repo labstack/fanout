@@ -1,14 +1,14 @@
 import { defaultCssVariablesResolver, DEFAULT_THEME, mergeMantineTheme } from "@mantine/core";
 import axe from "axe-core";
 import { expect, it } from "vitest";
-import { fanoutCssVariables, fanoutTheme } from "../../../theme";
+import { pitotCssVariables, pitotTheme } from "../../../theme";
 import { EditorView } from "@codemirror/view";
 import { sqlHighlight, sqlTheme } from "./theme";
 
 it.each(["light", "dark"] as const)("keeps all SQL token colors at 4.5:1 on normal and active lines in %s", scheme => {
-  const theme = mergeMantineTheme(DEFAULT_THEME, fanoutTheme);
+  const theme = mergeMantineTheme(DEFAULT_THEME, pitotTheme);
   const mantine = defaultCssVariablesResolver(theme);
-  const variables: Record<string, string> = { ...mantine.variables, ...mantine[scheme], ...fanoutCssVariables(theme)[scheme] };
+  const variables: Record<string, string> = { ...mantine.variables, ...mantine[scheme], ...pitotCssVariables(theme)[scheme] };
   const resolve = (value: string): string => value.startsWith("var(") ? resolve(variables[value.slice(4, -1)]) : value;
   type Color = { alpha: number; parseString(value: string): void };
   const color = (axe.commons as unknown as { color: {

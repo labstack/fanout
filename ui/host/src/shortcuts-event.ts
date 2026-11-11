@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 
 /** Window event the header help menu sends to open the current page's keyboard shortcuts. */
-export const shortcutsEvent = "fanout:shortcuts";
+export const shortcutsEvent = "pitot:shortcuts";
 
 let handlers = 0;
 const subscribers = new Set<() => void>();

@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/pitot/internal/config"
 )
 
 // lines joins SSE lines with \n.

@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 func TestChangesReportOnlyPanelsOutsideTheLongestCommonOrder(t *testing.T) {

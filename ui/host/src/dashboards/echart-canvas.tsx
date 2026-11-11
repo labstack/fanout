@@ -155,7 +155,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     if (!ref.current) return;
     const instance = init(ref.current, undefined, { renderer: "canvas" });
     chart.current = instance;
-    const removeAudit = import.meta.env.DEV && new URLSearchParams(location.search).get("__fanout_audit") === "1"
+    const removeAudit = import.meta.env.DEV && new URLSearchParams(location.search).get("__pitot_audit") === "1"
       ? registerAudit(ref.current, () => auditInput.current ? chartAuditSnapshot(instance, auditInput.current.compiled, auditInput.current.size) : undefined)
       : undefined;
     instance.on("click", (params) => {

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/fanout/internal/secret"
+	"github.com/labstack/pitot/internal/secret"
 )
 
 const SetupTTL = time.Hour

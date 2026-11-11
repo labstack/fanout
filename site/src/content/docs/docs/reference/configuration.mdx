@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: How Fanout reads and validates configuration settings.
+description: How Pitot reads and validates configuration settings.
 summary: Setting precedence, naming, secret files, and validation.
 read_when:
   - You are configuring an instance and want the rules before the list.
@@ -8,11 +8,11 @@ read_when:
 status: preview
 ---
 
-Fanout resolves built-in defaults followed by nonempty process environment
+Pitot resolves built-in defaults followed by nonempty process environment
 values. Every setting is listed under [Settings](/docs/reference/configuration/server),
 grouped by the part of the product it belongs to.
 
-`internal/config` defines the configuration schema. Use `cmd/fanout-docgen`
+`internal/config` defines the configuration schema. Use `cmd/pitot-docgen`
 to write the settings pages and `.env.example`, and `just docs-generate-check`
 to check them against that schema.
 
@@ -20,8 +20,8 @@ to check them against that schema.
 
 All settings are read once at startup and require a restart. An empty
 environment value means unset and preserves the built-in default. Native
-installs listen on `127.0.0.1:7520`; the image supplies `FANOUT_ADDR=:7520`
-and `FANOUT_DATA_DIR=/var/lib/fanout/data`.
+installs listen on `127.0.0.1:7520`; the image supplies `PITOT_ADDR=:7520`
+and `PITOT_DATA_DIR=/var/lib/pitot/data`.
 
 The binary reads only process environment. `.env.example` comments out every
 empty entry and documents types, defaults, and secret file forms in comments.
@@ -35,21 +35,21 @@ environment values or managed secret mounts.
 
 ## Naming
 
-Fanout settings use the `FANOUT_` prefix. Vendor credentials and endpoints keep
+Pitot settings use the `PITOT_` prefix. Vendor credentials and endpoints keep
 `ANTHROPIC_API_KEY`,
 `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL`.
 
-`FANOUT_AI_PROVIDER` defaults to empty, disabling chat. Exactly `anthropic`
+`PITOT_AI_PROVIDER` defaults to empty, disabling chat. Exactly `anthropic`
 or `openai` enables chat and requires that provider's key. Only the selected
 provider's endpoint is validated and used. Inherited credentials never select
-a provider. `FANOUT_AI_MODEL` selects the model; unrelated vendor/tool settings
+a provider. `PITOT_AI_MODEL` selects the model; unrelated vendor/tool settings
 such as `ANTHROPIC_MODEL` and `OPENAI_MODEL` are ignored. See
 [AI settings](/docs/reference/configuration/ai) for base URL meanings.
 Both provider base URLs accept a trailing slash.
 
 ## Unknown names
 
-Unknown `FANOUT_` names fail startup. Platform-injected service-discovery names
+Unknown `PITOT_` names fail startup. Platform-injected service-discovery names
 are tolerated, and unrelated names in shared vendor namespaces are ignored.
 Errors name the relevant environment variable. Boolean, integer, and Go
 duration values must parse as their declared types.
@@ -60,24 +60,24 @@ Every secret accepts either its value or its file path:
 
 | Value variable | File path variable |
 |---|---|
-| `FANOUT_AUTH_CODE_SECRET` | `FANOUT_AUTH_CODE_SECRET_FILE` |
-| `FANOUT_OIDC_CLIENT_SECRET` | `FANOUT_OIDC_CLIENT_SECRET_FILE` |
-| `FANOUT_SMTP_PASSWORD` | `FANOUT_SMTP_PASSWORD_FILE` |
-| `FANOUT_INGEST_TOKEN` | `FANOUT_INGEST_TOKEN_FILE` |
-| `FANOUT_METRICS_TOKEN` | `FANOUT_METRICS_TOKEN_FILE` |
+| `PITOT_AUTH_CODE_SECRET` | `PITOT_AUTH_CODE_SECRET_FILE` |
+| `PITOT_OIDC_CLIENT_SECRET` | `PITOT_OIDC_CLIENT_SECRET_FILE` |
+| `PITOT_SMTP_PASSWORD` | `PITOT_SMTP_PASSWORD_FILE` |
+| `PITOT_INGEST_TOKEN` | `PITOT_INGEST_TOKEN_FILE` |
+| `PITOT_METRICS_TOKEN` | `PITOT_METRICS_TOKEN_FILE` |
 | `ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY_FILE` |
 | `OPENAI_API_KEY` | `OPENAI_API_KEY_FILE` |
 
 Setting both forms nonempty fails startup. File contents lose exactly one
 trailing LF or CRLF; an empty result fails. Errors name variables and paths,
-never contents. The deployment controls file access; Fanout performs no
+never contents. The deployment controls file access; Pitot performs no
 file-mode check. Secrets are redacted from startup logs.
 Unselected AI providers' value and file forms are ignored.
 
 Use deployment environment injection, Docker/Compose secrets, Kubernetes
 Secrets, or a private selected SOPS profile. This public repository ships no
 operator profiles or recipients. See
-[runtime secret delivery](https://github.com/labstack/fanout/blob/main/docs/operations.md#runtime-secret-delivery)
+[runtime secret delivery](https://github.com/labstack/pitot/blob/main/docs/operations.md#runtime-secret-delivery)
 for examples.
 
 ## Validation
@@ -90,35 +90,35 @@ TLS environment settings without validating unrelated settings or secrets.
 ## DuckDB sizing
 
 Most deployments should not set DuckDB variables. Give the process or
-container the CPU and memory limits it may use; at startup Fanout reserves
+container the CPU and memory limits it may use; at startup Pitot reserves
 headroom for Go and sizes the DuckDB connection pool from available CPUs. The
-resolved values and whether Fanout chose them are available in the
+resolved values and whether Pitot chose them are available in the
 `runtime_sizing` block returned by `/readyz`.
 
 Override these values when measurements justify different resource limits:
 
 | Variable | Automatic behavior | When to override |
 |---|---|---|
-| `FANOUT_DUCKDB_MEMORY` | 60% of the container or host memory available to Fanout | A measured co-tenant workload needs a different Go/DuckDB split |
-| `FANOUT_DUCKDB_MAX_CONNECTIONS` | Available Go CPUs, bounded to 2–16 connections | Query concurrency has been benchmarked for this machine |
-| `FANOUT_DUCKDB_THREADS` | DuckDB chooses its own query worker count | Query-heavy work must leave specific cores free for ingest |
+| `PITOT_DUCKDB_MEMORY` | 60% of the container or host memory available to Pitot | A measured co-tenant workload needs a different Go/DuckDB split |
+| `PITOT_DUCKDB_MAX_CONNECTIONS` | Available Go CPUs, bounded to 2–16 connections | Query concurrency has been benchmarked for this machine |
+| `PITOT_DUCKDB_THREADS` | DuckDB chooses its own query worker count | Query-heavy work must leave specific cores free for ingest |
 
 An explicit value always wins. Startup logs and `/readyz` report the detected
 host and cgroup limits, the selected source, and whether detection was
-incomplete. If Fanout cannot conclusively inspect a container limit, it warns;
-set `FANOUT_DUCKDB_MEMORY` for a guaranteed bound. See
+incomplete. If Pitot cannot conclusively inspect a container limit, it warns;
+set `PITOT_DUCKDB_MEMORY` for a guaranteed bound. See
 [storage settings](/docs/reference/configuration/storage) for types and defaults.
 
 ## Image tags
 
 | Image tag | Points at |
 |---|---|
-| `labstack/fanout:latest` | the newest release |
-| `labstack/fanout:2026.11.0-alpha` | that exact release |
-| `ghcr.io/labstack/fanout:main` | the tip of `main` |
-| `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
+| `labstack/pitot:latest` | the newest release |
+| `labstack/pitot:2026.11.0-alpha` | that exact release |
+| `ghcr.io/labstack/pitot:main` | the tip of `main` |
+| `ghcr.io/labstack/pitot:sha-<commit>` | one specific commit |
 
-Release and `latest` tags also exist under `ghcr.io/labstack/fanout`.
+Release and `latest` tags also exist under `ghcr.io/labstack/pitot`.
 Development tags are GHCR-only.
 
 ## Ports and paths

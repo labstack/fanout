@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 type QueryEngine interface {

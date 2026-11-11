@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/fanout/internal/annotations"
-	"github.com/labstack/fanout/internal/engine/writegate"
-	"github.com/labstack/fanout/internal/metrics"
-	"github.com/labstack/fanout/internal/telemetry"
-	"github.com/labstack/fanout/internal/telemetry/semconv"
+	"github.com/labstack/pitot/internal/annotations"
+	"github.com/labstack/pitot/internal/engine/writegate"
+	"github.com/labstack/pitot/internal/metrics"
+	"github.com/labstack/pitot/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry/semconv"
 )
 
 const createVersionRollupTable = `CREATE TABLE IF NOT EXISTS version_rollup (

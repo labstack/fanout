@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/alert"
-	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/pitot/internal/alert"
+	"github.com/labstack/pitot/internal/auth"
 )
 
 type alertEmailServer struct {

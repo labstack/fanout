@@ -16,14 +16,14 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
-	appmcp "github.com/labstack/fanout/internal/mcp"
-	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/pitot/internal/auth"
+	"github.com/labstack/pitot/internal/config"
+	appmcp "github.com/labstack/pitot/internal/mcp"
+	appstore "github.com/labstack/pitot/internal/store"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
-const testMCPResource = "https://fanout.example.com/mcp"
+const testMCPResource = "https://pitot.example.com/mcp"
 
 const testReadMCPCall = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_overview","arguments":{}}}`
 
@@ -40,7 +40,7 @@ func newOAuthTestServerWithConfig(t *testing.T, cfg config.Config) (*echo.Echo, 
 func newOAuthTestServerAndDB(t *testing.T, cfg config.Config) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions, *appstore.SQLite) {
 	t.Helper()
 	if cfg.PublicURL == "" {
-		cfg.PublicURL = "https://fanout.example.com"
+		cfg.PublicURL = "https://pitot.example.com"
 	}
 	sqlite, err := appstore.NewSQLite(":memory:")
 	if err != nil {
@@ -126,7 +126,7 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	metadata := serve(t, e, http.MethodGet, "/.well-known/oauth-protected-resource/mcp", "", nil)
 	if metadata.Code != http.StatusOK ||
 		!strings.Contains(metadata.Body.String(), testMCPResource) ||
-		!strings.Contains(metadata.Body.String(), `"resource_name":"Fanout Observability"`) ||
+		!strings.Contains(metadata.Body.String(), `"resource_name":"Pitot Observability"`) ||
 		!strings.Contains(metadata.Body.String(), `"scopes_supported":["telemetry:read","dashboard:manage"]`) {
 		t.Fatalf("protected resource metadata = %d %s", metadata.Code, metadata.Body.String())
 	}
@@ -168,7 +168,7 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	}
 	cookie := oauthCookieForUser(t, e, user)
 	consent := serve(t, e, http.MethodGet, "/api/auth/oauth/authorize?"+params.Encode(), "", nil, cookie)
-	if consent.Code != http.StatusOK || !strings.Contains(consent.Body.String(), "Allow Codex to access Fanout?") {
+	if consent.Code != http.StatusOK || !strings.Contains(consent.Body.String(), "Allow Codex to access Pitot?") {
 		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
 	}
 	csp := consent.Header().Get("Content-Security-Policy")
@@ -185,7 +185,7 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	}
 	for _, brandElement := range []string{
 		`class="brand-mark"`,
-		`class="brand-name">Fanout`,
+		`class="brand-name">Pitot`,
 	} {
 		if !strings.Contains(consent.Body.String(), brandElement) {
 			t.Fatalf("consent page is missing branded element %q: %s", brandElement, consent.Body.String())
@@ -201,7 +201,7 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse callback: %v", err)
 	}
-	if callback.Query().Get("state") != "state-123" || callback.Query().Get("code") == "" || callback.Query().Get("iss") != "https://fanout.example.com" {
+	if callback.Query().Get("state") != "state-123" || callback.Query().Get("code") == "" || callback.Query().Get("iss") != "https://pitot.example.com" {
 		t.Fatalf("callback = %s", callback)
 	}
 
@@ -252,7 +252,7 @@ func TestMCPOAuthRejectsUnknownBearerAndAdvertisesDiscovery(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("MCP accepted unknown bearer: %d", rec.Code)
 	}
-	want := `resource_metadata="https://fanout.example.com/.well-known/oauth-protected-resource/mcp"`
+	want := `resource_metadata="https://pitot.example.com/.well-known/oauth-protected-resource/mcp"`
 	if !strings.Contains(rec.Header().Get("WWW-Authenticate"), want) {
 		t.Fatalf("WWW-Authenticate = %q, want %s", rec.Header().Get("WWW-Authenticate"), want)
 	}
@@ -265,7 +265,7 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 		t.Fatalf("Create user: %v", err)
 	}
 
-	anonymous := serve(t, e, http.MethodPost, "/api/mcp", "", map[string]string{"Fanout-Request": "1"})
+	anonymous := serve(t, e, http.MethodPost, "/api/mcp", "", map[string]string{"Pitot-Request": "1"})
 	if anonymous.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous browser MCP = %d, want 401", anonymous.Code)
 	}
@@ -281,7 +281,7 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 
 	browser := serve(t, e, http.MethodPost, "/api/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, map[string]string{
 		"Authorization":        "Bearer attacker-controlled",
-		"Fanout-Request":       "1",
+		"Pitot-Request":        "1",
 		"MCP-Protocol-Version": appmcp.ProtocolVersion,
 		"Mcp-Method":           "tools/list",
 	}, cookie)
@@ -299,7 +299,7 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 		t.Fatalf("browser MCP context exposed account role %q", role)
 	}
 
-	remoteWithSessionOnly := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Fanout-Request": "1"}, cookie)
+	remoteWithSessionOnly := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Pitot-Request": "1"}, cookie)
 	if remoteWithSessionOnly.Code != http.StatusUnauthorized {
 		t.Fatalf("remote MCP accepted browser session: %d", remoteWithSessionOnly.Code)
 	}
@@ -403,7 +403,7 @@ var formHeaders = map[string]string{"Content-Type": "application/x-www-form-urle
 
 func oauthCookieForUser(t *testing.T, e *echo.Echo, user auth.User) *http.Cookie {
 	t.Helper()
-	rec := serve(t, e, http.MethodPost, "/api/auth/setup", "", map[string]string{"X-Test-User": user.ID, "Fanout-Request": "1"})
+	rec := serve(t, e, http.MethodPost, "/api/auth/setup", "", map[string]string{"X-Test-User": user.ID, "Pitot-Request": "1"})
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("test login = %d %s", rec.Code, rec.Body.String())
 	}
@@ -504,7 +504,7 @@ func decodeTokens(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 // --- HTTP-layer negative-path and scope tests ---------------------------------
 
 func TestMCPOAuthScopePolicyRejectsRetiredNames(t *testing.T) {
-	legacy := "fanout:dashboard fanout:read fanout:dashboard"
+	legacy := "pitot:dashboard pitot:read pitot:dashboard"
 	if validMCPScopes(strings.Fields(legacy)) {
 		t.Fatal("retired scope aliases were accepted")
 	}
@@ -587,7 +587,7 @@ func TestMCPOAuthRetiredRefreshGrantsPromptReauthorizationAndRevokeFamily(t *tes
 	}
 	// Reproduce a persisted grant from before the scope rename, without
 	// accepting retired names in any issuance or authorization path.
-	if _, err := s.db.DB.Exec(`UPDATE oauth_tokens SET scope = 'fanout:read' WHERE user_id = ?`, user.ID); err != nil {
+	if _, err := s.db.DB.Exec(`UPDATE oauth_tokens SET scope = 'pitot:read' WHERE user_id = ?`, user.ID); err != nil {
 		t.Fatal(err)
 	}
 	form := url.Values{
@@ -650,7 +650,7 @@ func TestMCPOAuthConsentDenyRedirectsAccessDenied(t *testing.T) {
 	if callback.Query().Get("state") != "state-xyz" {
 		t.Fatalf("deny callback dropped state: %s", callback)
 	}
-	if callback.Query().Get("iss") != "https://fanout.example.com" {
+	if callback.Query().Get("iss") != "https://pitot.example.com" {
 		t.Fatalf("deny callback issuer = %q", callback.Query().Get("iss"))
 	}
 }
@@ -770,7 +770,7 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 	wwwAuthenticate := challenged.Header().Get("WWW-Authenticate")
 	if !strings.Contains(wwwAuthenticate, `error="insufficient_scope"`) ||
 		!strings.Contains(wwwAuthenticate, `scope="telemetry:read dashboard:manage"`) ||
-		!strings.Contains(wwwAuthenticate, `resource_metadata="https://fanout.example.com/.well-known/oauth-protected-resource/mcp"`) {
+		!strings.Contains(wwwAuthenticate, `resource_metadata="https://pitot.example.com/.well-known/oauth-protected-resource/mcp"`) {
 		t.Fatalf("dashboard step-up challenge = %q", wwwAuthenticate)
 	}
 }
@@ -816,15 +816,15 @@ func TestMCPOAuthConsentShowsDashboardWriteGrant(t *testing.T) {
 func serve(t *testing.T, e *echo.Echo, method, target, body string, headers map[string]string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
-	req.Host = "fanout.example.com"
+	req.Host = "pitot.example.com"
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
 	}
-	if len(cookies) > 0 && isUnsafeMethod(method) && req.Header.Get("Fanout-Request") == "" {
-		req.Header.Set("Fanout-Request", "1")
+	if len(cookies) > 0 && isUnsafeMethod(method) && req.Header.Get("Pitot-Request") == "" {
+		req.Header.Set("Pitot-Request", "1")
 	}
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -894,7 +894,7 @@ func TestOAuthConnectionsRequireBrowserSession(t *testing.T) {
 		for _, credential := range []string{"anonymous", "bearer", "bearer with cookie"} {
 			t.Run(route.method+" "+credential, func(t *testing.T) {
 				req := httptest.NewRequest(route.method, route.path, nil)
-				req.Header.Set("Fanout-Request", "1")
+				req.Header.Set("Pitot-Request", "1")
 				if credential != "anonymous" {
 					req.Header.Set("Authorization", "Bearer "+pair.AccessToken)
 				}
@@ -957,7 +957,7 @@ func TestOAuthConnectionsAreOwnAccountOnlyForEveryRole(t *testing.T) {
 				t.Fatalf("list = %d %s", list.Code, list.Body.String())
 			}
 			for _, clientID := range []string{otherClient.ClientID, "unknown"} {
-				rec := serve(t, s.e, http.MethodPost, "/api/auth/oauth/connections/"+clientID+"/revoke", "", map[string]string{"Fanout-Request": "1"}, cookie)
+				rec := serve(t, s.e, http.MethodPost, "/api/auth/oauth/connections/"+clientID+"/revoke", "", map[string]string{"Pitot-Request": "1"}, cookie)
 				if rec.Code != http.StatusNotFound || rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"code":"not_found"`) {
 					t.Fatalf("other or unknown revoke = %d %s", rec.Code, rec.Body.String())
 				}
@@ -969,7 +969,7 @@ func TestOAuthConnectionsAreOwnAccountOnlyForEveryRole(t *testing.T) {
 			if blocked.Code != http.StatusForbidden {
 				t.Fatalf("revoke without CSRF header = %d", blocked.Code)
 			}
-			revoked := serve(t, s.e, http.MethodPost, "/api/auth/oauth/connections/"+ownClient.ClientID+"/revoke", "", map[string]string{"Fanout-Request": "1", "User-Agent": "connection-test"}, cookie)
+			revoked := serve(t, s.e, http.MethodPost, "/api/auth/oauth/connections/"+ownClient.ClientID+"/revoke", "", map[string]string{"Pitot-Request": "1", "User-Agent": "connection-test"}, cookie)
 			if revoked.Code != http.StatusOK || revoked.Header().Get("Cache-Control") != "no-store" || !strings.Contains(revoked.Body.String(), `"ok":true`) {
 				t.Fatalf("revoke = %d %s", revoked.Code, revoked.Body.String())
 			}

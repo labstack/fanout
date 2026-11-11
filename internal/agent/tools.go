@@ -7,15 +7,15 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/dashboard"
-	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/toolerror"
+	"github.com/labstack/pitot/internal/dashboard"
+	pitotmcp "github.com/labstack/pitot/internal/mcp"
+	"github.com/labstack/pitot/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
-	mcpUIExtension = fanoutmcp.UIExtension
-	mcpAppMIME     = fanoutmcp.AppMIME
+	mcpUIExtension = pitotmcp.UIExtension
+	mcpAppMIME     = pitotmcp.AppMIME
 )
 
 type ToolExecution struct {
@@ -40,12 +40,12 @@ func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, er
 	if err != nil {
 		return nil, fmt.Errorf("connect internal MCP server: %w", err)
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "fanout-agent", Version: "1"}, &mcp.ClientOptions{
+	client := mcp.NewClient(&mcp.Implementation{Name: "pitot-agent", Version: "1"}, &mcp.ClientOptions{
 		Capabilities: &mcp.ClientCapabilities{Extensions: map[string]any{
 			mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
 		}},
 	})
-	session, err := client.Connect(ctx, clientTransport, &mcp.ClientSessionOptions{ProtocolVersion: fanoutmcp.ProtocolVersion})
+	session, err := client.Connect(ctx, clientTransport, &mcp.ClientSessionOptions{ProtocolVersion: pitotmcp.ProtocolVersion})
 	if err != nil {
 		serverSession.Close()
 		return nil, fmt.Errorf("connect internal MCP client: %w", err)
@@ -58,12 +58,12 @@ func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, er
 	}
 	registry := &ToolRegistry{session: session, serverSession: serverSession, apps: map[string]string{}, mutations: map[string]bool{}, readOnly: map[string]bool{}}
 	for _, tool := range listed.Tools {
-		if fanoutmcp.AppOnly(tool.Meta) {
+		if pitotmcp.AppOnly(tool.Meta) {
 			continue
 		}
 		registry.definitions = append(registry.definitions, ToolDef{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
 		registry.readOnly[tool.Name] = reviewedReadOnly(tool.Name, tool.Annotations)
-		if fanoutmcp.RequiredToolScope(tool.Name) == dashboard.OAuthScope && tool.Annotations != nil && !tool.Annotations.ReadOnlyHint {
+		if pitotmcp.RequiredToolScope(tool.Name) == dashboard.OAuthScope && tool.Annotations != nil && !tool.Annotations.ReadOnlyHint {
 			registry.mutations[tool.Name] = true
 		}
 		if resourceURI := appResourceURI(tool.Meta); resourceURI != "" {
@@ -185,19 +185,19 @@ func appResourceURI(meta mcp.Meta) string {
 }
 
 // Consume the server's identity; never recompute it in the agent or host.
-func fragmentView(value any) fanoutmcp.FragmentView {
-	if f, ok := value.(fanoutmcp.PanelFragment); ok {
+func fragmentView(value any) pitotmcp.FragmentView {
+	if f, ok := value.(pitotmcp.PanelFragment); ok {
 		return f.View
 	}
-	if f, ok := value.(*fanoutmcp.PanelFragment); ok && f != nil {
+	if f, ok := value.(*pitotmcp.PanelFragment); ok && f != nil {
 		return f.View
 	}
 	if f, ok := value.(map[string]any); ok {
 		if v, ok := f["view"].(map[string]any); ok {
 			kind, _ := v["kind"].(string)
 			key, _ := v["key"].(string)
-			return fanoutmcp.FragmentView{Kind: kind, Key: key}
+			return pitotmcp.FragmentView{Kind: kind, Key: key}
 		}
 	}
-	return fanoutmcp.FragmentView{}
+	return pitotmcp.FragmentView{}
 }

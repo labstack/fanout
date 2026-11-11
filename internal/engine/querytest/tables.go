@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry"
 )
 
 // types are the engine types the raw relation reads from each physical type.

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/pitot/internal/engine"
 )
 
 func TestRunResolvesOneInstantForAllPanelWindows(t *testing.T) {

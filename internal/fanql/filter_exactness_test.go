@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/query"
 )
 
 func TestRawFragmentsPreservePrecedence(t *testing.T) {

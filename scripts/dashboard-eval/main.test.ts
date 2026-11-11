@@ -152,8 +152,8 @@ it('runs synthetic holdout CLI without reading edits and skips a missing OpenAI 
  const promptFile=file('synthetic.json',prompts),raw=readFileSync(promptFile),end=BigInt(Date.now())*1_000_000n;
  const ledgerPath=file('ledger.json',{schema:1,rates:[{provider:'mock',model:'mock-no-provider',verified_at:'2026-10-08T00:00:00Z',input_includes_cache:true,input:0,output:0,cache_read:0,cache_write:0}],calls:[],prompts:[]});
  const cookies=join(root,'cookies.txt');writeFileSync(cookies,'');
- const envKeys=['FANOUT_HOLDOUT_OUT_ROOT','JUDGE_ANTHROPIC_KEY','JUDGE_OPENAI_KEY'];const previous=envKeys.map(k=>process.env[k]);
- process.env.FANOUT_HOLDOUT_OUT_ROOT=root;process.env.JUDGE_ANTHROPIC_KEY='mock-only';delete process.env.JUDGE_OPENAI_KEY;
+ const envKeys=['PITOT_HOLDOUT_OUT_ROOT','JUDGE_ANTHROPIC_KEY','JUDGE_OPENAI_KEY'];const previous=envKeys.map(k=>process.env[k]);
+ process.env.PITOT_HOLDOUT_OUT_ROOT=root;process.env.JUDGE_ANTHROPIC_KEY='mock-only';delete process.env.JUDGE_OPENAI_KEY;
  try {
   expect(await main(['--base',mock.base,'--cookies',cookies,'--out',join(root,'out'),'--prompts-file',promptFile,'--set','holdout','--holdout-sha',createHash('sha256').update(raw).digest('hex'),'--budget-usd','.6','--cost-ledger',ledgerPath,'--snapshot-manifest',file('snapshot.json',{source_hash:'0'.repeat(64),start_ns:String(end-1000000000n),end_ns:String(end),shift_ns:'0',replayed_at:new Date().toISOString()}),'--edits-file',join(root,'deliberately-absent.json'),'--judge'],()=>{})).toBe(0);
   const result=JSON.parse(readFileSync(join(root,'out/default/summary.json'),'utf8'));

@@ -7,8 +7,8 @@ import (
 	"strconv"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/pitot/internal/dashboard"
+	"github.com/labstack/pitot/internal/query"
 )
 
 type DashboardHandler struct{ dashboards *dashboard.Service }
@@ -124,8 +124,8 @@ func (h *DashboardHandler) delete(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if c.Request().Header.Get("Fanout-Confirm-Delete") != c.Param("id") {
-		return newAPIError(http.StatusPreconditionRequired, "confirmation_required", "Deleting a dashboard requires the Fanout-Confirm-Delete header set to its ID.")
+	if c.Request().Header.Get("Pitot-Confirm-Delete") != c.Param("id") {
+		return newAPIError(http.StatusPreconditionRequired, "confirmation_required", "Deleting a dashboard requires the Pitot-Confirm-Delete header set to its ID.")
 	}
 	if err := h.dashboards.Delete(c.Request().Context(), owner, c.Param("id")); err != nil {
 		return dashboardError(c, err)

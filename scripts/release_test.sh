@@ -26,7 +26,7 @@ assert_next_tag() (
   }
 
   number=$(next_release_number v2026.10 <<< "$tags")
-  created=$(create_release_tag labstack/fanout deadbeef v2026.10 "$number")
+  created=$(create_release_tag labstack/pitot deadbeef v2026.10 "$number")
   [ "$created" = "$expected" ] || fail "$name: created $created, want $expected"
 )
 
@@ -112,7 +112,7 @@ test_reserved_tags_are_skipped() (
       fail "unexpected fetch: $*"
   }
 
-  created=$(create_release_tag labstack/fanout deadbeef v2026.8 0)
+  created=$(create_release_tag labstack/pitot deadbeef v2026.8 0)
   [ "$created" = "v2026.8.2-alpha" ] || fail "created $created, want v2026.8.2-alpha"
 )
 
@@ -126,7 +126,7 @@ test_unrelated_errors_are_not_retried() (
     fail "git called after API failure: $*"
   }
 
-  if create_release_tag labstack/fanout deadbeef v2026.8 0 2>/dev/null; then
+  if create_release_tag labstack/pitot deadbeef v2026.8 0 2>/dev/null; then
     fail "permission error unexpectedly succeeded"
   fi
 )

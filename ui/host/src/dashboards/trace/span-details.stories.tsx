@@ -6,7 +6,7 @@ import { SpanDetails } from "./span-details";
 
 const meta = {
   id: "components-span-details", title: "Components/Span details", component: SpanDetails,
-  args: { traceId: traceDetail.data.trace_id, span: traceDetail.data.spans[0], onClose: fn(), load: async () => ({ attributes: { "http.response.status_code": 200, "http.request.method": "GET" }, resource: { "service.name": "checkout" }, events: [], scope: "fanout.http" }) },
+  args: { traceId: traceDetail.data.trace_id, span: traceDetail.data.spans[0], onClose: fn(), load: async () => ({ attributes: { "http.response.status_code": 200, "http.request.method": "GET" }, resource: { "service.name": "checkout" }, events: [], scope: "pitot.http" }) },
   decorators: [Story => <QueryClientProvider client={new QueryClient()}><Story /></QueryClientProvider>],
 } satisfies Meta<typeof SpanDetails>;
 export default meta;
@@ -17,7 +17,7 @@ export const Ready: Story = { play: async ({ canvas, userEvent, args }) => {
   await expect(within(list).getByText("http.response.status_code")).toBeVisible();
   await expect(within(list).getByText("200")).toBeVisible();
   await expect(canvas.getByLabelText("Span metadata", { selector: "dl" })).toHaveTextContent(args.span.span_id);
-  await expect(canvas.getByText("fanout.http")).toBeVisible();
+  await expect(canvas.getByText("pitot.http")).toBeVisible();
   await userEvent.click(canvas.getByRole("button", { name: "Close span details" }));
   await expect(args.onClose).toHaveBeenCalledOnce();
 } };

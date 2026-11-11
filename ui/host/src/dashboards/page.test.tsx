@@ -27,7 +27,7 @@ vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ option, label, onClick, onZ
 const app = vi.hoisted(() => ({ agentAvailable: true, openChat: vi.fn() }));
 vi.mock("../app-context", async (importOriginal) => ({
   ...await importOriginal<typeof import("../app-context")>(),
-  useFanoutApp: () => app,
+  usePitotApp: () => app,
 }));
 
 
@@ -711,7 +711,7 @@ it("keeps a real fetch 403 fixable with no Retry or automatic retry", async () =
  expect(queryBodies).toHaveLength(1);
  const card = within(host.querySelector<HTMLElement>('[data-panel="requests"]')!);
  expect(card.queryByRole("button", {name: "Retry"})).toBeNull();
- const fix = card.getByRole("button", {name: "Ask Fanout to fix it"});
+ const fix = card.getByRole("button", {name: "Ask Pitot to fix it"});
  await act(async () => fix.click());
  expect(app.openChat).toHaveBeenCalledOnce();
 });
@@ -780,7 +780,7 @@ it("shows fix for a loaded owner-scoped dashboard without maintaining a client r
  viewer.role="future_authenticated_role";
  panelResponse=async()=>json({results:[{id:"requests",status:"error",error:"Observed invalid measure",elapsed_ms:1}]});
  const {host}=await render();
- const fix=within(host).getByRole("button", {name:"Ask Fanout to fix it"});
+ const fix=within(host).getByRole("button", {name:"Ask Pitot to fix it"});
  expect(fix).toBeDefined();await act(async()=>fix!.click());expect(app.openChat.mock.lastCall![0]).toBe("Fix the panel “Requests”");expect(JSON.parse(app.openChat.mock.lastCall![1]!.context![0].value)).toMatchObject({error:"Observed invalid measure"});
 });
 

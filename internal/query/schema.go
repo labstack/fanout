@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/fanout/internal/queryrows"
-	"github.com/labstack/fanout/internal/telemetry"
-	"github.com/labstack/fanout/internal/telemetry/semconv"
+	"github.com/labstack/pitot/internal/queryrows"
+	"github.com/labstack/pitot/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry/semconv"
 )
 
 type SchemaRequest struct {

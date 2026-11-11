@@ -41,7 +41,7 @@ WHERE function_type = 'macro' AND regexp_matches(lower(macro_definition), '\bsel
 
 // An engine upgrade that adds, removes or retypes a built-in fails here until
 // its functions are reviewed against blockedSQLFunctions and the table-function
-// allowlist. Regenerate with FANOUT_UPDATE_SQL_FUNCTIONS=1 after that review.
+// allowlist. Regenerate with PITOT_UPDATE_SQL_FUNCTIONS=1 after that review.
 func TestBuiltinFunctionsMatchTheReviewedSnapshot(t *testing.T) {
 	db := openTestDuck(t)
 	var version string
@@ -64,7 +64,7 @@ func TestBuiltinFunctionsMatchTheReviewedSnapshot(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if os.Getenv("FANOUT_UPDATE_SQL_FUNCTIONS") == "1" {
+	if os.Getenv("PITOT_UPDATE_SQL_FUNCTIONS") == "1" {
 		if err := os.MkdirAll(filepath.Dir(builtinFunctionsSnapshot), 0o755); err != nil {
 			t.Fatal(err)
 		}

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine/writegate"
+	"github.com/labstack/pitot/internal/engine/writegate"
 )
 
 // A busy background lease must defer reuse of complete input contributions,

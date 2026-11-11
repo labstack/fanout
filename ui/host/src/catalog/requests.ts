@@ -179,8 +179,8 @@ export function makeService(scenario: Scenario = {}, staticFetch: typeof fetch =
       if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
       let result: unknown;
       switch (body.method) {
-        case "server/discover": result = { supportedVersions: ["2026-07-28"], capabilities: { tools: {}, resources: {} }, ttlMs: 0, cacheScope: "private", _meta: { "io.modelcontextprotocol/serverInfo": { name: "Fanout catalog", version: "1.0.0" } } }; break;
-        case "initialize": result = { protocolVersion: "2026-07-28", capabilities: { tools: {}, resources: {} }, serverInfo: { name: "Fanout catalog", version: "1.0.0" } }; break;
+        case "server/discover": result = { supportedVersions: ["2026-07-28"], capabilities: { tools: {}, resources: {} }, ttlMs: 0, cacheScope: "private", _meta: { "io.modelcontextprotocol/serverInfo": { name: "Pitot catalog", version: "1.0.0" } } }; break;
+        case "initialize": result = { protocolVersion: "2026-07-28", capabilities: { tools: {}, resources: {} }, serverInfo: { name: "Pitot catalog", version: "1.0.0" } }; break;
         case "tools/list": result = { tools: [], ttlMs: 0, cacheScope: "private" }; break;
         case "resources/read": {
           if (body.params?.uri !== healthContent.resource_uri) return fail(`Unexpected resource: ${body.params?.uri}`);

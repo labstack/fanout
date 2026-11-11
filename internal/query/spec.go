@@ -1,11 +1,11 @@
-// Package panel defines Fanout's dashboard spec: the typed, validated contract
+// Package panel defines Pitot's dashboard spec: the typed, validated contract
 // between the agent, the API, storage and the browser renderer. The Go types
 // are the single source of the JSON Schema the MCP tools publish.
 package query
 
 import "time"
 
-// SpecVersion is the only dashboard spec version Fanout reads.
+// SpecVersion is the only dashboard spec version Pitot reads.
 const SpecVersion = 1
 
 // AllValue selects All for a variable that offers it.

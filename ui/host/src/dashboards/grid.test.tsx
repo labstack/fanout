@@ -168,7 +168,7 @@ describe("PanelGrid", () => {
     const { host } = await render({ results: extraResults, fetching: true, agentAvailable: false });
     expect(host.textContent).toContain("No requests here.");
     expect(host.querySelector('[role="status"]')).not.toBeNull();
-    expect(host.textContent).not.toContain("Ask Fanout to fix it");
+    expect(host.textContent).not.toContain("Ask Pitot to fix it");
     expect(host.textContent).toContain("Could not convert");
     expect(host.querySelector("strong")!.textContent).toBe("Checkout");
   });
@@ -193,7 +193,7 @@ it("pins dashboard Explain to the executed panel window and keeps fix a separate
   expect(diagnostic).toMatchObject({dashboard_id:"d1",version:2,panel_id:"broken",from_ms:0,to_ms:3600000,vars:{service:"$__all"},diagnosis:"Observed diagnosis",stale_since:42,truncated:true,note:"Partial result"});
   expect(JSON.stringify(diagnostic.spec)).toContain("2026-10-08T00:00:00.123456789Z");
   expect(JSON.stringify(diagnostic.spec)).toContain("2026-10-08T01:00:00.987654321Z");
-  const fix = within(host).getByRole("button", {name: "Ask Fanout to fix it"});
+  const fix = within(host).getByRole("button", {name: "Ask Pitot to fix it"});
   await act(async () => fix.click());
   const [edit, editOptions] = vi.mocked(props.onOpenChat).mock.calls[1];
   expect(edit).toBe("Fix the panel “Broken”");
@@ -203,7 +203,7 @@ it("pins dashboard Explain to the executed panel window and keeps fix a separate
 
 it("hides fix without manage permission while keeping Explain answer-only", async () => {
   const { host, props } = await render({ canManage: false });
-  expect(host.textContent).not.toContain("Ask Fanout to fix it");
+  expect(host.textContent).not.toContain("Ask Pitot to fix it");
   await menu(host, "Broken", "Explain in chat");
   expect(vi.mocked(props.onOpenChat).mock.calls[0][1]).toMatchObject({ answer_only: true, context: [{description:"Observed panel diagnostics",value:expect.any(String)}] });
 });
@@ -211,12 +211,12 @@ it("hides fix without manage permission while keeping Explain answer-only", asyn
 it.each([undefined, "broken"])("hides Explain and Fix with chat disabled in panel view %s", async (view) => {
   const { host, props } = await render({ agentAvailable: false, view });
   const scope = view ? document.querySelector<HTMLElement>('[role="dialog"]')! : host;
-  expect(within(scope).queryByRole("button", { name: "Ask Fanout to fix it" })).toBeNull();
+  expect(within(scope).queryByRole("button", { name: "Ask Pitot to fix it" })).toBeNull();
   await act(async () => within(scope).getByRole("button", { name: "Broken menu" }).click());
   const actions = [...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent);
   expect(actions).toContain("Copy link");
   expect(actions).not.toContain("Explain in chat");
-  expect(actions).not.toContain("Ask Fanout to fix it");
+  expect(actions).not.toContain("Ask Pitot to fix it");
   expect(props.onOpenChat).not.toHaveBeenCalled();
 });
 

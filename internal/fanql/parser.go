@@ -9,8 +9,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/suggest"
+	"github.com/labstack/pitot/internal/query"
+	"github.com/labstack/pitot/internal/suggest"
 )
 
 const (

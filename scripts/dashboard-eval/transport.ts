@@ -62,7 +62,7 @@ export function cookieHeader(jar:string,url:URL,now=Date.now()/1000):string {
   return matches.sort((a,b)=>b.path.length-a.path.length).map(c=>`${c.name}=${c.value}`).join('; ');
 }
 
-// Consume through EOF: Fanout persists after the terminal event and before closing SSE.
+// Consume through EOF: Pitot persists after the terminal event and before closing SSE.
 export async function readSSE(response:Response,signal:AbortSignal,onUsage?:(u:CallUsage)=>void):Promise<StreamState> {
   const started=performance.now();
   const state:StreamState={tools:[],terminal:null,incomplete:false,truncated:false,error_code:null,usage:[],final_text:'',started_at:new Date().toISOString(),finished_at:null};
@@ -229,7 +229,7 @@ export function noSymlinks(path:string):string {
   return target;
 }
 export function privateFile(path:string):string {const target=noSymlinks(path);if(!lstatSync(target).isFile())throw new Error('Input must be a regular file');return target;}
-export function validateOutput(path:string,set:string,worktree=process.cwd(),sealedRoot=process.env.FANOUT_HOLDOUT_OUT_ROOT):string {
+export function validateOutput(path:string,set:string,worktree=process.cwd(),sealedRoot=process.env.PITOT_HOLDOUT_OUT_ROOT):string {
   const root=realpathSync(worktree),target=noSymlinks(path),evalRoot=resolve(root,'.cache/dashboard-eval');
   if(set==='benchmark') {if(!inside(evalRoot,target)||target===evalRoot)throw new Error('Benchmark output must be under .cache/dashboard-eval/');}
   else if(set==='holdout') {if(!sealedRoot)throw new Error('Controller output root required');const outRoot=noSymlinks(sealedRoot);if(inside(root,outRoot)||inside(root,target)||!inside(outRoot,target)||target===outRoot)throw new Error('Sealed output must be outside the worktree');}
@@ -237,7 +237,7 @@ export function validateOutput(path:string,set:string,worktree=process.cwd(),sea
   if(existsSync(target))throw new Error('Output already exists');
   return target;
 }
-export function safeOutput(path:string,set:string,worktree=process.cwd(),sealedRoot=process.env.FANOUT_HOLDOUT_OUT_ROOT):string {
+export function safeOutput(path:string,set:string,worktree=process.cwd(),sealedRoot=process.env.PITOT_HOLDOUT_OUT_ROOT):string {
   const target=validateOutput(path,set,worktree,sealedRoot);
   mkdirSync(dirname(target),{recursive:true});noSymlinks(dirname(target));mkdirSync(target);return target;
 }

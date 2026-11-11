@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/labstack/fanout/internal/telemetry"
-	"github.com/labstack/fanout/internal/telemetry/semconv"
+	"github.com/labstack/pitot/internal/telemetry"
+	"github.com/labstack/pitot/internal/telemetry/semconv"
 )
 
 func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {

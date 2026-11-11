@@ -9,7 +9,7 @@ import (
 
 const (
 	mcpAppMIME   = "text/html;profile=mcp-app"
-	panelsAppURI = "ui://fanout/panels.html"
+	panelsAppURI = "ui://pitot/panels.html"
 )
 
 //go:embed apps/*.html
@@ -27,7 +27,7 @@ func (s *Server) addAppResource(name, uri, path string) {
 		Title:       name,
 		URI:         uri,
 		MIMEType:    mcpAppMIME,
-		Description: "Interactive Fanout observability view delivered as an MCP App.",
+		Description: "Interactive Pitot observability view delivered as an MCP App.",
 	}, func(_ context.Context, _ *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		html, err := appFiles.ReadFile(path)
 		if err != nil {
