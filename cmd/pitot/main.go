@@ -711,6 +711,9 @@ func createLoginLink(cfg config.Config, rawEmail string, breakGlass bool, output
 	if err != nil {
 		return err
 	}
+	if err := store.MigrateControlDatabase(cfg.ControlSQLitePath()); err != nil {
+		return err
+	}
 	if _, err := os.Stat(cfg.ControlSQLitePath()); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("control database does not exist at %s", cfg.ControlSQLitePath())

@@ -14,9 +14,16 @@ conflict with a third party's registered US trademark in cloud services.
 - The pre-rename environment variable prefix is no longer read, including
   installer overrides and secret-file settings. Use `PITOT_*` settings.
 - Before upgrading, stop the service and take a cold backup of the complete
-  data directory. Rename the pre-rename control database in `control/` to
-  `pitot.sqlite` before starting the new binary. Do not start against an empty
-  control database or create a fresh volume by accident.
+  data directory. On startup, Pitot automatically renames the previous control
+  database and its SQLite WAL, shared-memory and rollback-journal sidecars in
+  `control/` to `pitot.sqlite` and matching sidecar names, then syncs the directory.
+  No manual filename change is needed, including for unattended agent upgrades.
+  If both database names or an incomplete sidecar move exist, startup refuses
+  before opening SQLite; stop the instance and recover a consistent file set
+  from the cold backup before retrying. Never delete a database just to bypass
+  this refusal or create a fresh volume by accident. For rollback to the previous
+  binary, restore its complete cold backup before starting it; older binaries
+  do not move the database name back.
 - Telemetry spill footer keys retain their persisted format-5 spelling so
   existing Parquet files remain valid and byte compatibility stays unchanged.
 - Sessions use the `pitot_session` cookie (with the `__Host-` prefix over HTTPS),
