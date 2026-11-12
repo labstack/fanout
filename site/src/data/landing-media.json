@@ -1,18 +1,18 @@
 {
   "chat-dark": {
-    "mp4": "https://assets.pitot.dev/videos/chat-dark-ae46adaa4f84.mp4",
-    "webm": "https://assets.pitot.dev/videos/chat-dark-25106cec7536.webm"
+    "mp4": "https://assets.pitot.dev/videos/chat-dark-58d1c8aa349c.mp4",
+    "webm": "https://assets.pitot.dev/videos/chat-dark-619b5925c580.webm"
   },
   "chat-light": {
-    "mp4": "https://assets.pitot.dev/videos/chat-light-49de797fb720.mp4",
-    "webm": "https://assets.pitot.dev/videos/chat-light-d279248e9746.webm"
+    "mp4": "https://assets.pitot.dev/videos/chat-light-3e5c3b38c19a.mp4",
+    "webm": "https://assets.pitot.dev/videos/chat-light-c69fcb65f0bf.webm"
   },
   "dashboard-dark": {
-    "mp4": "https://assets.pitot.dev/videos/dashboard-dark-e3921af9e6d5.mp4",
-    "webm": "https://assets.pitot.dev/videos/dashboard-dark-132eeec0b24b.webm"
+    "mp4": "https://assets.pitot.dev/videos/dashboard-dark-94ae092b84c4.mp4",
+    "webm": "https://assets.pitot.dev/videos/dashboard-dark-52f2866e084d.webm"
   },
   "dashboard-light": {
-    "mp4": "https://assets.pitot.dev/videos/dashboard-light-405b82e3b64a.mp4",
-    "webm": "https://assets.pitot.dev/videos/dashboard-light-0e9dede918bf.webm"
+    "mp4": "https://assets.pitot.dev/videos/dashboard-light-c500367d14fd.mp4",
+    "webm": "https://assets.pitot.dev/videos/dashboard-light-c5d9509c942b.webm"
   }
 }

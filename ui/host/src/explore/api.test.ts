@@ -31,13 +31,6 @@ describe("pitotql api", () => {
     expect((error as ApiError).problems).toEqual(problems);
   });
 
-  it("reads previous query error codes as canonical PitotQL failures", async () => {
-    fetchMock.mockResolvedValue(json(400, { code: "invalid_fanql", message: "The query has problems." }));
-    const error = await parsePitotql({ text: "spans where" }).catch((e: unknown) => e);
-    expect((error as ApiError).code).toBe("invalid_pitotql");
-    expect(JSON.stringify(error)).not.toContain("invalid_fanql");
-  });
-
   it("asks for completions at the cursor", async () => {
     fetchMock.mockResolvedValue(json(200, { replace: { start: 0, end: 2 }, items: [], schema: { window: "1h", sampled: false, warm: true, recent: true } }));
     await completePitotql({ text: "sp", cursor: 2, window: "1h" });

@@ -459,28 +459,19 @@ func TestPitotQLParseOffersSeenDottedKey(t *testing.T) {
 	}
 }
 
-func TestPreviousQueryRoutesAcceptClientsAndReturnCanonicalNames(t *testing.T) {
-	for _, tc := range []struct {
-		action, method, body string
-		status               int
-	}{
-		{"parse", http.MethodPost, `{"text":"spans | count() by service"}`, http.StatusOK},
-		{"format", http.MethodPost, `{"query":{"from":"spans","where":["service = 'api'"]}}`, http.StatusOK},
-		{"complete", http.MethodPost, `{"text":"spa","cursor":3}`, http.StatusOK},
-		{"reference", http.MethodGet, "", http.StatusOK},
-		{"parse", http.MethodPost, `{"text":"spans where a:1 b:2 or c:3"}`, http.StatusBadRequest},
-	} {
-		t.Run(tc.action+tc.body, func(t *testing.T) {
-			oldPath := previousQueryPath(tc.action)
-			policy, ok := classifyRoute(tc.method, oldPath)
-			if !ok || policy.capability != ReadTelemetry {
-				t.Fatalf("unprotected alias: %+v", policy)
-			}
-			old := servePitotQL(t, &fakePitotQLParser{}, &fakePitotQLPanels{}, tc.method, oldPath, tc.body)
-			current := servePitotQL(t, &fakePitotQLParser{}, &fakePitotQLPanels{}, tc.method, "/api/pitotql/"+tc.action, tc.body)
-			if old.Code != tc.status || old.Body.String() != current.Body.String() {
-				t.Fatalf("alias: %d %s; canonical: %d %s", old.Code, old.Body, current.Code, current.Body)
-			}
-		})
+func TestRetiredQueryRoutesAreNotRegistered(t *testing.T) {
+	for _, action := range []string{"parse", "format", "complete", "reference"} {
+		method := http.MethodPost
+		if action == "reference" {
+			method = http.MethodGet
+		}
+		path := "/api/fanql/" + action
+		if _, ok := classifyRoute(method, path); ok {
+			t.Fatalf("retired route classified: %s", path)
+		}
+		response := servePitotQL(t, &fakePitotQLParser{}, &fakePitotQLPanels{}, method, path, `{}`)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("retired route: %d %s", response.Code, response.Body)
+		}
 	}
 }

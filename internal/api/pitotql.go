@@ -24,15 +24,7 @@ func RegisterPitotQLRoutes(e *echo.Echo, parser query.Parser, engine QueryEngine
 	e.POST("/api/pitotql/format", h.format, read)
 	e.POST("/api/pitotql/complete", h.complete, read)
 	e.GET("/api/pitotql/reference", h.reference, read)
-	// Published route aliases accept old clients; all response content is canonical.
-	e.POST(previousQueryPath("parse"), h.parse, read)
-	e.POST(previousQueryPath("format"), h.format, read)
-	e.POST(previousQueryPath("complete"), h.complete, read)
-	e.GET(previousQueryPath("reference"), h.reference, read)
 }
-
-// Intentional published API compatibility exception.
-func previousQueryPath(action string) string { return "/api/fanql/" + action }
 
 type pitotqlPreview struct {
 	Text string `json:"text"`

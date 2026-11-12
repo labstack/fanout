@@ -1,7 +1,10 @@
 # Landing recordings
 
-Record the chat and dashboard slots from an OpenTelemetry Demo instance with
-chat enabled.
+Record the chat and dashboard slots from a Pitot instance with telemetry and
+chat enabled. Use a dedicated recording account and synthetic telemetry for
+public media. The Pitot cutover clips use the committed `e2eseed` workload and
+real agent/tool runs, with no intercepted API responses or production data.
+They demonstrate the interface, not benchmark throughput.
 
 Expected assets (16:10; posters at 1280 × 800, videos at 1280 × 800 or larger):
 
