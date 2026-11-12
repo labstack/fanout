@@ -35,11 +35,11 @@ beforeEach(() => {
   format = async () => json({ text: "spans | p95(duration) by service", exactness: "exact", editable: true, requires: [], notices: [], where: [], measures: [] });
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input);
-    if (url === "/api/fanql/parse") return parse(JSON.parse(String(init?.body)));
-    if (url === "/api/fanql/complete") return json({ replace: { start: 0, end: 0 }, items: [], schema: { window: "1h", sampled: false, warm: true, recent: true } });
+    if (url === "/api/pitotql/parse") return parse(JSON.parse(String(init?.body)));
+    if (url === "/api/pitotql/complete") return json({ replace: { start: 0, end: 0 }, items: [], schema: { window: "1h", sampled: false, warm: true, recent: true } });
     if (url === "/api/queries/run") return runQuery();
     if (url === "/api/telemetry/schema") return schemaFailure ? json({ code: "schema_unavailable", message: "schema unavailable" }, 500) : json({ signals: { spans: { columns: [{ name: "service", type: "string" }, { name: "duration_ms", type: "number" }] } }, sql_relations: {}, measures: ["count", "p95"], services: [{ value: "checkout" }] });
-    if (url === "/api/fanql/format") return format(JSON.parse(String(init?.body)));
+    if (url === "/api/pitotql/format") return format(JSON.parse(String(init?.body)));
     throw new Error(`Unexpected request: ${url}`);
   });
 });
@@ -56,7 +56,7 @@ async function render(initial: Partial<ExploreSearch> = {}, strict = false, rout
   cleanups.push(() => { root.unmount(); client.clear(); });
   await draw();
   const ui = within(host);
-  const editor = () => EditorView.findFromDOM(ui.getByRole("textbox", { name: /FanQL query|Explore SQL/ }))!;
+  const editor = () => EditorView.findFromDOM(ui.getByRole("textbox", { name: /PitotQL query|Explore SQL/ }))!;
   const type = async (text: string) => act(async () => { const view = editor(); view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }); });
   const click = async (name: string | RegExp) => act(async () => ui.getByRole("button", { name }).click());
   const wait = async (assertion: () => void) => vi.waitFor(async () => { await act(async () => {}); assertion(); }, { timeout: 3000, interval: 10 });
@@ -74,25 +74,25 @@ describe("ExplorePage", () => {
     expect(ui.getByText("Type a query above and press Enter.")).toBeTruthy();
     expect(document.querySelector(".cm-placeholder")?.textContent).toBe("spans | count() by service");
     expect(ui.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true);
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/fanql/parse", expect.anything());
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/pitotql/parse", expect.anything());
   });
 
   it("says what to do when Enter is pressed in the empty editor", async () => {
     const { ui, type } = await render();
-    const editor = ui.getByRole("textbox", { name: "FanQL query" });
+    const editor = ui.getByRole("textbox", { name: "PitotQL query" });
     await act(async () => { editor.focus(); fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 }); });
-    expect(document.querySelector("[data-fanql-empty]")?.textContent).toBe("Type a query to run, for example spans | count() by service.");
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/fanql/parse", expect.anything());
+    expect(document.querySelector("[data-pitotql-empty]")?.textContent).toBe("Type a query to run, for example spans | count() by service.");
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/pitotql/parse", expect.anything());
     await type("spans");
-    expect(document.querySelector("[data-fanql-empty]")?.textContent).toBe("");
+    expect(document.querySelector("[data-pitotql-empty]")?.textContent).toBe("");
   });
 
   it("keeps the empty-run region mounted, announces each empty Enter, and clears it when the text arrives from history", async () => {
     const { ui, onSearch, search, wait } = await render();
-    const region = document.querySelector("[data-fanql-empty]")!;
+    const region = document.querySelector("[data-pitotql-empty]")!;
     expect(region.getAttribute("aria-live")).toBe("polite");
     expect(region.textContent).toBe("");
-    const editor = ui.getByRole("textbox", { name: "FanQL query" });
+    const editor = ui.getByRole("textbox", { name: "PitotQL query" });
     const enter = async () => act(async () => { editor.focus(); fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 }); });
     await enter();
     const first = region.firstElementChild;
@@ -100,7 +100,7 @@ describe("ExplorePage", () => {
     await enter();
     // A new node is an addition the screen reader announces again.
     expect(region.firstElementChild).not.toBe(first);
-    expect(document.querySelector("[data-fanql-empty]")).toBe(region);
+    expect(document.querySelector("[data-pitotql-empty]")).toBe(region);
     await act(async () => onSearch({ ...search(), q: "spans | count()" }));
     await wait(() => expect(editor.textContent).toBe("spans | count()"));
     expect(region.textContent).toBe("");
@@ -135,8 +135,8 @@ describe("ExplorePage", () => {
     expect(onSearch.mock.calls.map(([next, replace]) => [next.q, replace])).toEqual([["spans | count()", false], ["spans | count() by service", false], ["spans | count() by service", true]]);
     // The router hands back the earlier entry.
     await act(async () => onSearch({ ...search(), q: "spans | count()" }));
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count()", window: "1h" }));
-    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count()");
+    await wait(() => expect(bodies("/api/pitotql/parse").at(-1)).toEqual({ text: "spans | count()", window: "1h" }));
+    expect(ui.getByRole("textbox", { name: "PitotQL query" }).textContent).toBe("spans | count()");
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(4));
   });
 
@@ -150,8 +150,8 @@ describe("ExplorePage", () => {
     await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Apply range")!.click());
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
     // An absolute window sends no window name.
-    expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count()" });
-    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count()");
+    expect(bodies("/api/pitotql/parse").at(-1)).toEqual({ text: "spans | count()" });
+    expect(ui.getByRole("textbox", { name: "PitotQL query" }).textContent).toBe("spans | count()");
   });
 
   it("runs a shared link on open under StrictMode's remount", async () => {
@@ -170,8 +170,8 @@ describe("ExplorePage", () => {
     // The router hands back the 1h entry; the draft in the editor is not run.
     await act(async () => onSearch(first));
     await wait(() => expect(bodies("/api/queries/run").at(-1).time).toEqual({ range: "1h", refresh: "off" }));
-    expect(bodies("/api/fanql/parse").map(body => body.text)).not.toContain("spans | count()");
-    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count() by service");
+    expect(bodies("/api/pitotql/parse").map(body => body.text)).not.toContain("spans | count()");
+    expect(ui.getByRole("textbox", { name: "PitotQL query" }).textContent).toBe("spans | count() by service");
     // Rerunning the entry it shows replaces it with itself; it never adds or rewrites one.
     expect(onSearch.mock.calls.slice(calls + 1).every(([next, replace]) => replace && next.q === first.q && next.range === "1h")).toBe(true);
   });
@@ -189,14 +189,14 @@ describe("ExplorePage", () => {
     expect(bodies("/api/queries/run")[1].dashboard.panels[0]).not.toHaveProperty("drill");
   });
 
-  it("explains the SQL tab and labels the FanQL result there", async () => {
+  it("explains the SQL tab and labels the PitotQL result there", async () => {
     const { ui, type, click, wait } = await render();
     await type("spans | count() by service");
     await click("Run");
     await wait(() => expect(ui.getByRole("status").textContent).toContain("Ran as"));
     await act(async () => ui.getByRole("tab", { name: "SQL" }).click());
-    await wait(() => expect(document.querySelector("[data-sql-hint]")?.textContent).toMatch(/the FanQL query is not converted.*\$__window\(time_column\)/));
-    expect(ui.getByRole("status").textContent).toBe("Result of the last FanQL run");
+    await wait(() => expect(document.querySelector("[data-sql-hint]")?.textContent).toMatch(/the PitotQL query is not converted.*\$__window\(time_column\)/));
+    expect(ui.getByRole("status").textContent).toBe("Result of the last PitotQL run");
   });
 
   it("fits the empty state to the tab", async () => {
@@ -216,7 +216,7 @@ describe("ExplorePage", () => {
   });
 
   it("shows problems and does not run a query that has them", async () => {
-    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "unknown field servce", hint: "did you mean service?", span: { start: 12, end: 18 } }] }, 400);
+    parse = async () => json({ code: "invalid_pitotql", message: "The query has problems.", problems: [{ path: "text", message: "unknown field servce", hint: "did you mean service?", span: { start: 12, end: 18 } }] }, 400);
     const { ui, type, click, wait } = await render();
     await type("spans where servce:a");
     await click("Run");
@@ -231,7 +231,7 @@ describe("ExplorePage", () => {
     const { ui, type, click, wait } = await render({ tab: kind });
     await type(source);
     await click("Run");
-    const editor = ui.getByRole("textbox", { name: kind === "sql" ? "Explore SQL" : "FanQL query" });
+    const editor = ui.getByRole("textbox", { name: kind === "sql" ? "Explore SQL" : "PitotQL query" });
     await wait(() => expect(editor.getAttribute("aria-invalid")).toBe("true"));
     expect(ui.getByRole("alert").textContent).toContain(problem.message);
     const marks: { from: number; to: number; message: string }[] = [];
@@ -256,25 +256,25 @@ describe("ExplorePage", () => {
     await type(kind === "sql" ? "SELECT service FROM spans" : "spans where service:a | count()");
     await act(async () => answer(json({ results: [{ id: "explore", status: "invalid", problems: [{ path: kind === "sql" ? "panels[0].sql" : "panels[0].query.where[0]", message: "unknown field http_route" }], elapsed_ms: 0 }] })));
     await wait(() => expect(ui.getByRole("button", { name: "Run" }).getAttribute("data-loading")).toBeNull());
-    expect(ui.getByRole("textbox", { name: kind === "sql" ? "Explore SQL" : "FanQL query" }).getAttribute("aria-invalid")).toBe("false");
+    expect(ui.getByRole("textbox", { name: kind === "sql" ? "Explore SQL" : "PitotQL query" }).getAttribute("aria-invalid")).toBe("false");
     expect(ui.queryByRole("alert")).toBeNull();
     expect(document.querySelector("[data-panel-error]")).toBeNull();
   });
 
   it("applies a problem's fix-it to the query text", async () => {
-    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "unknown function cuont", span: { start: 8, end: 13 }, fix_its: [{ label: "count", span: { start: 8, end: 13 }, text: "count" }] }] }, 400);
+    parse = async () => json({ code: "invalid_pitotql", message: "The query has problems.", problems: [{ path: "text", message: "unknown function cuont", span: { start: 8, end: 13 }, fix_its: [{ label: "count", span: { start: 8, end: 13 }, text: "count" }] }] }, 400);
     const { ui, type, click, wait } = await render();
     await type("spans | cuont()");
     await click("Run");
     await wait(() => expect(ui.getByRole("alert").textContent).toContain("unknown function cuont"));
     await click("Replace with count");
-    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count()");
+    expect(ui.getByRole("textbox", { name: "PitotQL query" }).textContent).toBe("spans | count()");
     expect(ui.queryByRole("alert")).toBeNull();
   });
 
   it("keeps the other fix-its after one is applied, until the text is typed in", async () => {
     const cuont = { start: 8, end: 13 }, p59 = { start: 17, end: 20 };
-    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [
+    parse = async () => json({ code: "invalid_pitotql", message: "The query has problems.", problems: [
       { path: "text", message: "unknown function cuont", span: cuont, fix_its: [{ label: "count", span: cuont, text: "count" }] },
       { path: "text", message: "unknown function p59", span: p59, fix_its: [{ label: "p95", span: p59, text: "p95" }] },
     ] }, 400);
@@ -285,7 +285,7 @@ describe("ExplorePage", () => {
     await click("Replace with count");
     expect(ui.getAllByRole("alert").map(alert => alert.textContent)).toEqual(["unknown function p59"]);
     await click("Replace with p95");
-    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count(), p95(duration) by service");
+    expect(ui.getByRole("textbox", { name: "PitotQL query" }).textContent).toBe("spans | count(), p95(duration) by service");
     expect(ui.queryByRole("alert")).toBeNull();
     await click("Run");
     await wait(() => expect(ui.getAllByRole("alert")).toHaveLength(2));
@@ -301,7 +301,7 @@ describe("ExplorePage", () => {
     await click("Run");
     await wait(() => expect(ui.getByText("host.name is usually a resource attribute")).toBeTruthy());
     await click("Replace with resource.host.name");
-    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count() by resource.host.name");
+    expect(ui.getByRole("textbox", { name: "PitotQL query" }).textContent).toBe("spans | count() by resource.host.name");
   });
 
   it("drops notices when the text is edited, refused, or changed while the parse was out", async () => {
@@ -313,16 +313,16 @@ describe("ExplorePage", () => {
     await click("Run");
     await wait(() => expect(ui.getByText("host.name is usually a resource attribute")).toBeTruthy());
     await type("spans | count() by host");
-    expect(document.querySelector("[data-fanql-notices]")).toBeNull();
+    expect(document.querySelector("[data-pitotql-notices]")).toBeNull();
     // A refused run does not bring back the notices of the run before it.
     await type("spans | count() by host.name");
     await click("Run");
     await wait(() => expect(ui.getByText("host.name is usually a resource attribute")).toBeTruthy());
-    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "unknown function cuont", span: { start: 8, end: 13 } }] }, 400);
+    parse = async () => json({ code: "invalid_pitotql", message: "The query has problems.", problems: [{ path: "text", message: "unknown function cuont", span: { start: 8, end: 13 } }] }, 400);
     await type("spans | cuont() by service");
     await click("Run");
     await wait(() => expect(ui.getByRole("alert").textContent).toBe("unknown function cuont"));
-    expect(document.querySelector("[data-fanql-notices]")).toBeNull();
+    expect(document.querySelector("[data-pitotql-notices]")).toBeNull();
     // Notices for text the user has since changed are not shown.
     let answer!: () => void;
     parse = body => new Promise(resolve => { answer = () => resolve(json({ ...parsed(body.text), notices: [notice] })); });
@@ -331,7 +331,7 @@ describe("ExplorePage", () => {
     await type("spans | count() by host.name ");
     await act(async () => answer());
     await wait(() => expect(bodies("/api/queries/run").length).toBeGreaterThan(0));
-    expect(document.querySelector("[data-fanql-notices]")).toBeNull();
+    expect(document.querySelector("[data-pitotql-notices]")).toBeNull();
   });
 
   it("renders an execution error in the panel card", async () => {
@@ -350,7 +350,7 @@ describe("ExplorePage", () => {
     const options = within(ui.getByRole("radiogroup", { name: "Visualization" })).getAllByRole<HTMLInputElement>("radio");
     expect(options.map(option => [option.value, option.disabled])).toEqual([["table", false], ["bar", false], ["state_timeline", true]]);
     await click("Time series…");
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count() by service every auto", window: "1h" }));
+    await wait(() => expect(bodies("/api/pitotql/parse").at(-1)).toEqual({ text: "spans | count() by service every auto", window: "1h" }));
   });
 
   it("marks the result stale after an edit and only saves a fresh run with rows", async () => {
@@ -372,7 +372,7 @@ describe("ExplorePage", () => {
     await type("spans | count() by service");
     await click("Run");
     await wait(() => expect(save().getAttribute("aria-disabled")).toBe("false"));
-    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "unknown field nosuchcol" }] }, 400);
+    parse = async () => json({ code: "invalid_pitotql", message: "The query has problems.", problems: [{ path: "text", message: "unknown field nosuchcol" }] }, 400);
     await type("spans | count() by nosuchcol");
     await click("Run");
     await wait(() => expect(ui.getByRole("alert").textContent).toBe("unknown field nosuchcol"));
@@ -413,14 +413,14 @@ describe("ExplorePage", () => {
     await click("Run");
     await wait(() => expect(calls).toBe(1));
     // Run shows a spinner meanwhile; Enter in the editor still starts a new run.
-    const editor = ui.getByRole("textbox", { name: "FanQL query" });
+    const editor = ui.getByRole("textbox", { name: "PitotQL query" });
     await act(async () => { editor.focus(); editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); });
     await wait(() => expect(first?.aborted).toBe(true));
   });
 
   it("runs a shared link on open", async () => {
     const { wait } = await render({ q: "spans | count() by service", viz: "table" });
-    await wait(() => expect(bodies("/api/fanql/parse")).toEqual([{ text: "spans | count() by service", window: "1h" }]));
+    await wait(() => expect(bodies("/api/pitotql/parse")).toEqual([{ text: "spans | count() by service", window: "1h" }]));
     await wait(() => expect(bodies("/api/queries/run")[0].dashboard.panels[0].viz).toBe("table"));
   });
 
@@ -436,10 +436,10 @@ describe("ExplorePage", () => {
 
   it("does not pin a new query to the previous viz", async () => {
     const { type, click, wait } = await render({ q: "logs", viz: "logs" });
-    await wait(() => expect(bodies("/api/fanql/parse")).toEqual([{ text: "logs", window: "1h" }]));
+    await wait(() => expect(bodies("/api/pitotql/parse")).toEqual([{ text: "logs", window: "1h" }]));
     await type("logs | count() by service");
     await click("Run");
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "logs | count() by service", window: "1h" }));
+    await wait(() => expect(bodies("/api/pitotql/parse").at(-1)).toEqual({ text: "logs | count() by service", window: "1h" }));
   });
 
   it("reruns the edited text, not the last result, when the window changes", async () => {
@@ -449,7 +449,7 @@ describe("ExplorePage", () => {
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     await type("spans | count() by service");
     await pick("Last 24 hours");
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count() by service", window: "24h" }));
+    await wait(() => expect(bodies("/api/pitotql/parse").at(-1)).toEqual({ text: "spans | count() by service", window: "24h" }));
     await wait(() => expect(bodies("/api/queries/run").at(-1).time).toEqual({ range: "24h", refresh: "off" }));
   });
 
@@ -488,9 +488,9 @@ describe("ExplorePage", () => {
     const { ui, type, click, wait } = await render();
     await type("spans where servce:a");
     await click("Run");
-    await wait(() => expect(bodies("/api/fanql/parse")).toHaveLength(1));
+    await wait(() => expect(bodies("/api/pitotql/parse")).toHaveLength(1));
     await type("spans where service:a");
-    await act(async () => answer(json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "unknown field servce", span: { start: 12, end: 18 } }] }, 400)));
+    await act(async () => answer(json({ code: "invalid_pitotql", message: "The query has problems.", problems: [{ path: "text", message: "unknown field servce", span: { start: 12, end: 18 } }] }, 400)));
     await act(async () => {});
     expect(ui.queryByRole("alert")).toBeNull();
   });
@@ -516,14 +516,14 @@ describe("ExplorePage", () => {
     const list = () => within(document.getElementById(fn.getAttribute("aria-controls") ?? "")!);
     await wait(() => list().getByRole("option", { name: "p95", hidden: true }));
     await act(async () => { fireEvent.click(list().getByRole("option", { name: "p95", hidden: true })); });
-    await wait(() => expect(bodies("/api/fanql/format").at(-1)).toEqual({ query: { from: "spans", measures: ["p95(duration_ms)"], by: ["service"] } }));
+    await wait(() => expect(bodies("/api/pitotql/format").at(-1)).toEqual({ query: { from: "spans", measures: ["p95(duration_ms)"], by: ["service"] } }));
     await wait(() => expect(ui.getByText("spans | p95(duration) by service")).toBeTruthy());
     await act(async () => ui.getByRole("tab", { name: "Query" }).click());
-    await wait(() => expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | p95(duration) by service"));
+    await wait(() => expect(ui.getByRole("textbox", { name: "PitotQL query" }).textContent).toBe("spans | p95(duration) by service"));
   });
 
   it("stays on the Query tab when the text has problems", async () => {
-    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "unexpected |" }] }, 400);
+    parse = async () => json({ code: "invalid_pitotql", message: "The query has problems.", problems: [{ path: "text", message: "unexpected |" }] }, 400);
     const { ui, type, wait, search } = await render();
     await type("spans ||");
     await act(async () => ui.getByRole("tab", { name: "Builder" }).click());
@@ -534,23 +534,23 @@ describe("ExplorePage", () => {
   it("runs from the Builder through the formatted text", async () => {
     const { ui, wait, click } = await render({ tab: "builder" });
     await wait(() => expect(ui.getByLabelText("Measure 1 function", { selector: "input" })).toBeTruthy());
-    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    await wait(() => expect(bodies("/api/pitotql/format")).toHaveLength(1));
     await click("Run");
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | p95(duration) by service", window: "1h" }));
+    await wait(() => expect(bodies("/api/pitotql/parse").at(-1)).toEqual({ text: "spans | p95(duration) by service", window: "1h" }));
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
   });
 
   it("keeps a query the text cannot hold in the Builder and runs it directly", async () => {
     format = async () => json({ text: "spans where …", exactness: "exact", editable: false, reason: "it has more than 64 filters", requires: [], notices: [], where: [], measures: [] });
     const { ui, wait, click } = await render({ tab: "builder" });
-    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    await wait(() => expect(bodies("/api/pitotql/format")).toHaveLength(1));
     await click("Run");
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
-    expect(bodies("/api/fanql/parse")).toHaveLength(0);
+    expect(bodies("/api/pitotql/parse")).toHaveLength(0);
     expect(bodies("/api/queries/run")[0].dashboard.panels[0].query).toEqual({ from: "spans", measures: ["count()"], by: ["service"] });
     await act(async () => ui.getByRole("tab", { name: "Query" }).click());
     await wait(() => expect(ui.getByText(/This query is edited in the Builder: it has more than 64 filters/)).toBeTruthy());
-    expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!.state.readOnly).toBe(true);
+    expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "PitotQL query" }))!.state.readOnly).toBe(true);
   });
 
   it("disables Run while the builder query has problems", async () => {
@@ -563,30 +563,30 @@ describe("ExplorePage", () => {
   it("does not let a pending builder print overwrite typed text", async () => {
     let answer: (response: Response) => void = () => {};
     const { ui, wait, type } = await render({ tab: "builder" });
-    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    await wait(() => expect(bodies("/api/pitotql/format")).toHaveLength(1));
     format = () => new Promise(resolve => { answer = resolve; });
     await act(async () => ui.getByRole("button", { name: "Add measure" }).click());
-    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(2));
+    await wait(() => expect(bodies("/api/pitotql/format")).toHaveLength(2));
     await act(async () => ui.getByRole("tab", { name: "Query" }).click());
     await type("logs | count()");
     await act(async () => answer(json({ text: "spans | count(), count() by service", exactness: "exact", editable: true, requires: [], notices: [], where: [], measures: [] })));
     await act(async () => {});
-    expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!.state.doc.toString()).toBe("logs | count()");
+    expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "PitotQL query" }))!.state.doc.toString()).toBe("logs | count()");
   });
 
   it("reopens the Builder for an oversized query without reparsing it", async () => {
     format = async () => json({ text: "spans where …", exactness: "exact", editable: false, reason: "too long", requires: [], notices: [], where: [], measures: [] });
     const { ui, wait, search } = await render({ tab: "builder" });
-    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    await wait(() => expect(bodies("/api/pitotql/format")).toHaveLength(1));
     await act(async () => ui.getByRole("tab", { name: "Query" }).click());
     await act(async () => ui.getByRole("tab", { name: "Builder" }).click());
     await wait(() => expect(search().tab).toBe("builder"));
-    expect(bodies("/api/fanql/parse")).toHaveLength(0);
+    expect(bodies("/api/pitotql/parse")).toHaveLength(0);
   });
 
   it("does not pull the user back to the Builder after they leave during a run", async () => {
     const { ui, wait, click, search } = await render({ tab: "builder" });
-    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    await wait(() => expect(bodies("/api/pitotql/format")).toHaveLength(1));
     let answer: (response: Response) => void = () => {};
     format = () => new Promise(resolve => { answer = resolve; });
     await click("Run");
@@ -624,7 +624,7 @@ describe("ExplorePage", () => {
   });
 
   it("shows why a linked query cannot open in the Builder and offers the Query tab", async () => {
-    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "a time series groups by one field" }] }, 400);
+    parse = async () => json({ code: "invalid_pitotql", message: "The query has problems.", problems: [{ path: "text", message: "a time series groups by one field" }] }, 400);
     const { ui, wait, search } = await render({ tab: "builder", q: "spans | count() by service, operation every 5m" });
     await wait(() => expect(document.querySelector("[data-builder-blocked]")?.textContent).toContain("a time series groups by one field"));
     expect(ui.queryByText("Loading fields…")).toBeNull();
@@ -632,26 +632,26 @@ describe("ExplorePage", () => {
     await wait(() => expect(search().tab).toBe("query"));
   });
 
-  it("shows a linked query as FanQL in the Builder, labels its chips, and keeps the typed text", async () => {
+  it("shows a linked query as PitotQL in the Builder, labels its chips, and keeps the typed text", async () => {
     const query = { from: "spans", measures: ["count()"], where: ["contains(lower(operation), lower('se'))"] };
     parse = async body => json({ ...parsed(body.text), query });
     format = async () => json({ text: "spans where se | count()", exactness: "exact", editable: true, requires: [], notices: [], where: ["se"], measures: ["count()"] });
     const { ui, wait } = await render({ tab: "builder", q: "spans se | count()" });
-    await wait(() => expect(document.querySelector("[data-builder-text]")?.textContent).toBe("As FanQL: spans where se | count()"));
+    await wait(() => expect(document.querySelector("[data-builder-text]")?.textContent).toBe("As PitotQL: spans where se | count()"));
     expect(ui.getByText("se")).toBeTruthy();
     expect(ui.queryByText(/contains\(lower/)).toBeNull();
     await act(async () => ui.getByRole("tab", { name: "Query" }).click());
-    await wait(() => expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans se | count()"));
+    await wait(() => expect(ui.getByRole("textbox", { name: "PitotQL query" }).textContent).toBe("spans se | count()"));
   });
 
   it("starts an empty Builder from an example without writing it into the query text", async () => {
     const { ui, wait } = await render({ tab: "builder" });
-    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    await wait(() => expect(bodies("/api/pitotql/format")).toHaveLength(1));
     await act(async () => ui.getByRole("tab", { name: "SQL" }).click());
     await wait(() => expect(document.querySelector("[data-sql-hint]")).toBeTruthy());
     expect(document.querySelector("[data-sql-hint]")?.textContent).not.toContain("not converted");
     await act(async () => ui.getByRole("tab", { name: "Query" }).click());
-    expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!.state.doc.toString()).toBe("");
+    expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "PitotQL query" }))!.state.doc.toString()).toBe("");
   });
 
   it("holds Run while a Builder filter value cannot be used", async () => {
@@ -661,7 +661,7 @@ describe("ExplorePage", () => {
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "100 ms please" } }); });
     await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true));
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "100ms" } }); });
-    await new Promise(r => setTimeout(r, 400)); await act(async () => {}); const input = ui.getByRole<HTMLInputElement>("textbox", { name: "Filter 1 value" }); const btn = ui.getByRole<HTMLButtonElement>("button", { name: "Run" }); console.log("DBG", document.querySelector("[data-builder-problems]")?.textContent, document.querySelector("[data-builder-text]")?.textContent, input.value, input.getAttribute("aria-invalid"), btn.outerHTML.slice(0, 300), JSON.stringify(bodies("/api/fanql/format")));
+    await new Promise(r => setTimeout(r, 400)); await act(async () => {}); const input = ui.getByRole<HTMLInputElement>("textbox", { name: "Filter 1 value" }); const btn = ui.getByRole<HTMLButtonElement>("button", { name: "Run" }); console.log("DBG", document.querySelector("[data-builder-problems]")?.textContent, document.querySelector("[data-builder-text]")?.textContent, input.value, input.getAttribute("aria-invalid"), btn.outerHTML.slice(0, 300), JSON.stringify(bodies("/api/pitotql/format")));
     await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false));
   });
 

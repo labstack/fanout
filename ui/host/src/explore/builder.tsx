@@ -68,7 +68,7 @@ function Chip({ text, onRemove }: { text: string; onRemove(): void }) {
 
 /**
  * `variables` are the dashboard's variable names; filters may compare with `$name`.
- * `labels` give stored entries as FanQL, for those shown as chips. `onInvalid`
+ * `labels` give stored entries as PitotQL, for those shown as chips. `onInvalid`
  * reports whether a filter value cannot be used, so the owner can hold the run.
  */
 export function Builder({ query, schema, variables = [], labels = {}, onChange, onInvalid }: {

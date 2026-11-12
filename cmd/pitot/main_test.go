@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ecdsa"
@@ -822,5 +823,72 @@ func TestApplyConfiguredIngestTokenLogsWithoutToken(t *testing.T) {
 	}
 	if strings.Count(output, "PITOT_INGEST_TOKEN") != 2 {
 		t.Fatalf("logs must report both outcomes by setting name: %s", output)
+	}
+}
+
+func TestStartupRefusesRetiredEnvironmentBeforeStores(t *testing.T) {
+	if os.Getenv("TEST_STARTUP_CHILD") == "1" {
+		os.Args = []string{"pitot"}
+		main()
+		return
+	}
+	for _, retired := range []bool{true, false} {
+		t.Run(map[bool]string{true: "retired", false: "current"}[retired], func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "data")
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestStartupRefusesRetiredEnvironmentBeforeStores$")
+			command.Env = []string{"TEST_STARTUP_CHILD=1", "PATH=" + os.Getenv("PATH"), "PITOT_DATA_DIR=" + root, "PITOT_ADDR=127.0.0.1:0", "PITOT_MCP_ENABLED=false", "PITOT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32)}
+			// Test fixture for the exact retired prefix; production spelling is isolated.
+			const previous = "FANOUT_"
+			if retired {
+				command.Env = append(command.Env, previous+"DATA_DIR=private-value", previous+"TOKEN=")
+				output, err := command.CombinedOutput()
+				if err == nil || !strings.Contains(string(output), previous+"DATA_DIR") || !strings.Contains(string(output), previous+"TOKEN") || !strings.Contains(string(output), "rename them to PITOT_") || strings.Contains(string(output), "private-value") {
+					t.Fatalf("refusal: %s, %v", output, err)
+				}
+				if _, err := os.Stat(root); !os.IsNotExist(err) {
+					t.Fatalf("data directory touched before refusal: %v", err)
+				}
+				return
+			}
+			pipe, err := command.StderrPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := command.Start(); err != nil {
+				t.Fatal(err)
+			}
+			ready := make(chan bool, 1)
+			go func() {
+				scanner := bufio.NewScanner(pipe)
+				for scanner.Scan() {
+					if strings.Contains(scanner.Text(), "HTTP and OTLP listening") {
+						ready <- true
+						return
+					}
+				}
+				ready <- false
+			}()
+			select {
+			case started := <-ready:
+				if !started {
+					_ = command.Wait()
+					t.Fatal("current environment did not start")
+				}
+				if err := command.Process.Signal(os.Interrupt); err != nil {
+					t.Fatal(err)
+				}
+				if err := command.Wait(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.Stat(filepath.Join(root, "control", "pitot.sqlite")); err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				_ = command.Wait()
+				t.Fatal("startup timed out")
+			}
+		})
 	}
 }

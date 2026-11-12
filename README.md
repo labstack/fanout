@@ -25,7 +25,7 @@ client, built-in agent, MCP tools, dashboards, and alerts are preview capabiliti
 [documentation](https://pitot.dev) or run it below.
 
 - OTLP ingest over gRPC and HTTP, with local Parquet storage and DuckDB analytics.
-- Explore and FanQL for querying telemetry without an AI provider.
+- Explore and PitotQL for querying telemetry without an AI provider.
 - An investigation agent that answers questions about your telemetry in plain language.
 - An MCP server for external agents using the same typed query tools.
 - Dashboards across traces, logs, and metrics, and alerts on service error rate, latency,

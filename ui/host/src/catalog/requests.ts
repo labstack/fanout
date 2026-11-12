@@ -140,19 +140,19 @@ export function makeService(scenario: Scenario = {}, staticFetch: typeof fetch =
       if (scenario.dashboard === "error") return json({ code: "not_found", message: "Synthetic dashboard unavailable" }, 404);
       return json(scenario.dashboard === "empty" ? { ...dashboard, spec: { ...dashboard.spec, panels: [] } } : dashboard);
     }
-    if (path === "/api/fanql/parse" && method === "POST") {
-      if (body.text === exploreTypo) return json({ code: "invalid_fanql", message: "The query has problems", problems: [{ path: "text", message: "Unknown measure: countt", span: { start: 8, end: 14 }, fix_its: [{ label: "count", span: { start: 8, end: 14 }, text: "count" }] }] }, 400);
+    if (path === "/api/pitotql/parse" && method === "POST") {
+      if (body.text === exploreTypo) return json({ code: "invalid_pitotql", message: "The query has problems", problems: [{ path: "text", message: "Unknown measure: countt", span: { start: 8, end: 14 }, fix_its: [{ label: "count", span: { start: 8, end: 14 }, text: "count" }] }] }, 400);
       // Only recorded catalog inputs are accepted; this is no alternate parser.
       if (body.source === "logs" || body.source === "spans") return json({ query: { from: body.source, limit: 1000 }, canonical: body.text, notices: [], viz: { compatible: [{ viz: body.viz, requires: [] }], edits: [] } });
       if (body.text === exploreInvalid) return json({ query: { from: "spans", measures: ["sum(request_total)"], by: ["service"] }, canonical: exploreInvalid, notices: [], viz: { compatible: [{ viz: "bar", requires: [] }], edits: [] } });
-      if (body.text !== exploreQuery) return fail(`Unrecorded FanQL: ${body.text}`);
+      if (body.text !== exploreQuery) return fail(`Unrecorded PitotQL: ${body.text}`);
       return json({ query: { from: "spans", measures: ["count()"], by: ["service"] }, canonical: exploreQuery, notices: [], viz: { compatible: [{ viz: "bar", requires: [] }, { viz: "table", requires: [] }], edits: [] } });
     }
-    if (path === "/api/fanql/format" && method === "POST") {
-      if (JSON.stringify(body.query) !== JSON.stringify({ from: "spans", measures: ["count()"], by: ["service"] })) return fail("Unrecorded FanQL format");
+    if (path === "/api/pitotql/format" && method === "POST") {
+      if (JSON.stringify(body.query) !== JSON.stringify({ from: "spans", measures: ["count()"], by: ["service"] })) return fail("Unrecorded PitotQL format");
       return json({ text: exploreQuery, exactness: "exact", editable: true, requires: [], notices: [], where: [], measures: ["count()"] });
     }
-    if (path === "/api/fanql/complete" && method === "POST") return json({ replace: { start: body.cursor, end: body.cursor }, items: [], schema: { window: "1h", sampled: true, warm: true, recent: true } });
+    if (path === "/api/pitotql/complete" && method === "POST") return json({ replace: { start: body.cursor, end: body.cursor }, items: [], schema: { window: "1h", sampled: true, warm: true, recent: true } });
     if (path === "/api/queries/run" && method === "POST") {
       const requested = body.dashboard.panels as { id: string; viz: string }[];
       if (requested.length === 1 && ["explore", "search"].includes(requested[0].id)) {

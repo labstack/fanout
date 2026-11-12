@@ -196,8 +196,8 @@ test-race *ARGS='./...':
     bash scripts/with-duckdb.sh go test -race -gcflags=all=-d=checkptr=0 {{ARGS}}
 
 # Opt-in wall-clock acceptance; deterministic work bounds remain in test.
-fanql-perf:
-    PITOT_TEST_LATENCY=1 bash scripts/with-duckdb.sh go test ./internal/fanql -run TestLatencyBudgets -count=1
+pitotql-perf:
+    PITOT_TEST_LATENCY=1 bash scripts/with-duckdb.sh go test ./internal/pitotql -run TestLatencyBudgets -count=1
 
 # ── Browser quality ──────────────────────────────────────────────────────────
 

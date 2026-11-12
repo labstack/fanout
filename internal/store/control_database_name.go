@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -13,6 +15,30 @@ func previousControlDatabasePath(current string) string {
 	// Intentional compatibility exception: unattended upgrades must find the
 	// previous on-disk database instead of initializing an unclaimed instance.
 	return filepath.Join(filepath.Dir(current), "fanout.sqlite")
+}
+
+// previousEnvironmentPrefix is isolated for the startup-refusal compatibility exception.
+func previousEnvironmentPrefix() string { return "FANOUT_" }
+
+// RejectPreviousEnvironment refuses retired settings before startup can open state
+// or listeners. Empty assignments count as set; values never enter diagnostics.
+func RejectPreviousEnvironment(environ []string) error {
+	names := make(map[string]bool)
+	for _, assignment := range environ {
+		name, _, _ := strings.Cut(assignment, "=")
+		if strings.HasPrefix(name, previousEnvironmentPrefix()) {
+			names[name] = true
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	ordered := make([]string, 0, len(names))
+	for name := range names {
+		ordered = append(ordered, name)
+	}
+	sort.Strings(ordered)
+	return fmt.Errorf("retired environment variables: %s; rename them to PITOT_ before starting", strings.Join(ordered, ", "))
 }
 
 // MigrateControlDatabase preserves control state before any SQLite open can

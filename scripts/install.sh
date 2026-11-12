@@ -22,6 +22,13 @@ need() {
 	command -v "$1" >/dev/null 2>&1 || die "$1 is required"
 }
 
+# Intentional refusal exception, matching the server's previousEnvironmentPrefix.
+previous_environment_prefix() { printf '%s' 'FANOUT_'; }
+# NUL-delimited records keep multiline values from becoming apparent names.
+# Values remain inside awk; only assignment names reach diagnostics.
+previous_names=$(env -0 | tr '\n' '\001' | tr '\0' '\n' | awk -F= -v prefix="$(previous_environment_prefix)" 'index($1, prefix) == 1 { print $1 }' | sort -u)
+[ -z "$previous_names" ] || die "retired environment variables: $previous_names; rename them to PITOT_ before installing"
+
 need uname
 need tar
 need mktemp

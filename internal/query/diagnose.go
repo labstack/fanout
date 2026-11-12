@@ -175,7 +175,7 @@ func grouped(n int64) string {
 	return b.String()
 }
 
-// spoken writes a stored enum value as FanQL spells it: STATUS_CODE_ERROR is
+// spoken writes a stored enum value as PitotQL spells it: STATUS_CODE_ERROR is
 // error. Other values are unchanged.
 func spoken(sig *signal, field, value string) string {
 	if v := fieldVocabularies[field]; v.Signal == sig.name {

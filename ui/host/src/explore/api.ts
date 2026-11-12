@@ -13,11 +13,11 @@ export type Completion = { replace: TextSpan; items: CompletionItem[]; schema: {
 export type ParseBody = { text: string; source?: string; viz?: string; variables?: Variable[]; window?: string; namespace?: string };
 export type CompleteBody = { text: string; cursor: number; source?: string; viz?: string; window?: string; from?: string; to?: string };
 
-// Problems arrive as an ApiError with code invalid_fanql; spans index the text.
-export const parseFanql = (body: ParseBody, signal?: AbortSignal) => request<Parsed>("/api/fanql/parse", { method: "POST", json: body, signal });
-export const completeFanql = (body: CompleteBody, signal?: AbortSignal) => request<Completion>("/api/fanql/complete", { method: "POST", json: body, signal });
+// Problems arrive as an ApiError with code invalid_pitotql; spans index the text.
+export const parsePitotql = (body: ParseBody, signal?: AbortSignal) => request<Parsed>("/api/pitotql/parse", { method: "POST", json: body, signal });
+export const completePitotql = (body: CompleteBody, signal?: AbortSignal) => request<Completion>("/api/pitotql/complete", { method: "POST", json: body, signal });
 
-/** `where` and `measures` give each stored entry as FanQL, in stored order. */
+/** `where` and `measures` give each stored entry as PitotQL, in stored order. */
 export type Formatted = { text: string; exactness: string; editable: boolean; reason?: string; requires: string[]; notices: Notice[]; where: string[]; measures: string[] };
-// Prints a structured query as FanQL; problems arrive as an ApiError with code invalid_spec.
-export const formatFanql = (body: { query: Query; viz?: string }, signal?: AbortSignal) => request<Formatted>("/api/fanql/format", { method: "POST", json: body, signal });
+// Prints a structured query as PitotQL; problems arrive as an ApiError with code invalid_spec.
+export const formatPitotql = (body: { query: Query; viz?: string }, signal?: AbortSignal) => request<Formatted>("/api/pitotql/format", { method: "POST", json: body, signal });

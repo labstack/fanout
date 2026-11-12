@@ -9,7 +9,7 @@ import (
 )
 
 // The Traces page lists traces of spans; a diagnosis that counts names spans
-// throughout, groups digits, and spells stored enum values the way FanQL
+// throughout, groups digits, and spells stored enum values the way PitotQL
 // writes them.
 func TestTracesDiagnosisWording(t *testing.T) {
 	e := newFixtureExecutor(t)
@@ -49,8 +49,8 @@ func TestDiagnosisWithoutTimeStaysNeutral(t *testing.T) {
 	}
 }
 
-// A diagnosis names fields as FanQL spells them: duration, not duration ms.
-func TestDiagnosisNamesDurationAsFanQL(t *testing.T) {
+// A diagnosis names fields as PitotQL spells them: duration, not duration ms.
+func TestDiagnosisNamesDurationAsPitotQL(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := Dashboard{Name: "Duration", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "Slow", Viz: "table",
 		Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{"service = 'frontend'", "duration_ms > 9999000"}}}}}
@@ -64,7 +64,7 @@ func TestDiagnosisNamesDurationAsFanQL(t *testing.T) {
 }
 
 // IDs are unique, so the most common ones say nothing: an ID filter lists no
-// values seen. Other fields do, and an empty value is written as FanQL
+// values seen. Other fields do, and an empty value is written as PitotQL
 // writes it.
 func TestDiagnosisValuesSeen(t *testing.T) {
 	engine, repo := newTestEngine(t)

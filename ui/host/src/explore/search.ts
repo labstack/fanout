@@ -4,7 +4,7 @@ import { isInstant, ranges } from "../dashboards/search";
 
 const vizzes: readonly Viz[] = ["stat", "gauge", "timeseries", "bar", "table", "heatmap", "histogram", "scatter", "state_timeline", "logs", "log_patterns", "traces", "service_map", "health"];
 
-/** The FanQL envelope (proposal 0004, section 0.13) plus the page's own tab and SQL. */
+/** The PitotQL envelope (proposal 0004, section 0.13) plus the page's own tab and SQL. */
 export type ExploreSearch = { q: string; viz?: Viz; range: string; from?: string; to?: string; tab: "query" | "builder" | "sql"; sql?: string; sort?: string; drill?: string;
   /** Logs and Traces filter fields, kept apart from the typed filters. */
   picks?: Picks };

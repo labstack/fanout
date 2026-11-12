@@ -24,11 +24,11 @@ beforeEach(() => {
   parse = async body => json({ query: { from: body.source, ...(body.text ? { where: ["service = 'checkout'"] } : {}) }, canonical: body.source, viz: { compatible: [], edits: [] }, notices: [] });
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input);
-    if (url === "/api/fanql/parse") return parse(JSON.parse(String(init?.body)));
+    if (url === "/api/pitotql/parse") return parse(JSON.parse(String(init?.body)));
     if (url === "/api/queries/run") return json({ results: [{ id: "search", status: "ok", elapsed_ms: 3, frame }] });
     if (url === "/api/telemetry/schema") return json({ signals: {}, sql_relations: {}, services: [{ value: "checkout" }, { value: "frontend" }] });
     if (url.startsWith("/api/traces/")) return json({ summary: "", provenance: { window: "1h", generated_at: "", complete: true }, data: { trace_id: "abc", duration_ms: 5, has_error: false, services: ["checkout"], spans: [{ span_id: "s1", service: "checkout", operation: "GET /", kind: "server", start: "2026-10-30T10:00:00Z", duration_ms: 5, status: "ok" }], logs: [], span_count: 1, service_count: 1, truncated: false } });
-    if (url === "/api/fanql/complete") return json({ replace: { start: 0, end: 0 }, items: [], schema: { window: "1h", sampled: false, warm: true, recent: true } });
+    if (url === "/api/pitotql/complete") return json({ replace: { start: 0, end: 0 }, items: [], schema: { window: "1h", sampled: false, warm: true, recent: true } });
     throw new Error(`Unexpected request: ${url}`);
   });
 });
@@ -51,7 +51,7 @@ describe("SearchPage", () => {
   it("opens with the newest logs and runs the logs viz sorted by time", async () => {
     const { wait } = await render(logsPreset);
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
-    expect(bodies("/api/fanql/parse")[0]).toEqual({ text: "", window: "1h", source: "logs", viz: "logs" });
+    expect(bodies("/api/pitotql/parse")[0]).toEqual({ text: "", window: "1h", source: "logs", viz: "logs" });
     expect(bodies("/api/queries/run")[0].dashboard.panels[0]).toMatchObject({ viz: "logs", query: { from: "logs", sort: "time" } });
   });
 
@@ -74,7 +74,7 @@ describe("SearchPage", () => {
     await act(async () => view.dispatch({ changes: { from: 0, insert: "service:checkout" } }));
     await act(async () => ui.getByRole("button", { name: "Search" }).click());
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
-    expect(bodies("/api/fanql/parse")[1]).toEqual({ text: "service:checkout", window: "1h", source: "spans", viz: "traces" });
+    expect(bodies("/api/pitotql/parse")[1]).toEqual({ text: "service:checkout", window: "1h", source: "spans", viz: "traces" });
     expect(bodies("/api/queries/run")[1].dashboard.panels[0]).toMatchObject({ viz: "traces", query: { from: "spans", where: ["service = 'checkout'"], sort: "duration_ms" } });
   });
 
@@ -172,7 +172,7 @@ describe("SearchPage", () => {
     const { ui, wait, search } = await render(tracesPreset, { q: "a or b" });
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     await act(async () => ui.getByRole("button", { name: 'Exclude operation flagd.Service/"EventStream"' }).click());
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1).text).toBe('(a or b) -operation:"flagd.Service/""EventStream"""'));
+    await wait(() => expect(bodies("/api/pitotql/parse").at(-1).text).toBe('(a or b) -operation:"flagd.Service/""EventStream"""'));
     await wait(() => expect(search().q).toBe('(a or b) -operation:"flagd.Service/""EventStream"""'));
     expect(ui.getByRole("button", { name: "Exclude service flagd" })).toBeTruthy();
   });
@@ -182,14 +182,14 @@ describe("SearchPage", () => {
     const where = ["(service = 'a' OR service = 'b')", "(service IS NULL OR service != 'cart')", "status = 'STATUS_CODE_ERROR'", "duration_ms > 500"];
     parse = async body => json({ query: { from: body.source, where }, canonical: body.text, viz: { compatible: [], edits: [] }, notices: [] });
     const base = fetchMock.getMockImplementation()!;
-    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/fanql/format"
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/pitotql/format"
       ? json({ text: "", exactness: "exact", editable: true, requires: [], notices: [], where: ["service:a or service:b", "-service:cart", "status:error", "duration>500ms"], measures: [] })
       : base(input, init));
     const { ui, wait } = await render(tracesPreset, { q: "(service:a or service:b) -service:cart", picks: { errors: "1", slower: "500" } }, onExplore);
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     await act(async () => ui.getByRole("button", { name: "Span error rates by service" }).click());
     await wait(() => expect(onExplore).toHaveBeenCalledWith("spans where (service:a or service:b) duration>500ms | count(), error_rate(), p95(duration) by service sort error_rate"));
-    expect(bodies("/api/fanql/format")[0]).toEqual({ query: { from: "spans", where }, viz: "traces" });
+    expect(bodies("/api/pitotql/format")[0]).toEqual({ query: { from: "spans", where }, viz: "traces" });
   });
 
   it("opens every span by service when nothing filters the traces", async () => {
@@ -198,7 +198,7 @@ describe("SearchPage", () => {
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     await act(async () => ui.getByRole("button", { name: "Span error rates by service" }).click());
     await wait(() => expect(onExplore).toHaveBeenCalledWith("spans | count(), error_rate(), p95(duration) by service sort error_rate"));
-    expect(bodies("/api/fanql/format")).toHaveLength(0);
+    expect(bodies("/api/pitotql/format")).toHaveLength(0);
   });
 
   it("opens the trace drawer named in the URL", async () => {
@@ -212,7 +212,7 @@ describe("SearchPage", () => {
     const { wait, onSearch, search, ui } = await render(logsPreset, { q: "service:b" });
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     await act(async () => onSearch({ ...search(), q: "service:a" }));
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "service:a", window: "1h", source: "logs", viz: "logs" }));
+    await wait(() => expect(bodies("/api/pitotql/parse").at(-1)).toEqual({ text: "service:a", window: "1h", source: "logs", viz: "logs" }));
     expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "Search logs" }))!.state.doc.toString()).toBe("service:a");
   });
 
@@ -220,22 +220,22 @@ describe("SearchPage", () => {
     const { ui, wait, search } = await render(tracesPreset, { q: "operation:GET" });
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     await act(async () => ui.getByRole("switch", { name: "Errors only" }).click());
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "(operation:GET) status:error", window: "1h", source: "spans", viz: "traces" }));
+    await wait(() => expect(bodies("/api/pitotql/parse").at(-1)).toEqual({ text: "(operation:GET) status:error", window: "1h", source: "spans", viz: "traces" }));
     expect(search().picks).toEqual({ errors: "1" });
     const runs = bodies("/api/queries/run").length;
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Slower than (ms)" }), { target: { value: "500" } }); });
     // Typing alone does not search; leaving the field commits it.
     expect(bodies("/api/queries/run")).toHaveLength(runs);
     await act(async () => { fireEvent.keyDown(ui.getByRole("textbox", { name: "Slower than (ms)" }), { key: "Enter" }); });
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1).text).toBe("(operation:GET) status:error duration>500ms"));
+    await wait(() => expect(bodies("/api/pitotql/parse").at(-1).text).toBe("(operation:GET) status:error duration>500ms"));
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Slower than (ms)" }), { target: { value: "800" } }); });
     await act(async () => { fireEvent.focusOut(ui.getByRole("textbox", { name: "Slower than (ms)" })); });
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1).text).toBe("(operation:GET) status:error duration>800ms"));
+    await wait(() => expect(bodies("/api/pitotql/parse").at(-1).text).toBe("(operation:GET) status:error duration>800ms"));
   });
 
   it("filters logs by service and severity from the URL", async () => {
     const { ui, wait } = await render(logsPreset, { picks: { service: "billing", severity: "warn" } });
-    await wait(() => expect(bodies("/api/fanql/parse")[0]).toEqual({ text: "service:\"billing\" severity>=warn", window: "1h", source: "logs", viz: "logs" }));
+    await wait(() => expect(bodies("/api/pitotql/parse")[0]).toEqual({ text: "service:\"billing\" severity>=warn", window: "1h", source: "logs", viz: "logs" }));
     // A service missing from the recent schema still shows as chosen.
     await wait(() => expect(ui.getByLabelText<HTMLInputElement>("Service", { selector: "input" }).value).toBe("billing"));
   });
@@ -261,20 +261,20 @@ describe("SearchPage", () => {
     await wait(() => expect(ui.getByText("host.name is usually a resource attribute")).toBeTruthy());
     const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "Search logs" }))!;
     await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "host.name:b" } }));
-    expect(document.querySelector("[data-fanql-notices]")).toBeNull();
+    expect(document.querySelector("[data-pitotql-notices]")).toBeNull();
     await act(async () => ui.getByRole("button", { name: "Search" }).click());
     await act(async () => view.dispatch({ changes: { from: view.state.doc.length, insert: " x" } }));
     await act(async () => answer!());
     await wait(() => expect(bodies("/api/queries/run").length).toBeGreaterThan(1));
-    expect(document.querySelector("[data-fanql-notices]")).toBeNull();
+    expect(document.querySelector("[data-pitotql-notices]")).toBeNull();
   });
 
   it("groups typed filters before the fields and maps problem spans back to the editor", async () => {
     parse = async body => body.text.startsWith("(") && body.text.includes("where")
-      ? json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "the page supplies where", span: { start: 1, end: 6 }, fix_its: [{ label: "Remove where", span: { start: 1, end: 7 }, text: "" }] }, { path: "text", message: "about the field", span: { start: 20, end: 30 } }] }, 400)
+      ? json({ code: "invalid_pitotql", message: "The query has problems.", problems: [{ path: "text", message: "the page supplies where", span: { start: 1, end: 6 }, fix_its: [{ label: "Remove where", span: { start: 1, end: 7 }, text: "" }] }, { path: "text", message: "about the field", span: { start: 20, end: 30 } }] }, 400)
       : json({ query: { from: "logs" }, canonical: "logs", viz: { compatible: [], edits: [] }, notices: [] });
     const { ui, wait } = await render(logsPreset, { q: "service:a or service:b", picks: { severity: "warn" } });
-    await wait(() => expect(bodies("/api/fanql/parse")[0].text).toBe("(service:a or service:b) severity>=warn"));
+    await wait(() => expect(bodies("/api/pitotql/parse")[0].text).toBe("(service:a or service:b) severity>=warn"));
     const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "Search logs" }))!;
     await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "where x" } }));
     await act(async () => ui.getByRole("button", { name: "Search" }).click());
@@ -285,7 +285,7 @@ describe("SearchPage", () => {
   });
 
   it("shows the problem when a where is typed", async () => {
-    parse = async body => body.text ? json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "the page supplies where", span: { start: 0, end: 5 } }] }, 400) : json({ query: { from: "logs" }, canonical: "logs", viz: { compatible: [], edits: [] }, notices: [] });
+    parse = async body => body.text ? json({ code: "invalid_pitotql", message: "The query has problems.", problems: [{ path: "text", message: "the page supplies where", span: { start: 0, end: 5 } }] }, 400) : json({ query: { from: "logs" }, canonical: "logs", viz: { compatible: [], edits: [] }, notices: [] });
     const { ui, wait } = await render(logsPreset, { q: "where service:a" });
     await wait(() => expect(ui.getByRole("alert").textContent).toBe("the page supplies where"));
   });

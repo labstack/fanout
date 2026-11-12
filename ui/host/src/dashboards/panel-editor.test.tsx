@@ -33,8 +33,8 @@ beforeEach(() => {
   ranFrame = frame;
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input);
-    if (url === "/api/fanql/format") return json({ text: "spans | count() by service", exactness: "exact", editable: true, requires: [], notices: [] });
-    if (url === "/api/fanql/parse") return json({ query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] }, canonical: "spans where service:$service | count() by service", viz: { compatible, edits: [] }, notices: [] });
+    if (url === "/api/pitotql/format") return json({ text: "spans | count() by service", exactness: "exact", editable: true, requires: [], notices: [] });
+    if (url === "/api/pitotql/parse") return json({ query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] }, canonical: "spans where service:$service | count() by service", viz: { compatible, edits: [] }, notices: [] });
     if (url === "/api/queries/run") return json({ results: [{ id: "explore", status: ranFrame.rows ? "ok" : "empty", elapsed_ms: 2, frame: ranFrame }] });
     if (url === "/api/dashboards/d1" && (init?.method === "PATCH" || init?.method === "PUT")) return patch();
     if (url === "/api/dashboards/d1" && !init?.method) return json({ id: "d1", version: 9, spec: { ...spec, panels: [{ ...spec.panels[0], title: "Requests by service" }] } });
@@ -56,12 +56,12 @@ async function render({ add = false, panel: edited = spec.panels[0], layoutChang
 }
 
 describe("PanelEditor", () => {
-  it("opens a structured panel as FanQL, runs with the dashboard's variables and saves its query", async () => {
+  it("opens a structured panel as PitotQL, runs with the dashboard's variables and saves its query", async () => {
     const { ui, onClose, wait } = await render();
-    await wait(() => expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!.state.doc.toString()).toBe("spans | count() by service"));
+    await wait(() => expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "PitotQL query" }))!.state.doc.toString()).toBe("spans | count() by service"));
     // An existing panel runs as soon as it opens.
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
-    expect(bodies("/api/fanql/parse")[0].variables).toEqual(spec.variables);
+    expect(bodies("/api/pitotql/parse")[0].variables).toEqual(spec.variables);
     expect(bodies("/api/queries/run")[0]).toMatchObject({ vars: { service: "checkout" }, dashboard: { variables: spec.variables } });
     await wait(() => expect(ui.getByRole("button", { name: "Save panel" }).getAttribute("aria-disabled")).toBe("false"));
     await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
@@ -71,8 +71,8 @@ describe("PanelEditor", () => {
 
   it("adds a new panel with a free id", async () => {
     const { ui, wait } = await render({ add: true });
-    await wait(() => expect(ui.getByRole("textbox", { name: "FanQL query" })).toBeTruthy());
-    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!;
+    await wait(() => expect(ui.getByRole("textbox", { name: "PitotQL query" })).toBeTruthy());
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "PitotQL query" }))!;
     await act(async () => view.dispatch({ changes: { from: 0, insert: "spans | count() by service" } }));
     await act(async () => ui.getByRole("button", { name: "Run" }).click());
     await wait(() => expect(ui.getByRole("button", { name: "Add panel" }).getAttribute("aria-disabled")).toBe("false"));
@@ -143,8 +143,8 @@ describe("PanelEditor", () => {
     await act(async () => cleanups.splice(0).forEach(cleanup => cleanup()));
     document.body.innerHTML = "";
     const added = await render({ add: true });
-    await added.wait(() => expect(added.ui.getByRole("textbox", { name: "FanQL query" })).toBeTruthy());
-    const view = EditorView.findFromDOM(added.ui.getByRole("textbox", { name: "FanQL query" }))!;
+    await added.wait(() => expect(added.ui.getByRole("textbox", { name: "PitotQL query" })).toBeTruthy());
+    const view = EditorView.findFromDOM(added.ui.getByRole("textbox", { name: "PitotQL query" }))!;
     await act(async () => view.dispatch({ changes: { from: 0, insert: "spans | count() by service" } }));
     await act(async () => added.ui.getByRole("button", { name: "Run" }).click());
     await added.wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
@@ -153,10 +153,10 @@ describe("PanelEditor", () => {
 
   it("asks before discarding a draft", async () => {
     const { ui, onClose, wait } = await render({ add: true });
-    await wait(() => expect(ui.getByRole("textbox", { name: "FanQL query" })).toBeTruthy());
+    await wait(() => expect(ui.getByRole("textbox", { name: "PitotQL query" })).toBeTruthy());
     await act(async () => ui.getByRole("button", { name: "Cancel" }).click());
     expect(onClose).toHaveBeenCalledTimes(1);
-    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!;
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "PitotQL query" }))!;
     await act(async () => view.dispatch({ changes: { from: 0, insert: "spans" } }));
     await act(async () => ui.getByRole("button", { name: "Cancel" }).click());
     await wait(() => expect(ui.getByText("Discard changes?")).toBeTruthy());
@@ -243,7 +243,7 @@ describe("PanelEditor", () => {
     await wait(() => expect(ui.getByText(failure)).toBeTruthy());
     const save = () => ui.getByRole("button", { name: "Save panel" });
     expect(save().getAttribute("aria-disabled")).toBe("false");
-    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!;
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "PitotQL query" }))!;
     await act(async () => view.dispatch({ changes: { from: view.state.doc.length, insert: " every 5m" } }));
     await act(async () => ui.getByRole("button", { name: "Run" }).click());
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
@@ -253,9 +253,9 @@ describe("PanelEditor", () => {
 
   it("names a new panel after its query unless a title is typed, and shows the variables it runs with", async () => {
     const { ui, wait } = await render({ add: true });
-    await wait(() => expect(ui.getByRole("textbox", { name: "FanQL query" })).toBeTruthy());
+    await wait(() => expect(ui.getByRole("textbox", { name: "PitotQL query" })).toBeTruthy());
     expect(ui.getByText((_, node) => node?.hasAttribute("data-editor-variables") === true && node.textContent === "Runs with the dashboard's variables: $service = checkout")).toBeTruthy();
-    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!;
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "PitotQL query" }))!;
     await act(async () => view.dispatch({ changes: { from: 0, insert: "spans | count() by service" } }));
     await act(async () => ui.getByRole("button", { name: "Run" }).click());
     await wait(() => expect(ui.getByRole("button", { name: "Add panel" }).getAttribute("aria-disabled")).toBe("false"));

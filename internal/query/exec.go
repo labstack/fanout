@@ -894,8 +894,8 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 		executionSQL := compiled.SQL
 		scanColumns := compiled.Columns
 		if compiled.ranking != nil {
-			executionSQL = executionSQL[:compiled.rankOffset] + `, (SELECT count(*) FROM candidates WHERE n < 20)::DOUBLE AS "_fanql_below_floor"` + executionSQL[compiled.rankOffset:]
-			scanColumns = append(append([]Column(nil), scanColumns...), Column{Name: "_fanql_below_floor", Type: "number"})
+			executionSQL = executionSQL[:compiled.rankOffset] + `, (SELECT count(*) FROM candidates WHERE n < 20)::DOUBLE AS "_pitotql_below_floor"` + executionSQL[compiled.rankOffset:]
+			scanColumns = append(append([]Column(nil), scanColumns...), Column{Name: "_pitotql_below_floor", Type: "number"})
 		}
 		rows, err := e.engine.QueryContext(ctx, executionSQL, compiled.Args...)
 		if err != nil {

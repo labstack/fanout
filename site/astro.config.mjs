@@ -119,7 +119,7 @@ export default defineConfig({
             { label: "CLI", slug: "docs/reference/cli" },
             { label: "HTTP routes", slug: "docs/reference/api" },
             { label: "MCP tools", slug: "docs/reference/mcp" },
-            { label: "FanQL", slug: "docs/reference/fanql" },
+            { label: "PitotQL", slug: "docs/reference/pitotql" },
             { label: "Alert expressions", slug: "docs/reference/alert-expressions" },
             { label: "Roles", slug: "docs/reference/roles" },
             { label: "Endpoints", slug: "docs/reference/endpoints" },

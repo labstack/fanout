@@ -249,7 +249,7 @@ Candidate at v1.44.0. Filters on `rpc.method` read the VARIANT map until a
 later format adds the key. `peer_service` and `rpc_service` contain Pitot
 logic and stay as derived columns, which is open question 1.
 
-**Resolution.** FanQL already reads `http.route` as `attributes['http.route']`
+**Resolution.** PitotQL already reads `http.route` as `attributes['http.route']`
 (0004, section 0.5). The compiler maps a key in the list to its hidden column.
 The SQL guard does the same on the parsed AST for every
 `attributes['<literal>']` and `resource['<literal>']` subscript. The
@@ -264,7 +264,7 @@ mark.
 
 The read path implements this as follows (`internal/engine/sql_keys.go`):
 
-- Snapshot binding rewrites every query, so FanQL, structured panels, panel
+- Snapshot binding rewrites every query, so PitotQL, structured panels, panel
   SQL and product SQL share one rule. A subscript becomes the column when its
   map binds to a signal relation directly, or through subqueries and CTEs
   that pass it on with `*`. Rewritten select items keep their original
@@ -287,7 +287,7 @@ shredding `messaging.*`.
 **Views, rollups, compaction and verification.**
 
 - The spans view exposes the hidden columns.
-- Rollups, default dashboards and FanQL reference examples move from the old
+- Rollups, default dashboards and PitotQL reference examples move from the old
   columns to keys.
 - The read-cache schema version changes, so caches rebuild.
 - Compaction merges format-5 inputs column for column and sums the spill

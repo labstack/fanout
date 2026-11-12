@@ -5,5 +5,7 @@ export type Problem = { path: string; message: string; hint?: string; span?: Tex
 export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly problems: Problem[] = [], readonly code: string = "") {
     super(message);
+    // Read alias for responses saved or served before the language rename.
+    if (this.code === "invalid_fanql") this.code = "invalid_pitotql";
   }
 }

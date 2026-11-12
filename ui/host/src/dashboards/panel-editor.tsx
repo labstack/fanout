@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ALL, type DashboardSpec, type DashboardTime, type Panel, type VarValue } from "../../../panels/types";
 import { ApiError } from "../api-error";
-import { formatFanql, type Formatted } from "../explore/api";
+import { formatPitotql, type Formatted } from "../explore/api";
 import { ExplorePage } from "../explore/page";
 import { uniquePanelID } from "../explore/save-dialog";
 import { defaultRange, type ExploreSearch } from "../explore/search";
@@ -80,7 +80,7 @@ export default function PanelEditor({ dashboardId, version: openedVersion, spec:
   useEffect(() => { if (conflict === "stale") loadLatest.current?.focus(); }, [conflict]);
   const formatted = useQuery({
     queryKey: ["panel-editor-format", dashboardId, openedPanel?.id, openedVersion],
-    queryFn: ({ signal }) => formatFanql({ query: openedPanel!.query!, viz: openedPanel!.viz }, signal),
+    queryFn: ({ signal }) => formatPitotql({ query: openedPanel!.query!, viz: openedPanel!.viz }, signal),
     enabled: Boolean(openedPanel?.query), staleTime: Infinity, retry: false,
   });
   const ready = !openedPanel?.query || formatted.isSuccess;

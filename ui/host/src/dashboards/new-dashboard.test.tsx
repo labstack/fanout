@@ -19,7 +19,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input);
-    if (url === "/api/fanql/parse") return json({ query: { from: "spans", measures: ["count()"], by: ["service"] }, canonical: "spans | count() by service", viz: { compatible: [{ viz: "table", requires: [] }], edits: [] }, notices: [] });
+    if (url === "/api/pitotql/parse") return json({ query: { from: "spans", measures: ["count()"], by: ["service"] }, canonical: "spans | count() by service", viz: { compatible: [{ viz: "table", requires: [] }], edits: [] }, notices: [] });
     if (url === "/api/queries/run") return json({ results: [{ id: "explore", status: "ok", elapsed_ms: 2, frame }] });
     if (url === "/api/dashboards" && init?.method === "POST") return json({ id: "d9", version: 1 }, 201);
     throw new Error(`Unexpected request: ${url}`);
@@ -37,7 +37,7 @@ describe("NewDashboard", () => {
     const ui = within(document.body);
     const wait = async (assertion: () => void) => vi.waitFor(async () => { await act(async () => {}); assertion(); }, { timeout: 3000, interval: 10 });
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Dashboard name" }), { target: { value: "Checkout" } }); });
-    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!;
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "PitotQL query" }))!;
     await act(async () => view.dispatch({ changes: { from: 0, insert: "spans | count() by service" } }));
     await act(async () => ui.getByRole("button", { name: "Run" }).click());
     await wait(() => expect(ui.getByRole("button", { name: "Create dashboard" }).getAttribute("aria-disabled")).toBe("false"));

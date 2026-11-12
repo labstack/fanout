@@ -20,8 +20,17 @@ conflict with a third party's registered US trademark in cloud services.
 - Container images are `ghcr.io/labstack/pitot` and `docker.io/labstack/pitot`.
   Update deployment manifests, service names, install URLs and MCP client entries.
   The MCP Registry identity is `io.github.labstack/pitot`.
-- The pre-rename environment variable prefix is no longer read, including
-  installer overrides and secret-file settings. Use `PITOT_*` settings.
+- The server and installer refuse to start if any variable with the exact,
+  case-sensitive pre-rename prefix is set, including empty assignments,
+  installer overrides and secret-file settings. The error lists names only.
+  Rename those variables to `PITOT_*` before upgrading; they no longer silently
+  use defaults.
+- The query language is now **PitotQL**. Existing structured dashboard queries,
+  MCP `query_telemetry` arguments (`text`, `panel.query`, `panel.sql`), query
+  keywords, Explore URL parameters and browser storage keys are unchanged.
+  Previous query HTTP paths and the MCP reference URI remain read aliases;
+  responses and new clients use canonical PitotQL names. See
+  [rename compatibility](../reference/rename-compatibility/) for the exact aliases.
 - Before upgrading, stop the service and take a cold backup of the complete
   data directory. On startup, Pitot automatically renames the previous control
   database and its SQLite WAL, shared-memory and rollback-journal sidecars in

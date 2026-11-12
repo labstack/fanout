@@ -16,8 +16,8 @@ import { classifyPanelResult, type PanelDisplayResult } from "../dashboards/pane
 import { RangeMenu } from "../dashboards/toolbar";
 import type { RowControls } from "../dashboards/viz/table";
 import { LogDetails } from "./log-details";
-import { FanqlEditor } from "../fanql-editor/fanql-editor";
-import { completeFanql, formatFanql, parseFanql, type Notice as QueryNotice } from "./api";
+import { PitotqlEditor } from "../pitotql-editor/pitotql-editor";
+import { completePitotql, formatPitotql, parsePitotql, type Notice as QueryNotice } from "./api";
 import { SaveDialog, defaultTitle } from "./save-dialog";
 import { exploreTime, maxSlower, type ExploreSearch, type Picks } from "./search";
 import type { TextSpan } from "../api-error";
@@ -41,10 +41,10 @@ export const tracesPreset: Preset = { name: "Traces", source: "spans", viz: "tra
 const panelID = "search";
 const severityOptions = [{ value: "debug", label: "Debug and above" }, { value: "info", label: "Info and above" }, { value: "warn", label: "Warn and above" }, { value: "error", label: "Error and above" }, { value: "fatal", label: "Fatal" }];
 
-/** FanQL terms for the filter fields; the server parses them like typed filters. */
+/** PitotQL terms for the filter fields; the server parses them like typed filters. */
 function pickTerms(preset: Preset, picks: Picks): string {
   const terms: string[] = [];
-  // FanQL doubles a quote inside a quoted value.
+  // PitotQL doubles a quote inside a quoted value.
   if (preset.fields.includes("service") && picks.service) terms.push(`service:"${picks.service.replaceAll('"', '""')}"`);
   if (preset.fields.includes("severity") && picks.severity) terms.push(`severity>=${picks.severity}`);
   if (preset.fields.includes("errors") && picks.errors) terms.push("status:error");
@@ -59,13 +59,13 @@ const searchCopy = (result: PanelResult): PanelResult => result.reason === "busy
   ? { ...result, error: "Not run: other queries kept the server busy. Run the search again." } : result;
 /** The typed filters are grouped so a top-level `or` stays theirs; the fields' terms follow. */
 const combine = (filters: string, picked: string) => filters.trim() && picked ? `(${filters}) ${picked}` : filters.trim() ? filters : picked;
-/** FanQL quotes a value with doubled inner quotes. */
+/** PitotQL quotes a value with doubled inner quotes. */
 const quoted = (value: string) => `"${value.replaceAll('"', '""')}"`;
 /** A stored filter that reads the span status column, ignoring quoted text such as attribute keys. */
 const readsStatus = (sql: string) => /\bstatus\b/i.test(sql.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"/g, "''"));
 
 /**
- * The searched spans grouped by service, as a FanQL query. Status terms would
+ * The searched spans grouped by service, as a PitotQL query. Status terms would
  * make every rate 0 or 100%, and an excluded term drops whole traces here but
  * only single spans there, so both are left out.
  */
@@ -73,7 +73,7 @@ async function servicesQuery(query: Panel["query"]): Promise<string> {
   const where = query?.where ?? [];
   let filters = "";
   if (where.length > 0) {
-    const formatted = await formatFanql({ query: { from: "spans", where }, viz: "traces" });
+    const formatted = await formatPitotql({ query: { from: "spans", where }, viz: "traces" });
     filters = formatted.where.filter((entry, i) => !entry.startsWith("-") && !readsStatus(where[i] ?? ""))
       .map(entry => /\bor\b/i.test(entry) ? `(${entry})` : entry).join(" ");
   }
@@ -84,7 +84,7 @@ type Ran = { text: string; terms: string; sort: string; window: string; panel: P
 
 export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
   preset: Preset; search: ExploreSearch; onSearch(next: ExploreSearch, replace?: boolean): void; onSaved(dashboardId: string): void;
-  /** Opens a whole FanQL query in Explore. */
+  /** Opens a whole PitotQL query in Explore. */
   onExplore?(q: string): void;
 }) {
   const [text, setText] = useState(search.q);
@@ -125,7 +125,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
       const combined = combine(filters, picked);
       const shift = filters.trim() && picked ? 1 : 0;
       setShifted({ shift, length: Array.from(filters).length });
-      const parsed = await parseFanql({ text: combined, source: preset.source, viz: preset.viz, window: time.from && time.to ? undefined : time.range }, abort.signal);
+      const parsed = await parsePitotql({ text: combined, source: preset.source, viz: preset.viz, window: time.from && time.to ? undefined : time.range }, abort.signal);
       if (abort.signal.aborted) return;
       // Notice spans index the text that was sent, as problem spans do.
       if (current.current === filters) setNotices(parsed.notices);
@@ -201,10 +201,10 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
       <RangeMenu inHeader time={time} onRange={range => onSearch({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => onSearch({ ...search, from, to })} />
     </Group>
     <Stack gap="xs">
-      <Text id={help} size="xs" c="dimmed">Filter with FanQL, for example <code>{preset.example}</code>. {preset.matching} Press Enter to search.</Text>
-      <FanqlEditor value={text} label={`Search ${preset.name.toLowerCase()}`} describedBy={help} problems={local.problems} notices={local.notices}
+      <Text id={help} size="xs" c="dimmed">Filter with PitotQL, for example <code>{preset.example}</code>. {preset.matching} Press Enter to search.</Text>
+      <PitotqlEditor value={text} label={`Search ${preset.name.toLowerCase()}`} describedBy={help} problems={local.problems} notices={local.notices}
         onChange={value => { setText(value); setProblems([]); setNotices([]); }} onRun={() => void execute(text, sort)}
-        complete={(value, cursor, signal) => completeFanql({ text: value, cursor, source: preset.source, viz: preset.viz, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
+        complete={(value, cursor, signal) => completePitotql({ text: value, cursor, source: preset.source, viz: preset.viz, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
     </Stack>
     <Group gap="sm" align="flex-end" data-search-fields>
       {preset.fields.includes("service") && <Select label="Service" placeholder={services.isPending ? "Loading services…" : "All services"} w={220} clearable searchable value={search.picks?.service ?? null}

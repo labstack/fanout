@@ -224,3 +224,20 @@ func TestControlDatabaseUpgradeAllowsFreshInstall(t *testing.T) {
 		t.Fatalf("fresh users = %d, err=%v", users, err)
 	}
 }
+
+func TestPreviousEnvironmentRefusesNamesWithoutValues(t *testing.T) {
+	prefix := previousEnvironmentPrefix()
+	err := RejectPreviousEnvironment([]string{prefix + "TOKEN=private-marker", prefix + "ADDR=", prefix + "TOKEN=another-private-marker"})
+	want := "retired environment variables: " + prefix + "ADDR, " + prefix + "TOKEN; rename them to PITOT_ before starting"
+	if err == nil || err.Error() != want {
+		t.Fatalf("refusal = %v, want %q", err, want)
+	}
+}
+
+func TestPreviousEnvironmentAllowsCurrentAndCaseSensitiveNames(t *testing.T) {
+	for _, env := range [][]string{nil, {}, {"PITOT_ADDR=:0", strings.ToLower(previousEnvironmentPrefix()) + "TOKEN=ignored", "OTHER_" + previousEnvironmentPrefix() + "TOKEN=ignored"}} {
+		if err := RejectPreviousEnvironment(env); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

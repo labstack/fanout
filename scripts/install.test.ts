@@ -26,12 +26,27 @@ https://github.com/labstack/pitot/releases/download/v2026.11.4-alpha/*) cp "$INS
 esac
 `);
     chmodSync(join(commands, "curl"), 0o700);
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^PITOT_/.test(key)));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^PITOT_/.test(key) && !key.startsWith(previousPrefix)));
     Object.assign(env, { PATH: `${commands}:${process.env.PATH}`, INSTALL_FIXTURES: root,
-      PITOT_VERSION: "v2026.11.4-alpha", PITOT_PREFIX: prefix });
+      PITOT_VERSION: "v2026.11.4-alpha", PITOT_PREFIX: prefix,
+      [previousPrefix.toLowerCase() + "TOKEN"]: "ignored", OTHER: "private\n" + previousPrefix + "FAKE=private-continuation" });
     const result = spawnSync("sh", [installer], { env, encoding: "utf8" });
     expect(result.status).toBe(0);
     expect(readFileSync(join(prefix, "pitot"), "utf8")).toContain("fixture");
     expect(result.stderr).not.toContain(prefix);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+const previousPrefix = readFileSync(installer, "utf8").match(/previous_environment_prefix\(\) \{ printf '%s' '([^']+)'/ )![1];
+
+test("installer refuses retired variable names before downloads without exposing values", () => {
+ const env = { PATH: process.env.PATH, [previousPrefix + "VERSION"]: "private-version", [previousPrefix + "PREFIX"]: "", OTHER: "private\n" + previousPrefix + "FAKE=private-continuation" };
+ const result = spawnSync("sh", [installer], { env, encoding: "utf8" });
+ expect(result.status).not.toBe(0);
+ expect(result.stdout).toBe("");
+ expect(result.stderr).toContain(previousPrefix + "VERSION");
+ expect(result.stderr).toContain(previousPrefix + "PREFIX");
+ expect(result.stderr).toContain("rename them to PITOT_");
+ expect(result.stderr).not.toContain("private");
+ expect(result.stderr).not.toContain("FAKE");
 });

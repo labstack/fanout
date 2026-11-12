@@ -1,0 +1,1 @@
+import{t as e}from"./settings-Cgt_UVbR.js";var t=e;export{t as component};

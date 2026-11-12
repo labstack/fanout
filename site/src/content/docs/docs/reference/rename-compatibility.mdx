@@ -1,0 +1,32 @@
+---
+title: Rename compatibility
+description: Intentional compatibility exceptions retained through the Pitot rename.
+---
+
+The current query language is **PitotQL**. New code, clients, generated references
+and responses use current names. The following previous spellings are intentional
+exceptions, covered by compatibility tests:
+
+| Previous spelling | Behavior and owning boundary |
+| --- | --- |
+| `FANOUT_` | The server's `previousEnvironmentPrefix` beside `previousControlDatabasePath`, and the standalone installer's `previous_environment_prefix`, recognize this exact case-sensitive prefix only to refuse startup. Empty assignments also refuse; diagnostics list names only and instruct renaming to `PITOT_`. Tests exercise the same refusal. |
+| `/api/fanql/parse`, `/api/fanql/format`, `/api/fanql/complete`, `/api/fanql/reference` | Accepted aliases for the corresponding `/api/pitotql/` routes with identical telemetry authorization, request shapes and canonical responses. Owned by `previousQueryPath`; aliases remain callable by existing clients. |
+| `pitot://fanql/reference` | MCP `resources/read` accepts this URI and returns `pitot://pitotql/reference` with the current reference. Only the current URI is advertised. Owned by `canonicalQueryResource`. |
+| `/docs/reference/fanql` (also `.html` and `.md`) | `site/public/_redirects` redirects published reference URLs to the corresponding current HTML/Markdown reference. New navigation and generated pages use the current slug; script tests pin these redirect contracts. |
+| `invalid_fanql` | The Go `pitotql.Failure` JSON reader and browser `ApiError` accept recorded or older-server failures as `invalid_pitotql`; serialization and new server responses emit only the current code. Tests prove read-old/write-new behavior. |
+| `fanout.sqlite` | `previousControlDatabasePath` preserves users, tokens and dashboards by migrating the complete control database file set before opening SQLite. |
+| Published migration comments | The two previous-name comments in `20260930000000_initial.sql` and `20261004000000_dashboard_specs.sql` remain immutable. |
+| Telemetry spill footer prefix | The existing `fanout` prefix remains byte-compatible with format-5 persisted telemetry. |
+
+Saved dashboard specs store structured `query` objects, not a language enum or text.
+MCP tool names and arguments remain `query_telemetry`, `text`, `panel.query` and
+`panel.sql`. Explore URL keys (`v`, `q`, `tab`, `sql`, time and visualization),
+browser storage keys, API enums and the language keywords contain no renamed
+language identifier and retain their wire/storage spelling. User-authored query
+text, SQL aliases, field names and dashboard titles remain data, never rewritten.
+The internal ranking helper column now uses `_pitotql_below_floor`; it is transient,
+not a persisted dashboard field.
+
+Generated browser assets retain the error-code reader alias. Disposable site
+build output may repeat this compatibility page and the documentation redirect;
+those are the same documented exceptions.

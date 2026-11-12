@@ -13,9 +13,9 @@ import { PanelCard } from "../dashboards/panel-card";
 import { exploreDrillClient } from "./drill";
 import { classifyPanelResult, type PanelDisplayResult } from "../dashboards/panel-result";
 import { RangeMenu } from "../dashboards/toolbar";
-import { FanqlEditor } from "../fanql-editor/fanql-editor";
+import { PitotqlEditor } from "../pitotql-editor/pitotql-editor";
 import { SqlEditor } from "../sql-editor/sql-editor";
-import { completeFanql, formatFanql, parseFanql, type Formatted, type Notice as QueryNotice, type Parsed, type VizCompat } from "./api";
+import { completePitotql, formatPitotql, parsePitotql, type Formatted, type Notice as QueryNotice, type Parsed, type VizCompat } from "./api";
 import { Builder, querySchema } from "./builder";
 import { SaveDialog, defaultTitle } from "./save-dialog";
 import { exploreTime, parseExploreSearch, toExploreParams, type ExploreSearch } from "./search";
@@ -29,7 +29,7 @@ const vizLabel: Record<Viz, string> = {
 };
 const requirementLabel = { min_max: "a minimum and maximum", thresholds: "thresholds" } as const;
 
-/** Query and Builder are two views of one FanQL query; SQL is separate. */
+/** Query and Builder are two views of one PitotQL query; SQL is separate. */
 type Kind = "query" | "sql";
 const kindOf = (tab: ExploreSearch["tab"]): Kind => tab === "sql" ? "sql" : "query";
 const starter: Query = { from: "spans", measures: ["count()"], by: ["service"] };
@@ -41,7 +41,7 @@ function drillFor(query: Query, viz: Viz): Panel["drill"] {
   return undefined;
 }
 
-/** Stored filters and measures keyed to their FanQL text, for entries the Builder shows as chips. */
+/** Stored filters and measures keyed to their PitotQL text, for entries the Builder shows as chips. */
 function labelsOf(query: Query, formatted: Formatted): Record<string, string> {
   const pairs = (stored: string[] | undefined, printed: string[]) => (stored ?? []).flatMap((entry, i) => i < printed.length ? [[entry, printed[i]] as const] : []);
   return Object.fromEntries([...pairs(query.where, formatted.where), ...pairs(query.measures, formatted.measures)]);
@@ -100,7 +100,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const [built, setBuilt] = useState<Query | undefined>(context?.initial?.query);
   const [formatted, setFormatted] = useState<Formatted | undefined>(context?.initial?.formatted);
   const [formatProblems, setFormatProblems] = useState<Problem[]>([]);
-  // Stored filters and measures as FanQL, from every print so far, for the Builder's chips.
+  // Stored filters and measures as PitotQL, from every print so far, for the Builder's chips.
   const [labels, setLabels] = useState<Record<string, string>>(() => context?.initial ? labelsOf(context.initial.query, context.initial.formatted) : {});
   // A Builder filter value that cannot be used holds the run.
   const [builderInvalid, setBuilderInvalid] = useState(false);
@@ -165,7 +165,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         record({ ...searchNow.current, q: source, viz: panel.viz });
       } else if (kind === "query") {
         // Parse without the previous viz: a new query shape may not fit it.
-        const next = await parseFanql({ text: source, variables, window: relative }, abort.signal);
+        const next = await parsePitotql({ text: source, variables, window: relative }, abort.signal);
         if (abort.signal.aborted) return;
         setParsed({ ...next, text: source });
         // Notice spans index the text that was sent, as problem spans do.
@@ -222,7 +222,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
     cancelFormat();
     const abort = new AbortController(); formatter.current.abort = abort;
     try {
-      const next = await formatFanql({ query }, abort.signal);
+      const next = await formatPitotql({ query }, abort.signal);
       if (abort.signal.aborted) return undefined;
       setFormatted(next); setFormatProblems([]); setLabels(known => ({ ...known, ...labelsOf(query, next) }));
       if (adopt) { setNotices(next.notices); setProblems([]); setText(next.text); }
@@ -259,7 +259,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
     // An empty editor starts the Builder from an example; the text stays empty until the user edits or runs it.
     if (!text.trim()) { setBuilt(starter); show(); void format(starter, false); return; }
     try {
-      const next = await parseFanql({ text, variables, window: relative });
+      const next = await parsePitotql({ text, variables, window: relative });
       setParsed({ ...next, text }); setBuilt(next.query); show(); void format(next.query, false);
     } catch (failure) {
       if (failure instanceof ApiError && failure.problems.length > 0) setProblems(failure.problems);
@@ -320,12 +320,12 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       <Tabs.Panel value="query" pt="sm">
         <Stack gap="xs">
           <Text id={help} size="xs" c="dimmed">Press Enter to run. For example <code>spans | p95(duration) by service every 5m</code>.</Text>
-          {readOnlyText && <Text size="xs" c="dimmed" data-fanql-readonly>This query is edited in the Builder: {formatted?.reason ?? "it is too large for the text editor"}.</Text>}
+          {readOnlyText && <Text size="xs" c="dimmed" data-pitotql-readonly>This query is edited in the Builder: {formatted?.reason ?? "it is too large for the text editor"}.</Text>}
           <div>
-            <FanqlEditor value={text} readOnly={readOnlyText} placeholder="spans | count() by service" onChange={(value, kept) => { cancelFormat(); setText(value); setProblems(kept?.problems ?? []); setNotices(kept?.notices ?? []); setFormatted(undefined); }} onRun={() => { if (!text.trim()) setEmptyRun(count => count + 1); void execute("query", text, search.viz, readOnlyText ? built : undefined); }} problems={problems} notices={notices} describedBy={help}
-              complete={(value, cursor, signal) => completeFanql({ text: value, cursor, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
+            <PitotqlEditor value={text} readOnly={readOnlyText} placeholder="spans | count() by service" onChange={(value, kept) => { cancelFormat(); setText(value); setProblems(kept?.problems ?? []); setNotices(kept?.notices ?? []); setFormatted(undefined); }} onRun={() => { if (!text.trim()) setEmptyRun(count => count + 1); void execute("query", text, search.viz, readOnlyText ? built : undefined); }} problems={problems} notices={notices} describedBy={help}
+              complete={(value, cursor, signal) => completePitotql({ text: value, cursor, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
             {/* The live region stays mounted so additions to it are announced; each Enter adds a new node. It sits with the editor so it takes no gap while empty. */}
-            <Text size="xs" c="dimmed" mt={emptyShown ? 4 : 0} aria-live="polite" data-fanql-empty>{emptyShown && <span key={emptyRun}>Type a query to run, for example <code>spans | count() by service</code>.</span>}</Text>
+            <Text size="xs" c="dimmed" mt={emptyShown ? 4 : 0} aria-live="polite" data-pitotql-empty>{emptyShown && <span key={emptyRun}>Type a query to run, for example <code>spans | count() by service</code>.</span>}</Text>
           </div>
         </Stack>
       </Tabs.Panel>
@@ -343,11 +343,11 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
               : !schema.error && <Text size="sm" c="dimmed">Loading fields…</Text>}
           </>}
           {formatProblems.length > 0 && <Stack gap={2} role="alert" data-builder-problems>{formatProblems.map((problem, index) => <Text key={index} size="sm" c="bad">{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</Text>)}</Stack>}
-          {formatted && formatProblems.length === 0 && <Text size="xs" c="dimmed" data-builder-text>As FanQL: <code>{formatted.text}</code></Text>}
+          {formatted && formatProblems.length === 0 && <Text size="xs" c="dimmed" data-builder-text>As PitotQL: <code>{formatted.text}</code></Text>}
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="sql" pt="sm">
-        {!sql.trim() && <Text size="xs" c="dimmed" mb="xs" data-sql-hint>{text.trim() ? "SQL runs on its own; the FanQL query is not converted. " : ""}Write one SELECT over spans, logs or metrics that filters time with <code>$__window(time_column)</code>, for example <code>SELECT service, count(*) AS spans FROM spans WHERE $__window(start_time) GROUP BY service</code>.</Text>}
+        {!sql.trim() && <Text size="xs" c="dimmed" mb="xs" data-sql-hint>{text.trim() ? "SQL runs on its own; the PitotQL query is not converted. " : ""}Write one SELECT over spans, logs or metrics that filters time with <code>$__window(time_column)</code>, for example <code>SELECT service, count(*) AS spans FROM spans WHERE $__window(start_time) GROUP BY service</code>.</Text>}
         <SqlEditor value={sql} onChange={value => { setSql(value); setProblems([]); }} onRun={() => void execute("sql", sql)} onEscape={() => runButton.current?.focus()} schema={schema.data} problems={search.tab === "sql" ? problems : []} label={context ? "Panel SQL" : "Explore SQL"} />
         {search.tab === "sql" && problems.length > 0 && <Notice tone="danger" title="The SQL has problems"><ul>{problems.map((problem, index) => <li className="sql-problem" key={index}>{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul></Notice>}
       </Tabs.Panel>
@@ -385,7 +385,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
     {savingError && <Notice tone="danger" title="Not saved">{savingError}</Notice>}
     <Box ref={resultBox}>
       {run ? <Stack gap="xs">
-        <Text size="sm" fw={600} role="status">{running ? "Running the query…" : run.kind !== kind ? `Result of the last ${run.kind === "sql" ? "SQL" : "FanQL"} run` : run.source !== source ? "Result of the last run · query has changed" : run.window !== windowKey ? "Result of the last run · time range has changed" : run.canonical ? <>Ran as <code>{run.canonical}</code></> : "Result"}</Text>
+        <Text size="sm" fw={600} role="status">{running ? "Running the query…" : run.kind !== kind ? `Result of the last ${run.kind === "sql" ? "SQL" : "PitotQL"} run` : run.source !== source ? "Result of the last run · query has changed" : run.window !== windowKey ? "Result of the last run · time range has changed" : run.canonical ? <>Ran as <code>{run.canonical}</code></> : "Result"}</Text>
         <Box h={resultHeight}>
           <PanelCard panel={run.panel} title={run.panel.title} result={run.result} loading={running} height={resultHeight} group="explore" editing={false} agentAvailable={false}
             range={time.range} onRetry={() => void execute(run.kind, run.source, run.panel.viz, readOnlyText ? built : undefined)} traceLinks="button"

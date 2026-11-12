@@ -142,8 +142,8 @@ func newServer(queries Observability, dashboards *dashboard.Service, panels *que
 	s.registerPanelTools()
 	s.registerDashboardTools()
 	s.registerAppResources()
-	s.registerFanQLResource()
-	s.mcp.AddReceivingMiddleware(limitLegacySessions(s.mcp), normalizeToolErrors, recoverToolPanic, addStaticCacheHints, filterMCPAppToolMetadata, s.validateToolArguments)
+	s.registerPitotQLResource()
+	s.mcp.AddReceivingMiddleware(limitLegacySessions(s.mcp), canonicalQueryResource, normalizeToolErrors, recoverToolPanic, addStaticCacheHints, filterMCPAppToolMetadata, s.validateToolArguments)
 	return s
 }
 

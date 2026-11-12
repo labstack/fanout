@@ -27,7 +27,7 @@ type MeasureGrammar struct {
 }
 
 // ReadMeasureExpression is the single precedence and grouping grammar used by
-// structured measures and FanQL. The result is panel's aggregate AST directly.
+// structured measures and PitotQL. The result is panel's aggregate AST directly.
 func ReadMeasureExpression(g MeasureGrammar, minPrecedence, depth int) (MeasureExpr, int) {
 	if !g.Depth(depth) || !g.OK() {
 		return nil, 0
