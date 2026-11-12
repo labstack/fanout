@@ -1,1 +1,0 @@
-import{n as e}from"./settings-U8Mc2c9c.js";var t=e;export{t as component};

@@ -1,38 +1,22 @@
-// Syntax colours for the Ayu Mono theme.
-//
-// Expressive Code takes its frame from Starlight's grey tokens but its syntax
-// palette is independent, so without this the code blocks ship GitHub's blue
-// and purple inside an Ayu frame — the only thing on the page speaking a
-// different language.
-//
-// The palette is deliberately narrow, and narrower than Ayu's own. Almost every
-// code block on this site is a command line, a YAML document or an environment
-// variable, and none of those are improved by twelve token classes. What a
-// reader needs to pick out is the value they are meant to change. So values
-// carry the accent, the keys and commands naming them sit at full strength, and
-// structure and comments fall back.
-//
-// The accent is `--info` from the product palette rather than a colour invented
-// here. The three health hues are load-bearing on this site — green, amber and
-// red mean healthy, degraded and unhealthy in the product itself — so tinting a
-// string literal green would put "green means healthy" in direct conflict with
-// itself. Violet is the one accent in the palette that carries no status.
+// Syntax uses the product surfaces and violet accent. Values carry the accent,
+// keys and commands use ink, and structure stays quiet. Health colors retain
+// their status meaning rather than becoming decorative syntax colors.
 
 const dark = {
-  fg: "#bfbdb6",
-  bg: "#131721",
-  dim: "#737681",
-  bright: "#fafafa",
-  accent: "#d2a6ff",
+  fg: "#EDEDEF",
+  bg: "#121214",
+  dim: "#A1A1A9",
+  bright: "#EDEDEF",
+  accent: "#B5B0FF",
   invalid: "#f26d78",
 };
 
 const light = {
-  fg: "#5c6166",
-  bg: "#f8f9fa",
-  dim: "#8a9199",
-  bright: "#171b24",
-  accent: "#7c4dcc",
+  fg: "#53535B",
+  bg: "#EFEFF1",
+  dim: "#6D6D73",
+  bright: "#111113",
+  accent: "#5A50D8",
   invalid: "#c4382d",
 };
 
@@ -104,5 +88,5 @@ function theme(name, type, c) {
   };
 }
 
-export const pitotCodeDark = theme("pitot-ayu-dark", "dark", dark);
-export const pitotCodeLight = theme("pitot-ayu-light", "light", light);
+export const pitotCodeDark = theme("pitot-dark", "dark", dark);
+export const pitotCodeLight = theme("pitot-light", "light", light);

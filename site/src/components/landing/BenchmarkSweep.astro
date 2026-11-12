@@ -100,7 +100,7 @@ const { sustained } = benchmark;
   svg { display: block; width: 100%; height: auto; margin-top: 0.6rem; }
   /* Cancel the 480-unit viewBox scale so labels match the caption at every width.
    * tan(atan2()) gives a unitless ratio without CSS typed division. */
-  svg text { fill: var(--fo-sweep-muted); font-family: var(--fo-font-display); font-size: calc(0.72rem * tan(atan2(480px, 100cqw))); }
+  svg text { fill: var(--fo-sweep-muted); font-family: var(--fo-font-mono); font-size: calc(0.72rem * tan(atan2(480px, 100cqw))); }
   .fo-y-label { text-anchor: end; }
   .fo-x-label, .fo-axis-title { text-anchor: middle; }
   .fo-generator-label, .fo-generator-detail, .fo-generator-inline { text-anchor: end; }

@@ -42,7 +42,7 @@ export default defineConfig({
       },
       // Expressive Code's syntax palette is independent of Starlight's grey
       // tokens, so without naming themes here the code blocks keep GitHub's
-      // colours inside an Ayu frame.
+      // colours instead of the product palette.
       expressiveCode: {
         themes: [pitotCodeDark, pitotCodeLight],
         styleOverrides: { borderColor: "var(--sl-color-gray-5)" },

@@ -18,17 +18,23 @@ async function exportLogo(page: Page) {
     const svg = element.querySelector("svg")!, text = element.querySelector(".mantine-Text-root")!;
     const bounds = element.getBoundingClientRect(), mark = svg.getBoundingClientRect(), word = text.getBoundingClientRect();
     const style = getComputedStyle(text);
+    for (const path of svg.querySelectorAll("path")) {
+      const d = path.getAttribute("d");
+      path.removeAttribute("stroke");
+      path.setAttribute("class", d === "M3.3 4.5H20.7" ? "a" : d === "M10.5 19.5H17" ? "d" : "i");
+    }
     svg.setAttribute("width", String(mark.width)); svg.setAttribute("height", String(mark.height));
     return { mark: svg.outerHTML, width: Math.ceil(bounds.width), height: bounds.height, x: word.left - bounds.left,
-      fontSize: style.fontSize, weight: style.fontWeight, tracking: style.letterSpacing, word: text.textContent?.toUpperCase() };
+      fontSize: style.fontSize, weight: style.fontWeight, tracking: style.letterSpacing, word: text.textContent?.trim() };
   });
-  expect(lockup.word).toBe("PITOT");
+  expect(lockup.word).toBe("pitot");
   const css = await readFile(fileURLToPath(new URL("../../../../../site/src/styles/pitot.css", import.meta.url)), "utf8");
-  const font = css.match(/--fo-font-display:\s*([^;]+);/)![1].replaceAll('"', "&quot;");
+  const font = css.match(/--fo-font-body:\s*([^;]+);/)![1].replaceAll('"', "&quot;");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${lockup.width} ${lockup.height}" role="img" aria-label="Pitot">
 <title>Pitot</title>
+<style>.i{stroke:#111113}.d{stroke:#B4B4BB}.a{stroke:#5A50D8}@media (prefers-color-scheme:dark){.i{stroke:#EDEDEF}.d{stroke:#4A4A52}.a{stroke:#8F8CFF}}</style>
 ${lockup.mark}
-<text x="${lockup.x}" y="${lockup.height / 2}" dominant-baseline="central" fill="currentColor" font-family="${font}" font-size="${lockup.fontSize}" font-weight="${lockup.weight}" letter-spacing="${lockup.tracking}">PITOT</text>
+<text x="${lockup.x}" y="${lockup.height / 2}" dominant-baseline="central" fill="currentColor" font-family="${font}" font-size="${lockup.fontSize}" font-weight="${lockup.weight}" letter-spacing="${lockup.tracking}">pitot</text>
 </svg>
 `;
   await writeFile(fileURLToPath(new URL("../../../../../site/public/logo.svg", import.meta.url)), svg);

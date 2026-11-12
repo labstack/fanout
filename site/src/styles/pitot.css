@@ -1,77 +1,38 @@
-@import "@fontsource/ibm-plex-mono/latin-400.css";
-@import "@fontsource/ibm-plex-mono/latin-400-italic.css";
-@import "@fontsource/ibm-plex-mono/latin-500.css";
-@import "@fontsource/ibm-plex-mono/latin-600.css";
-@import "@fontsource/ibm-plex-sans/latin-400.css";
-@import "@fontsource/ibm-plex-sans/latin-400-italic.css";
-@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource-variable/geist/index.css";
+@import "@fontsource-variable/geist-mono/index.css";
 
-/* Pitot docs theme — Ayu Mono.
- *
- * The palette is the product's own: Ayu Dark surfaces under IBM Plex. Pitot is
- * one binary you point a collector at and then read telemetry out of, and both
- * halves of that are on the page — the surfaces are the ones the product's own
- * UI uses, so the documentation and the thing it documents do not look like
- * different products.
- *
- * The accent is violet, and that is a decision worth stating because the
- * obvious alternative is wrong. Three hues on this site are load-bearing:
- * green, amber and red mean healthy, degraded and unhealthy inside Pitot
- * itself and in its product captures. Tinting a
- * link green would put "green means healthy" in conflict with "green means
- * interactive" on the same scroll. Violet is the one accent in the product
- * palette that carries no status, so it is the one free to mean "you can click
- * this".
- *
- * White is not available for that job either, despite being the product's
- * interactive primary: headings are already white, so a white link is
- * indistinguishable from the text around it. White stays what it is here — the
- * strongest text, and the fill of a primary button.
- *
- * What is deliberately NOT tinted is the asides. Those keep Starlight's
- * semantic amber, blue and red, because a caution marking something the binary
- * does not yet do has to read as a warning rather than as more site chrome.
- *
- * Typography is the same superfamily split onebox.run uses. IBM Plex Mono owns
- * the brand, navigation, headings and technical artifacts; IBM Plex Sans is
- * confined to sustained prose, which on this site means the documentation body
- * and the landing page's longer paragraphs. Because both are Plex, the role
- * change reads as hierarchy rather than as a second visual identity.
- *
- * Starlight's tokens are overridden rather than fought with, so component
- * updates keep working.
- */
+/* Docs and product share surfaces, violet tokens and Geist so they read as
+ * one thing. Geist Mono is for code and technical data. Violet is the only
+ * non-status accent; health colors keep their existing meaning. */
 
 :root {
-  --fo-font-display: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --fo-font-body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --fo-font-display: var(--fo-font-body);
+  --fo-font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+  --fo-font-body: "Geist Variable", "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --fo-frame-radius: 8px;
   --fo-frame-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
 
-  /* Mono owns the brand, navigation, headings and technical artifacts. Sans is
-     opted into by prose, below. */
+  /* One reading face for navigation, headings and prose. */
   --sl-font: var(--fo-font-display);
-  --sl-font-mono: var(--fo-font-display);
+  --sl-font-mono: var(--fo-font-mono);
 
-  /* Dark (Starlight's default state). Ayu Dark surfaces, unchanged from the
-     product's own theme — a "corrected" neutral grey would undo the slight blue
-     cast that makes these read as Ayu rather than as any dark theme. */
-  --sl-color-accent-low: #2a2141;
-  --sl-color-accent: #a97ce0;
-  --sl-color-accent-high: #d2a6ff;
-  --sl-color-white: #fafafa;
-  --sl-color-gray-1: #e6e4de;
-  --sl-color-gray-2: #bfbdb6;
-  --sl-color-gray-3: #8b8e99;
-  --sl-color-gray-4: #565b69;
-  --sl-color-gray-5: #1d2433;
-  --sl-color-gray-6: #131721;
-  --sl-color-black: #0b0e14;
+  /* Product surfaces and violet scale from ui/tokens.ts. */
+  --sl-color-accent-low: #332B81;
+  --sl-color-accent: #8F8CFF;
+  --sl-color-accent-high: #B5B0FF;
+  --sl-color-white: #EDEDEF;
+  --sl-color-gray-1: #EDEDEF;
+  --sl-color-gray-2: #A1A1A9;
+  --sl-color-gray-3: #828288;
+  --sl-color-gray-4: #53535B;
+  --sl-color-gray-5: #232327;
+  --sl-color-gray-6: #121214;
+  --sl-color-black: #0B0B0C;
 
   /* Healthy, degraded, unhealthy. These three are load-bearing: they mean the
      same thing on this site as they do inside the product. Tokens because
      the dark values wash out on a light background — the pale green and coral
-     that read clearly on Ayu surfaces fall under 4.5:1 on white. */
+     that read clearly on dark surfaces fall under 4.5:1 on white. */
   --fo-status-ok: #7fd962;
   --fo-status-warn: #ffb454;
   --fo-status-bad: #f26d78;
@@ -79,29 +40,35 @@
 
 :root[data-theme="light"] {
   --fo-frame-shadow: 0 2px 4px rgb(23 27 36 / 0.04), 0 12px 32px rgb(23 27 36 / 0.08);
-  --sl-color-accent-low: #ece3fb;
-  --sl-color-accent: #7c4dcc;
-  --sl-color-accent-high: #5b32a3;
-  --sl-color-white: #171b24;
-  --sl-color-gray-1: #2b3038;
-  --sl-color-gray-2: #4a5058;
-  --sl-color-gray-3: #6b7280;
-  --sl-color-gray-4: #a4abb4;
-  --sl-color-gray-5: #d6d9dd;
-  --sl-color-gray-6: #eceef0;
+  --sl-color-accent-low: #F1F0FF;
+  --sl-color-accent: #5A50D8;
+  --sl-color-accent-high: #463DAE;
+  --sl-color-white: #111113;
+  --sl-color-gray-1: #111113;
+  --sl-color-gray-2: #53535B;
+  --sl-color-gray-3: #6D6D73;
+  --sl-color-gray-4: #B4B4BB;
+  --sl-color-gray-5: #E3E3E6;
+  --sl-color-gray-6: #EFEFF1;
   --fo-status-ok: #3c7a2a;
   --fo-status-warn: #9a5b00;
   --fo-status-bad: #b3352c;
-  --sl-color-gray-7: #f3f4f5;
-  --sl-color-black: #fcfcfc;
+  --sl-color-gray-7: #F5F5F6;
+  --sl-color-black: #F5F5F6;
 }
 
-/* The favicon is the product mark, not only browser chrome. Pair it with the
-   name in the header so the same identity carries across the landing page and
-   the documentation without asking a first-time visitor to decode an icon
-   alone. */
+/* The full mark and wordmark share the header across landing and docs.
+   Fixed assets follow the site toggle rather than the browser preference. */
 .site-title {
   gap: 0.55rem;
+  font-family: var(--fo-font-body);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  text-transform: lowercase;
+}
+
+:root[data-theme="dark"] .site-title::before {
+  background-image: url("/mark-dark.svg");
 }
 
 .site-title::before {
@@ -109,7 +76,7 @@
   width: 1.35rem;
   height: 1.35rem;
   flex: 0 0 auto;
-  background: url("/favicon.svg") center / contain no-repeat;
+  background: url("/mark-light.svg") center / contain no-repeat;
 }
 
 .fo-link {
@@ -141,8 +108,7 @@
   header.header starlight-theme-select .caret { display: none; }
 }
 
-/* The landing page stays mono-led; the proportional face is reserved for the
-   long-form documentation where it materially improves reading. */
+/* Keep the landing page header focused on navigation. */
 body:has(.fo-hero) site-search {
   display: none;
 }
@@ -199,7 +165,7 @@ body:has(.fo-hero) .sl-markdown-content > * {
   border-radius: 4px;
   font-size: 0.75rem;
 }
-.fo-mcp-tools code { font-family: var(--fo-font-display); }
+.fo-mcp-tools code { font-family: var(--fo-font-mono); }
 
 @media (max-width: 71.999rem) {
   body:has(.fo-hero) { --fo-section-gap: 3.5rem; }
@@ -213,22 +179,17 @@ body:has(.fo-hero) .sl-markdown-content > * {
   }
 }
 
-/* Prose uses the productive member of the same Plex family. The mono identity
-   remains in every heading and piece of chrome, while paragraphs and lists get
-   the denser word shapes and calmer rhythm of a proportional text face. */
+/* Reading rhythm for documentation prose. */
 .sl-markdown-content p,
 .sl-markdown-content li {
   font-family: var(--fo-font-body);
   line-height: 1.7;
 }
 
-/* Starlight's Card sets its own title in the body face. A card title is a
-   heading, and headings on this site are mono — without this the landing page
-   states the rule in its own hierarchy and then breaks it in the first grid a
-   reader meets. */
+/* Card titles share the product heading treatment. */
 .card > .title {
   font-family: var(--fo-font-display);
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: -0.015em;
 }
 
@@ -244,17 +205,13 @@ body:has(.fo-hero) .sl-markdown-content > * {
   line-height: 1.45;
 }
 
-/* The mono headings carry the product identity against the proportional prose:
-   500 rather than bold, pulled slightly tighter, so each reads as a precise
-   label rather than as shouting. The page title sits outside
-   .sl-markdown-content, so it is named separately rather than assumed to be
-   inside it. */
+/* Headings differ from prose by size, weight and tracking. */
 .sl-markdown-content h1,
 .sl-markdown-content h2,
 .sl-markdown-content h3,
 .content-panel h1,
 h1#_top {
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: -0.015em;
 }
 
@@ -300,7 +257,7 @@ h1#_top {
   padding: clamp(0.75rem, 2vw, 1.25rem);
   border: 1px solid var(--sl-color-gray-5);
   border-radius: 0.5rem;
-  background: #fafafa;
+  background: #EDEDEF;
 }
 
 .sl-markdown-content .docs-diagram__asset {
@@ -322,7 +279,7 @@ h1#_top {
 
 .sl-markdown-content .docs-diagram figcaption {
   margin-top: 0.75rem;
-  color: #565b69;
+  color: #53535B;
   font-family: var(--fo-font-display);
   font-size: 0.75rem;
   line-height: 1.5;
@@ -361,15 +318,7 @@ h1#_top {
   font-size: 0.78em;
 }
 
-/* Previous/next links at the foot of a page. Starlight sizes their titles at
-   1.5rem, which is right for the proportional face it ships with and too large
-   in this one — mono sets every glyph on the same advance, so a title that fits
-   in a card there wraps here. The label above it moves the other way: Starlight
-   leaves "Previous" and "Next" at body size, so it reads as loudly as the prose
-   it follows, while every other piece of chrome sits at --sl-text-sm.
-
-   The label is a bare text node with no element of its own, so it is styled on
-   the link's span and the title resets what it should not inherit. */
+/* Keep pagination labels quiet and destination titles readable. */
 .pagination-links a > span {
   font-size: 0.75rem;
   letter-spacing: 0.12em;
@@ -405,18 +354,18 @@ h1#_top {
   :root,
   :root[data-theme="dark"],
   :root[data-theme="light"] {
-    --sl-color-accent-low: #ece3fb;
-    --sl-color-accent: #7c4dcc;
-    --sl-color-accent-high: #5b32a3;
-    --sl-color-white: #171b24;
-    --sl-color-gray-1: #2b3038;
-    --sl-color-gray-2: #4a5058;
-    --sl-color-gray-3: #6b7280;
-    --sl-color-gray-4: #a4abb4;
-    --sl-color-gray-5: #d6d9dd;
-    --sl-color-gray-6: #eceef0;
-    --sl-color-gray-7: #f3f4f5;
-    --sl-color-black: #ffffff;
+    --sl-color-accent-low: #F1F0FF;
+    --sl-color-accent: #5A50D8;
+    --sl-color-accent-high: #463DAE;
+    --sl-color-white: #111113;
+    --sl-color-gray-1: #111113;
+    --sl-color-gray-2: #53535B;
+    --sl-color-gray-3: #6D6D73;
+    --sl-color-gray-4: #B4B4BB;
+    --sl-color-gray-5: #E3E3E6;
+    --sl-color-gray-6: #EFEFF1;
+    --sl-color-gray-7: #F5F5F6;
+    --sl-color-black: #F5F5F6;
     --fo-status-ok: #3c7a2a;
     --fo-status-warn: #9a5b00;
     --fo-status-bad: #b3352c;

@@ -2,7 +2,7 @@
 // its og:image at /social-card.png.
 //
 // Render it with `just social-card`, which pins the typst version, requires
-// Inter on a font path, and fails when the face is missing. Running typst by
+// Geist on a font path, and fails when the face is missing. Running typst by
 // hand does not: it warns about an unknown font family, exits 0, and writes a
 // card set in whatever it found instead. The recipe also passes `--root .`,
 // without which typst refuses to read the mark below — it sits outside this
@@ -12,31 +12,26 @@
 // size GitHub expects for a social preview, and large enough that a link unfurl
 // does not resample it.
 //
-// The mark is read from ui/host/public/favicon.svg — the canonical asset that
-// internal/brand tracks — rather than copied here, so a revised mark reaches
-// the card the next time it is rendered.
-#set page(width: 960pt, height: 480pt, margin: (x: 60pt, top: 44pt, bottom: 34pt), fill: rgb("#0b0f14"))
-#set text(font: "Inter", fill: rgb("#f2f5f8"))
-
-#place(top + left, dx: -60pt, dy: -44pt, rect(width: 960pt, height: 5pt,
-  fill: gradient.linear(rgb("#5FE8CE"), rgb("#41B6F8"), rgb("#9A50F4"))))
+// The fixed dark mark avoids media queries, which Typst cannot resolve.
+#set page(width: 960pt, height: 480pt, margin: (x: 60pt, top: 44pt, bottom: 34pt), fill: rgb("#0B0B0C"))
+#set text(font: "Geist", fill: rgb("#EDEDEF"))
 
 #grid(
   columns: (86pt, 1fr),
   column-gutter: 16pt,
   align: horizon,
-  image("../../ui/host/public/favicon.svg", width: 84pt),
-  text(size: 56pt, weight: 700, "Pitot"),
+  image("../../ui/host/public/mark-dark.svg", width: 84pt),
+  text(size: 56pt, weight: 600, tracking: -0.045em, "pitot"),
 )
 
 #v(30pt)
-#text(size: 34pt, weight: 700, fill: rgb("#5FE8CE"))[
+#text(size: 34pt, weight: 700, fill: rgb("#EDEDEF"))[
   Single-binary, agent-native \
   OpenTelemetry investigation.
 ]
 
 #v(18pt)
-#text(size: 20pt, fill: rgb("#8a94a6"))[
+#text(size: 20pt, fill: rgb("#A1A1A9"))[
   Ingest OTLP, store as Parquet, query with DuckDB, \
   and ask an agent about it. One Go process.
 ]
@@ -47,9 +42,9 @@
 // body copy and typst still exited 0. In flow, the same overflow spills onto a
 // second page, and a two-page render fails the PNG export outright.
 #v(1fr)
-#line(length: 100%, stroke: 0.75pt + rgb("#1b2430"))
+#line(length: 100%, stroke: 0.75pt + rgb("#232327"))
 #v(12pt)
 #grid(columns: (1fr, auto),
-  text(size: 19pt, fill: rgb("#8a94a6"))[No collector fleet. No object store. One data directory.],
-  text(size: 19pt, fill: rgb("#8a94a6"))[github.com/labstack/pitot],
+  text(size: 19pt, fill: rgb("#A1A1A9"))[No collector fleet. No object store. One data directory.],
+  text(size: 19pt, fill: rgb("#A1A1A9"))[github.com/labstack/pitot],
 )
