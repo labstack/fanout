@@ -1,108 +1,129 @@
-import { test, expect, type Locator, type Page } from "../../fixtures/test";
-import { mkdir } from "node:fs/promises";
+import { test, expect, type Page } from "../../fixtures/test";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { cardSelector, readyCard, settle } from "../../support/accessibility-support";
-import type { DashboardSpec } from "../../../../panels/types";
+import conversation from "../../data/landing-chat.json" with { type: "json" };
+import type { DashboardSpec, PanelResult } from "../../../../panels/types";
 
-// Use either the real seeded server or an existing instance, without intercepts.
-const externalBaseURL = process.env.PITOT_LANDING_BASE_URL;
-test.skip(process.env.PITOT_LANDING_CAPTURES !== "1", "set PITOT_LANDING_CAPTURES=1 to refresh landing assets");
-test.use({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
-if (externalBaseURL) test.use({
-  baseURL: externalBaseURL,
-  storageState: async ({}, use) => {
-    const cookie = process.env.PITOT_LANDING_SESSION_COOKIE ?? "";
-    const match = /^([!#$%&'*+.^_`|~\w-]+)=([^;\s]+)$/.exec(cookie);
-    if (!match) throw new Error("PITOT_LANDING_SESSION_COOKIE must be a nonempty name=value session cookie");
-    const url = new URL(externalBaseURL);
-    await use({ cookies: [{
-      name: match[1], value: match[2], domain: url.hostname, path: "/",
-      expires: -1, httpOnly: true, secure: url.protocol === "https:", sameSite: "Lax",
-    }], origins: [] });
-  },
-});
+// Only the disposable seeded instance is used. Never capture private telemetry.
+test.skip(process.env.PITOT_LANDING_CAPTURES !== "1", "use just landing-captures to refresh all six images");
+// Historical full-window sizes: overview 1920×1200; dashboard/chat 1280×800.
+test.use({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1.5 });
 
-async function readyOverviewViewport(page: Page) {
-  // Recompute intersections on each poll without scrolling lazy panels into view.
-  await expect.poll(() => page.locator(".mantine-Paper-root[data-panel]").evaluateAll(cards => cards
-    .filter(card => {
-      const bounds = card.getBoundingClientRect();
-      return bounds.width > 0 && bounds.height > 0
-        && bounds.left < window.innerWidth && bounds.right > 0
-        && bounds.top < window.innerHeight && bounds.bottom > 0;
-    })
-    .filter(card => card.querySelector('[aria-label="Loading panel"], [aria-label="Refreshing"], [data-panel-error], [aria-label$=", refresh failed"]'))
-    .map(card => card.getAttribute("data-panel"))), {
-    message: "Every panel intersecting the overview viewport must finish loading without errors",
-  }).toEqual([]);
+async function exportLogo(page: Page) {
+  // Export the actual BrandLockup DOM, so the mark and type proportions cannot
+  // drift into a second hand-drawn identity. Use the site's display font stack.
+  const brand = page.getByLabel("Pitot", { exact: true }).first();
+  const lockup = await brand.evaluate(element => {
+    const svg = element.querySelector("svg")!, text = element.querySelector(".mantine-Text-root")!;
+    const bounds = element.getBoundingClientRect(), mark = svg.getBoundingClientRect(), word = text.getBoundingClientRect();
+    const style = getComputedStyle(text);
+    svg.setAttribute("width", String(mark.width)); svg.setAttribute("height", String(mark.height));
+    return { mark: svg.outerHTML, width: Math.ceil(bounds.width), height: bounds.height, x: word.left - bounds.left,
+      fontSize: style.fontSize, weight: style.fontWeight, tracking: style.letterSpacing, word: text.textContent?.toUpperCase() };
+  });
+  expect(lockup.word).toBe("PITOT");
+  const css = await readFile(fileURLToPath(new URL("../../../../../site/src/styles/pitot.css", import.meta.url)), "utf8");
+  const font = css.match(/--fo-font-display:\s*([^;]+);/)![1].replaceAll('"', "&quot;");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${lockup.width} ${lockup.height}" role="img" aria-label="Pitot">
+<title>Pitot</title>
+${lockup.mark}
+<text x="${lockup.x}" y="${lockup.height / 2}" dominant-baseline="central" fill="currentColor" font-family="${font}" font-size="${lockup.fontSize}" font-weight="${lockup.weight}" letter-spacing="${lockup.tracking}">PITOT</text>
+</svg>
+`;
+  await writeFile(fileURLToPath(new URL("../../../../../site/public/logo.svg", import.meta.url)), svg);
 }
 
-test("capture the README overview", async ({ page, request }, info) => {
-  // The normal matrix also includes 1100px. Write each stable asset only once.
-  test.skip(info.project.use.viewport?.width !== 1440, "landing captures use the 1440px projects");
+test("capture the seeded store dashboard and fixture conversation", async ({ page, request, baseURL }, info) => {
+  test.skip(info.project.use.viewport?.width !== 1440, "write each theme once using the 1440px projects");
+  test.setTimeout(180_000);
+  if (process.env.PITOT_LANDING_BASE_URL) throw new Error("Landing stills require the offline seeded instance");
   const theme = info.project.use.colorScheme as "light" | "dark";
   const directory = fileURLToPath(new URL("../../../../../site/src/assets/landing/", import.meta.url));
   await mkdir(directory, { recursive: true });
-  const capture = async (view: string, element?: Locator, clip?: () => Promise<{ x: number; y: number; width: number; height: number }>) => {
+  const blocked: string[] = [];
+  await page.route("**/*", async route => {
+    const url = new URL(route.request().url());
+    if (url.origin !== new URL(baseURL!).origin || url.pathname === "/api/agent/runs") {
+      blocked.push(url.pathname); await route.abort();
+    } else await route.continue();
+  });
+  const window = JSON.parse(process.env.PITOT_E2E_PERFORMANCE_WINDOW ?? "null") as { from: string; to: string } | null;
+  if (!window) throw new Error("Global setup did not provide the seed window");
+  await page.clock.setFixedTime(new Date(window.to));
+  await page.addInitScript(value => localStorage.setItem("mantine-color-scheme-value", value), theme);
+  const id = process.env.PITOT_E2E_LANDING_DASHBOARD_ID;
+  const response = await request.get(`/api/dashboards/${id}`);
+  expect(response.status()).toBe(200);
+  const { spec } = await response.json() as { spec: DashboardSpec };
+  const preview = await request.post("/api/queries/run", { headers: { "Pitot-Request": "1" }, data: { dashboard: spec } });
+  expect(preview.status()).toBe(200);
+  const { results } = await preview.json() as { results: PanelResult[] };
+  const value = (id: string) => {
+    const frame = results.find(result => result.id === id)!.frame!;
+    const measure = frame.columns.findIndex(column => column.role === "measure");
+    return Number(frame.totals?.[measure] ?? frame.values[measure][0]);
+  };
+  expect(value("requests")).toBeGreaterThan(38); expect(value("requests")).toBeLessThan(40);
+  expect(value("errors")).toBeGreaterThan(0.005); expect(value("errors")).toBeLessThan(0.02);
+  expect(value("latency")).toBeGreaterThan(45); expect(value("latency")).toBeLessThan(56);
+  for (const result of results) expect(result.status, result.id).toBe("ok");
+
+  const capture = async (view: "overview" | "dashboard" | "chat") => {
+    await expect(page.getByLabel("Pitot", { exact: true }).first()).toBeVisible();
+    const navigation = page.getByRole("navigation", { name: "Navigation", exact: true });
+    await expect(navigation).toBeVisible();
+    await expect(navigation.getByText("Dashboards", { exact: true })).toBeVisible();
     await page.mouse.move(0, 0);
-    await page.evaluate(() => {
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    });
+    await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
     await settle(page);
-    // Match the existing review captures' wait for chart compiler animations.
     await page.waitForTimeout(250);
-    if (view === "overview") await readyOverviewViewport(page);
-    else await expect((element ?? page).locator('[aria-label="Loading panel"], [aria-label="Refreshing"], [aria-label="Loading drill data"], [data-panel-error]')).toHaveCount(0);
-    const options = {
-      path: `${directory}${view}-${theme}.png`, animations: "disabled" as const, scale: "device" as const,
-      // Capture-only styling: keep keyboard focus indicators in the product.
-      style: "*:focus, *:focus-visible { outline: none !important; } [role=tooltip] { visibility: hidden !important; }",
-    };
-    if (clip) await page.screenshot({ ...options, clip: await clip() });
-    else if (element) await element.screenshot(options);
-    else await page.screenshot({ ...options, fullPage: false });
+    await page.screenshot({ path: `${directory}${view}-${theme}.png`, fullPage: false, animations: "disabled",
+      scale: view === "overview" ? "device" : "css",
+      style: "*:focus, *:focus-visible { outline: none !important; } [role=tooltip] { visibility: hidden !important; }" });
   };
 
-  const seedWindow = externalBaseURL ? null : JSON.parse(process.env.PITOT_E2E_PERFORMANCE_WINDOW ?? "null") as { to: string } | null;
-  if (!externalBaseURL) {
-    if (!seedWindow) throw new Error("Global setup did not provide the seed window");
-    await page.clock.setFixedTime(new Date(seedWindow.to));
-  }
-  await page.addInitScript(value => localStorage.setItem("mantine-color-scheme-value", value), theme);
-  await page.goto("/");
-  await expect(page).toHaveURL(/\/dashboards\/[^/?]+/);
-  const dashboardURL = new URL(page.url());
-  if (seedWindow) {
-    dashboardURL.searchParams.set("from", new Date(Date.parse(seedWindow.to) - 3_600_000).toISOString());
-    dashboardURL.searchParams.set("to", seedWindow.to);
-    await page.goto(dashboardURL.pathname + dashboardURL.search);
-  }
-  await expect(page.locator("html")).toHaveAttribute("data-mantine-color-scheme", theme);
-  await expect(page.getByText("System overview", { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: `Switch to ${theme === "light" ? "dark" : "light"} theme` })).toBeVisible();
-
-  const response = await request.get(`/api${dashboardURL.pathname}`);
-  expect(response.status()).toBe(200);
-  const dashboard = await response.json() as { is_default: boolean; spec: DashboardSpec };
-  expect(dashboard.is_default).toBe(true);
-  // Saved panels load when visible. Only panels in the shot gate the overview;
-  // empty results are valid, and offscreen panels are left alone.
-  await page.evaluate(() => window.scrollTo(0, 0));
-  const firstFold = [
-    ...dashboard.spec.panels.filter(panel => panel.viz === "stat"),
-    ...dashboard.spec.panels.filter(panel => panel.viz === "timeseries").slice(0, 2),
-  ];
-  for (const panel of firstFold) await expect(page.locator(cardSelector(panel.id))).toBeInViewport({ ratio: 1 });
-  const overview = page.getByRole("region", { name: "Dashboard", exact: true });
-  await capture("overview", overview, async () => {
-    const clip = await overview.evaluate(main => {
-      const bounds = main.getBoundingClientRect();
-      const x = Math.ceil(Math.max(0, bounds.left)), y = Math.ceil(Math.max(0, bounds.top));
-      return { x, y, width: Math.floor(Math.min(window.innerWidth, bounds.right)) - x,
-        height: Math.floor(Math.min(window.innerHeight, bounds.bottom)) - y };
-    });
-    expect(clip.width).toBeGreaterThanOrEqual(clip.height);
-    expect(clip.height).toBeGreaterThan(0);
-    return clip;
+  // The local server has no AI provider. Only saved-thread reads and the
+  // capability flag are fixtures; the app, telemetry queries and MCP UI are real.
+  await page.route("**/api/auth/status", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...await response.json(), agent_available: true } });
   });
+  await page.route(/\/api\/agent\/threads(?:\/[^?]+)?(?:\?.*)?$/, async route => {
+    expect(route.request().method()).toBe("GET");
+    const path = new URL(route.request().url()).pathname;
+    await route.fulfill({ json: path.endsWith("/threads")
+      ? { items: [{ id: conversation.id, title: conversation.title, created_at: window.to, updated_at: window.to }], next_cursor: null }
+      : conversation });
+  });
+  await page.goto(`/dashboards/${id}`);
+  await expect(page.locator("html")).toHaveAttribute("data-mantine-color-scheme", theme);
+  await expect(page.getByRole("heading", { name: "Store overview - last hour", exact: true })).toBeVisible();
+  for (const panel of spec.panels) await readyCard(page, panel);
+  await page.evaluate(() => globalThis.scrollTo(0, 0));
+  for (const panel of spec.panels) await expect(page.locator(cardSelector(panel.id)).locator('[aria-label="Loading panel"], [aria-label="Refreshing"], [data-panel-error]')).toHaveCount(0);
+  await expect(page.locator(cardSelector("errors")).getByText("Healthy", { exact: true })).toBeVisible();
+  // The README hero must show every plot, not only its below-fold heading.
+  for (const panel of spec.panels) await expect(page.locator(cardSelector(panel.id))).toBeInViewport({ ratio: 1 });
+  await capture("overview");
+  await capture("dashboard");
+  if (theme === "light") await exportLogo(page);
+
+  await page.goto(`/chat/${conversation.id}`);
+  await expect(page.getByRole("log", { name: "Conversation" })).toContainText("Accounting is the slowest at p95 53.8 ms");
+  const frame = page.frameLocator('iframe[title="Pitot analysis view"]');
+  await expect(frame.getByText("Service latency", { exact: true })).toBeVisible();
+  await expect(frame.locator("tbody tr")).toHaveCount(5);
+  await expect(frame.locator('[data-panel-error], .mantine-Loader-root')).toHaveCount(0);
+  await frame.locator("body").evaluate(async () => { await document.fonts.ready; });
+  await settle(page);
+  await expect(page.getByRole("log", { name: "Conversation" }).getByText(conversation.messages[0].content as string, { exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole("button", { name: "Jump to latest", exact: true })).toBeHidden();
+  await expect(page.locator('[data-answer-position]')).toBeVisible();
+  await expect.poll(() => page.locator('[data-answer-position]').evaluate(answer => {
+    const pane = answer.closest(".chat-scroll")!;
+    return answer.getBoundingClientRect().bottom <= pane.getBoundingClientRect().bottom + 1;
+  })).toBe(true);
+  await capture("chat");
+  expect(blocked, "No external requests or model runs may occur during captures").toEqual([]);
 });

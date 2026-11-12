@@ -30,14 +30,15 @@ import (
 func main() {
 	endpoint := flag.String("endpoint", "", "Disposable Pitot base URL")
 	tokenFile := flag.String("token-file", "", "Temporary ingest credential file")
+	landing := flag.Bool("landing", false, "Seed the dense one-hour landing capture workload")
 	flag.Parse()
-	if err := run(*endpoint, *tokenFile); err != nil {
+	if err := run(*endpoint, *tokenFile, *landing); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(endpoint, tokenFile string) error {
+func run(endpoint, tokenFile string, landing bool) error {
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || tokenFile == "" {
 		return errors.New("endpoint and token-file are required")
@@ -50,34 +51,49 @@ func run(endpoint, tokenFile string) error {
 		return errors.New("empty token file")
 	}
 	base := time.Now().UTC()
-	data, err := payloads(13, base)
+	window := 24 * time.Hour
+	var batches []map[string][]byte
+	if landing {
+		base = base.Truncate(time.Minute)
+		window = time.Hour
+		batches, err = landingPayloads(13, base)
+	} else {
+		var data map[string][]byte
+		data, err = payloads(13, base)
+		batches = []map[string][]byte{data}
+	}
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	for _, signal := range []string{"traces", "logs", "metrics"} {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+"/v1/"+signal, bytes.NewReader(data[signal]))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/x-protobuf")
-		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
-		resp, err := client.Do(req)
-		if err != nil {
-			return fmt.Errorf("post %s failed", signal)
-		}
-		_, readErr := io.Copy(io.Discard, resp.Body)
-		closeErr := resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("post %s: HTTP %d", signal, resp.StatusCode)
-		}
-		if readErr != nil || closeErr != nil {
-			return fmt.Errorf("read %s response failed", signal)
+	for _, data := range batches {
+		for _, signal := range []string{"traces", "logs", "metrics"} {
+			if len(data[signal]) == 0 {
+				continue
+			}
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+"/v1/"+signal, bytes.NewReader(data[signal]))
+			if err != nil {
+				return err
+			}
+			req.Header.Set("Content-Type", "application/x-protobuf")
+			req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
+			resp, err := client.Do(req)
+			if err != nil {
+				return fmt.Errorf("post %s failed", signal)
+			}
+			_, readErr := io.Copy(io.Discard, resp.Body)
+			closeErr := resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("post %s: HTTP %d", signal, resp.StatusCode)
+			}
+			if readErr != nil || closeErr != nil {
+				return fmt.Errorf("read %s response failed", signal)
+			}
 		}
 	}
-	fmt.Printf("seed_window=%s,%s\n", base.Add(-24*time.Hour).Format(time.RFC3339Nano), base.Format(time.RFC3339Nano))
+	fmt.Printf("seed_window=%s,%s\n", base.Add(-window).Format(time.RFC3339Nano), base.Format(time.RFC3339Nano))
 	return nil
 }
 

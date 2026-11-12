@@ -12,11 +12,11 @@ Pitot's built-in agent or connect your own over MCP.
 <a href="https://pitot.dev">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/src/assets/landing/overview-dark.png">
-  <img src="site/src/assets/landing/overview-light.png" alt="A Pitot dashboard the built-in agent built from one request: store request rate, error rate, p95 latency and error logs, with request and error rates by service.">
+  <img src="site/src/assets/landing/overview-light.png" alt="Pitot Store overview - last hour: request rate, error rate, p95 latency and error logs, with request rate, error rate and p95 latency by service.">
 </picture>
 </a>
 
-*Preview capture from the pre-rename alpha.*
+*Current Pitot interface with deterministic offline sample telemetry.*
 
 Pitot keeps OpenTelemetry traces, logs, and metrics in one binary and one data directory, with no
 external storage services to operate. Pitot is pre-release and changes without migration paths; the browser

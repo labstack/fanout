@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "name": "Store overview - last hour",
+  "description": "Request rate, errors and latency across fourteen store services over the last hour.",
+  "time": {
+    "range": "1h",
+    "refresh": "off"
+  },
+  "panels": [
+    {
+      "id": "requests",
+      "title": "Requests per second",
+      "viz": "stat",
+      "width": 3,
+      "height": "s",
+      "unit": "per_second",
+      "reduce": "window",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "rate()"
+        ],
+        "where": [
+          "kind = 'SPAN_KIND_SERVER'"
+        ]
+      }
+    },
+    {
+      "id": "errors",
+      "title": "Error rate",
+      "viz": "stat",
+      "width": 3,
+      "height": "s",
+      "unit": "percent",
+      "reduce": "window",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "error_rate()"
+        ],
+        "where": [
+          "kind = 'SPAN_KIND_SERVER'"
+        ]
+      },
+      "thresholds": [
+        {
+          "value": 1,
+          "status": "warn"
+        },
+        {
+          "value": 5,
+          "status": "bad"
+        }
+      ],
+      "better": "lower"
+    },
+    {
+      "id": "latency",
+      "title": "p95 latency",
+      "viz": "stat",
+      "width": 3,
+      "height": "s",
+      "unit": "ms",
+      "reduce": "window",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "p95(duration_ms)"
+        ],
+        "where": [
+          "kind = 'SPAN_KIND_SERVER'"
+        ]
+      }
+    },
+    {
+      "id": "error_logs",
+      "title": "Error logs",
+      "viz": "stat",
+      "width": 3,
+      "height": "s",
+      "unit": "count",
+      "reduce": "window",
+      "query": {
+        "from": "logs",
+        "measures": [
+          "count()"
+        ],
+        "where": [
+          "upper(severity) IN ('ERROR', 'FATAL')"
+        ]
+      }
+    },
+    {
+      "id": "traffic",
+      "title": "Request rate by service",
+      "viz": "timeseries",
+      "width": 4,
+      "height": "m",
+      "options": {
+        "style": "line",
+        "top": 6
+      },
+      "query": {
+        "from": "spans",
+        "where": [
+          "kind = 'SPAN_KIND_SERVER'"
+        ],
+        "measures": [
+          "rate()"
+        ],
+        "by": [
+          "service"
+        ],
+        "bucket": "1m"
+      }
+    },
+    {
+      "id": "error_services",
+      "title": "Error rate by service",
+      "viz": "timeseries",
+      "width": 4,
+      "height": "m",
+      "options": {
+        "style": "line",
+        "top": 6
+      },
+      "query": {
+        "from": "spans",
+        "where": [
+          "kind = 'SPAN_KIND_SERVER'"
+        ],
+        "measures": [
+          "error_rate()"
+        ],
+        "by": [
+          "service"
+        ],
+        "bucket": "1m"
+      }
+    },
+    {
+      "id": "service_latency",
+      "title": "p95 latency by service",
+      "viz": "timeseries",
+      "width": 4,
+      "height": "m",
+      "options": {
+        "style": "line",
+        "top": 6
+      },
+      "query": {
+        "from": "spans",
+        "where": [
+          "kind = 'SPAN_KIND_SERVER'"
+        ],
+        "measures": [
+          "p95(duration_ms)"
+        ],
+        "by": [
+          "service"
+        ],
+        "bucket": "1m"
+      }
+    }
+  ]
+}

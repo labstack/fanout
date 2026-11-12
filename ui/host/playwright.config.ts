@@ -10,6 +10,7 @@ export default defineConfig({
   testMatch: "**/*.spec.ts",
   testIgnore: process.env.PITOT_E2E_SKIP_PERFORMANCE === "1" ? ["**/performance.spec.ts"] : [],
   globalTeardown: "./e2e/support/app-teardown.ts",
+  globalSetup: process.env.PITOT_LANDING_CAPTURES === "1" ? "./e2e/support/landing-setup.ts" : undefined,
   fullyParallel: true,
   workers: 1,
   retries: 0,

@@ -1,0 +1,119 @@
+{
+  "id": "landing-service-latency",
+  "title": "Which service is slowest right now?",
+  "messages": [
+    {
+      "id": "landing-question",
+      "role": "user",
+      "content": "Which service is slowest right now?"
+    },
+    {
+      "id": "landing-evidence",
+      "role": "activity",
+      "activityType": "mcp-app",
+      "content": {
+        "resource_uri": "ui://pitot/panels.html",
+        "tool_name": "query_telemetry",
+        "tool_input": {},
+        "tool_result": {
+          "view": {
+            "kind": "query",
+            "key": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "dashboard": {
+            "version": 1,
+            "name": "Service latency",
+            "time": {
+              "from": "2026-11-12T12:00:00Z",
+              "to": "2026-11-12T13:00:00Z",
+              "refresh": "off"
+            },
+            "panels": [
+              {
+                "id": "latency",
+                "title": "Service latency",
+                "viz": "table",
+                "width": 12,
+                "height": "m",
+                "query": {
+                  "from": "spans",
+                  "measures": [
+                    "p50(duration_ms)",
+                    "p95(duration_ms)"
+                  ],
+                  "by": [
+                    "service"
+                  ]
+                },
+                "grid": {
+                  "x": 0,
+                  "y": 0,
+                  "w": 12,
+                  "h": 5
+                }
+              }
+            ]
+          },
+          "results": [
+            {
+              "id": "latency",
+              "status": "ok",
+              "elapsed_ms": 0,
+              "frame": {
+                "columns": [
+                  {
+                    "name": "service",
+                    "type": "string",
+                    "role": "dimension"
+                  },
+                  {
+                    "name": "p50_ms",
+                    "type": "number",
+                    "role": "measure",
+                    "unit": "ms"
+                  },
+                  {
+                    "name": "p95_ms",
+                    "type": "number",
+                    "role": "measure",
+                    "unit": "ms"
+                  }
+                ],
+                "values": [
+                  [
+                    "accounting",
+                    "checkout",
+                    "payment",
+                    "frontend-proxy",
+                    "recommendation"
+                  ],
+                  [
+                    38.2,
+                    26.3,
+                    25.1,
+                    22.8,
+                    19.4
+                  ],
+                  [
+                    53.8,
+                    52.1,
+                    51.6,
+                    50.9,
+                    49.7
+                  ]
+                ],
+                "rows": 5
+              }
+            }
+          ]
+        },
+        "is_error": false
+      }
+    },
+    {
+      "id": "landing-answer",
+      "role": "assistant",
+      "content": "**Accounting is the slowest at p95 53.8 ms**, just ahead of checkout (52.1 ms). The store is healthy: **39 requests/s**, **0.01% errors**, and about **50 ms p95** across fourteen services.\n\nNo clear incident stands out. I can inspect an accounting trace or build a service comparison dashboard."
+    }
+  ]
+}

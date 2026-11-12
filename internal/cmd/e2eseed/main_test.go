@@ -251,7 +251,7 @@ func TestSeedPostsAuthenticatedProtobuf(t *testing.T) {
 	if err := os.WriteFile(file, []byte("smoke-test-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(server.URL, file); err != nil {
+	if err := run(server.URL, file, false); err != nil {
 		t.Fatal(err)
 	}
 	if len(seen) != 3 {
