@@ -53,18 +53,6 @@ case "$arch" in
 	*) die "unsupported architecture: $arch (amd64 and arm64 are supported)" ;;
 esac
 
-legacy_names=""
-if [ "${PITOT_VERSION+x}" != x ] && [ "${FANOUT_VERSION+x}" = x ]; then
-	PITOT_VERSION=$FANOUT_VERSION
-	legacy_names="FANOUT_VERSION"
-fi
-if [ "${PITOT_PREFIX+x}" != x ] && [ "${FANOUT_PREFIX+x}" = x ]; then
-	PITOT_PREFIX=$FANOUT_PREFIX
-	legacy_names="${legacy_names:+$legacy_names, }FANOUT_PREFIX"
-fi
-if [ -n "$legacy_names" ]; then
-	printf 'pitot: deprecated environment variables: %s; use PITOT_ equivalents before the next alpha release\n' "$legacy_names" >&2
-fi
 version="${PITOT_VERSION:-}"
 if [ -z "$version" ]; then
 	version="$(fetch_stdout "https://api.github.com/repos/${REPO}/releases/latest" |

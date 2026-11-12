@@ -163,7 +163,7 @@ db-migrate-create NAME:
     {{goose}} -dir internal/db/migrations create {{NAME}} sql
 
 # Apply migrations (development; production auto-applies on boot).
-db-migrate-apply DB="data/control/fanout.sqlite":
+db-migrate-apply DB="data/control/pitot.sqlite":
     go run ./internal/cmd/dbmigrate -db "{{DB}}"
 
 # ── Go quality ───────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # Pitot
 
-Pitot (pronounced **PEE-toh**), formerly Fanout.
+Pitot (pronounced **PEE-toh**).
 
 **Observability your agents can operate.** Send OpenTelemetry to one binary, then investigate with
 Pitot's built-in agent or connect your own over MCP.

@@ -87,7 +87,7 @@ func (s *testAuthServer) login(t *testing.T, user auth.User) *http.Cookie {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("verify = %d %s", rec.Code, rec.Body.String())
 	}
-	return firstCookie(t, rec, "fanout_session")
+	return firstCookie(t, rec, "pitot_session")
 }
 
 func sessionRequest(method, target string, body *strings.Reader, cookie *http.Cookie) *http.Request {
@@ -527,7 +527,7 @@ func TestLoginLinkAuthenticatesExactlyOnce(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/link/verify", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	s.e.ServeHTTP(first, req)
-	if first.Code != http.StatusOK || firstCookie(t, first, "fanout_session") == nil {
+	if first.Code != http.StatusOK || firstCookie(t, first, "pitot_session") == nil {
 		t.Fatalf("first redemption = %d %s", first.Code, first.Body.String())
 	}
 
@@ -589,7 +589,7 @@ func TestLocalSelfSignupCreatesVerifiedViewer(t *testing.T) {
 	if user.Role != auth.RoleViewer || user.Status != auth.UserStatusActive {
 		t.Fatalf("self-signup user = %#v, want active viewer", user)
 	}
-	firstCookie(t, rec, "fanout_session")
+	firstCookie(t, rec, "pitot_session")
 	var provisioned int
 	if err := s.db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'user.provisioned' AND target_id = ?`, user.ID).Scan(&provisioned); err != nil {
 		t.Fatalf("query audit: %v", err)
@@ -735,7 +735,7 @@ func TestSetupExpiryAndExistingAdminRetry(t *testing.T) {
 			t.Fatalf("retry = %d %s, want 403: one setup credential must not establish a second session", rec.Code, rec.Body.String())
 		}
 		for _, cookie := range rec.Result().Cookies() {
-			if cookie.Name == "fanout_session" && cookie.Value != "" {
+			if cookie.Name == "pitot_session" && cookie.Value != "" {
 				t.Fatal("denied setup retry established a browser session")
 			}
 		}
@@ -811,7 +811,7 @@ func (s *testAuthServer) countFailedReason(t *testing.T, reason string) int {
 
 func hasSessionCookie(rec *httptest.ResponseRecorder) bool {
 	for _, cookie := range rec.Result().Cookies() {
-		if cookie.Name == "fanout_session" && cookie.Value != "" {
+		if cookie.Name == "pitot_session" && cookie.Value != "" {
 			return true
 		}
 	}

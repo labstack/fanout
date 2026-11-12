@@ -116,14 +116,17 @@ shipped dependencies.
 
 After merging the rename pull request:
 
-1. Rename the GitHub repository from `labstack/fanout` to `labstack/pitot` in
-   repository settings. Update remotes and the repository website to
+1. Verify the GitHub repository is `labstack/pitot`. Update remotes and the
+   repository website to
    `https://pitot.dev`; configure that domain for the site deployment. Configure
    the `pitot` Cloudflare Pages project used by `site.yml` and migrate the media
    hostname to `assets.pitot.dev` before enabling the renamed site workflow.
-   Refresh the six historical landing captures and hosted clips with the new
-   wordmark on a host that can launch Chrome; the committed captures still
-   document the pre-rename alpha.
+   Replace `site/public/logo.svg`: its outlined wordmark has no editable source
+   in the repository. Recapture `chat-{light,dark}.png` and
+   `dashboard-{light,dark}.png` under `site/src/assets/landing/`; no offline
+   capture recipe exists for these four historical images. Verify hosted clips
+   separately. The two overview captures were refreshed offline with
+   `just landing-captures`. The social card and favicon already use the current name.
 2. Verify the renamed repository's Actions permissions, branch protection,
    environments, OIDC trust and package access. Ensure `ghcr.io/labstack/pitot`
    is public and Actions can write it. Create or configure the public Docker Hub
@@ -135,12 +138,13 @@ After merging the rename pull request:
 4. Wait for the tag-triggered `release.yml` workflow, including anonymous image
    pulls, `pitot_` archives containing `./pitot`, checksums, attestations and
    installer verification. It publishes version and `latest` images to both new
-   image destinations. Add the rename and one-alpha compatibility notice from
+   image destinations. Add the rename and upgrade notice from
    `CHANGELOG.md` to the release notes.
 5. The final workflow job authenticates with GitHub OIDC and publishes the tagged
    `server.json` as `io.github.labstack/pitot` in the MCP Registry. Verify that
    entry and its version after the job passes; retire the old registry listing
    separately according to registry policy. Do not publish from this branch.
-6. In the following alpha, remove the legacy environment bridge and its installer
-   overrides after repeating the deprecation notice. Keep storage filenames and
-   token compatibility independently of that environment window.
+6. Verify the upgrade steps in `CHANGELOG.md`, including the control database
+   filename, session cookies and saved chat metadata. Telemetry footer keys
+   retain their persisted format-5 spelling.
+   The pre-rename environment variable prefix is no longer read.

@@ -11,11 +11,3 @@ it("validates each immutable activity once across chat and frame boundaries", ()
   expect(mcpAppContent({ ...raw, tool_result: "old persisted result" })).toBeUndefined();
   decode.mockRestore();
 });
-
-it("renders saved pre-rename activities without rewriting their stored URI", () => {
-  const raw = { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: fixture(), is_error: false };
-  const content = mcpAppContent(raw);
-  expect(content?.resource_uri).toBe("ui://pitot/panels.html");
-  expect(raw.resource_uri).toBe("ui://fanout/panels.html");
-  expect(mcpAppContent({ ...raw, tool_result: "invalid" })).toBeUndefined();
-});

@@ -93,7 +93,7 @@ test("capture the README overview", async ({ page, request }, info) => {
     ...dashboard.spec.panels.filter(panel => panel.viz === "timeseries").slice(0, 2),
   ];
   for (const panel of firstFold) await expect(page.locator(cardSelector(panel.id))).toBeInViewport({ ratio: 1 });
-  const overview = page.getByRole("main", { name: "Dashboard", exact: true });
+  const overview = page.getByRole("region", { name: "Dashboard", exact: true });
   await capture("overview", overview, async () => {
     const clip = await overview.evaluate(main => {
       const bounds = main.getBoundingClientRect();

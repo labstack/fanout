@@ -78,7 +78,7 @@ func main() {
 	var healthEnvironment map[string]string
 	if healthURL != "" || derivedProbe {
 		healthEnvironment = make(map[string]string)
-		for _, assignment := range config.ResolveEnvironment(os.Environ()) {
+		for _, assignment := range os.Environ() {
 			name, value, _ := strings.Cut(assignment, "=")
 			healthEnvironment[name] = value
 		}

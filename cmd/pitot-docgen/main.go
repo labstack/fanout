@@ -555,7 +555,7 @@ func renderPage(name string, page groupPage, fields []field) []byte {
 
 	b.WriteString("Every setting below is read once at startup and requires a restart to change.\n")
 	b.WriteString("Built-in defaults are overridden by nonempty environment values.\n")
-	b.WriteString("For the first Pitot alpha, unset `PITOT_` variables accept `FANOUT_` equivalents with a names-only deprecation warning. Explicitly empty primary variables block fallback.\n")
+	b.WriteString("The pre-rename environment variable prefix is no longer read. Use `PITOT_` settings.\n")
 	b.WriteString("Unknown `PITOT_` names fail startup; platform-injected service names are tolerated.\n")
 	b.WriteString("Vendor credentials and endpoints keep the vendor's documented names.\n\n")
 	if name == "ai" {

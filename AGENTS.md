@@ -11,10 +11,8 @@
   An empty provider disables chat; exactly `anthropic` or `openai` requires
   that provider's key. Ignore AI credentials and endpoints when chat is disabled;
   validate only the selected provider's endpoint.
-- For the first Pitot alpha, `internal/config/loader.go` resolves legacy
-  `FANOUT_*` only when the equivalent primary name is unset. Preserve explicit
-  empty primaries and emit one names-only warning. See `CHANGELOG.md` for the
-  removal window and storage compatibility names.
+- Only the current `PITOT_*` custom environment names are read; the
+  pre-rename environment variable prefix is no longer supported.
 - Every `secret:"true"` field accepts `<ENV>_FILE`. Both forms nonempty fail;
   secret files lose exactly one trailing LF or CRLF and must remain nonempty.
   Unselected AI providers' value and file forms are ignored.

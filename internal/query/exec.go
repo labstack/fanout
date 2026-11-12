@@ -398,7 +398,7 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 		return caller.Err()
 	}
 	// Decide once before scheduling this batch's panels. A sibling waiting for
-	// the same limited panel slots is normal dashboard fanout, not evidence
+	// the same limited panel slots is normal dashboard concurrency, not evidence
 	// of pre-existing pressure. Keep this policy even if the queue drains
 	// before an admitted panel finishes; diagnosis uses its existing slot.
 	deferDiagnosis := e.admission.waiting() > 0

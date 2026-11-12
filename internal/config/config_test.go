@@ -784,95 +784,19 @@ func TestLoadSCIMToken(t *testing.T) {
 	}
 }
 
-func TestLegacyEnvironmentCompatibility(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		env      []string
-		want     string
-		warnings int
-	}{
-		{"fallback", []string{"FANOUT_ADDR=:9001", "FANOUT_RETENTION_DAYS=9"}, ":9001", 1},
-		{"primary wins", []string{"FANOUT_ADDR=:9001", "PITOT_ADDR=:9002"}, ":9002", 0},
-		{"empty primary blocks fallback", []string{"FANOUT_ADDR=:9001", "PITOT_ADDR="}, DefaultAddr, 0},
-		{"empty legacy uses default", []string{"FANOUT_ADDR="}, DefaultAddr, 0},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			var logs bytes.Buffer
-			previous := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(previous) })
-			cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), test.env...)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cfg.Addr != test.want {
-				t.Fatalf("address = %q, want %q", cfg.Addr, test.want)
-			}
-			if strings.Count(logs.String(), "deprecated environment variables") != test.warnings {
-				t.Fatalf("unexpected warning count: %s", logs.String())
-			}
-			if test.warnings > 0 && !strings.Contains(logs.String(), "FANOUT_ADDR, FANOUT_RETENTION_DAYS") {
-				t.Fatal("warning must list every used name")
-			}
-			if strings.Contains(logs.String(), ":9001") {
-				t.Fatal("warning leaked a value")
-			}
-		})
-	}
-}
-
-func TestLegacySecretFileCompatibility(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth-secret")
-	value := strings.Repeat("z", 32)
-	if err := os.WriteFile(path, []byte(value+"\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-	cfg, err := Load(LoadOptions{Environ: []string{"FANOUT_AUTH_CODE_SECRET_FILE=" + path}})
+func TestUnrelatedEnvironmentPrefixesAreIgnored(t *testing.T) {
+	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), "PREVIOUS_ADDR=:9001", "PREVIOUS_AUTH_CODE_SECRET_FILE=/nonexistent")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AuthCodeSecret != value {
-		t.Fatal("legacy secret file was not loaded")
-	}
-	if !strings.Contains(logs.String(), "FANOUT_AUTH_CODE_SECRET_FILE") || strings.Contains(logs.String(), path) || strings.Contains(logs.String(), value) {
-		t.Fatal("warning must contain only the variable name")
-	}
-	_, err = Load(LoadOptions{Environ: []string{"FANOUT_AUTH_CODE_SECRET_FILE=" + path, "PITOT_AUTH_CODE_SECRET=" + value}})
-	if err == nil {
-		t.Fatal("mixed value and file forms must still conflict")
+	if cfg.Addr != DefaultAddr {
+		t.Fatalf("unrelated prefix changed address to %q", cfg.Addr)
 	}
 }
 
-func TestLegacySchemaAliasesCoverEveryOwnedSetting(t *testing.T) {
-	specs, err := configFieldSpecs()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, spec := range specs {
-		if !strings.HasPrefix(spec.env, "PITOT_") {
-			continue
-		}
-		names := []string{spec.env}
-		if spec.secret {
-			names = append(names, spec.env+"_FILE")
-		}
-		for _, name := range names {
-			legacy := strings.Replace(name, "PITOT_", "FANOUT_", 1)
-			got := ResolveEnvironment([]string{legacy + "="})
-			if !reflect.DeepEqual(got, []string{name + "="}) {
-				t.Fatalf("alias missing for %s", name)
-			}
-		}
-	}
-}
-
-func TestControlDatabaseKeepsLegacyFilename(t *testing.T) {
+func TestControlDatabaseUsesProductFilename(t *testing.T) {
 	cfg := Config{DataDir: t.TempDir()}
-	if filepath.Base(cfg.ControlSQLitePath()) != "fanout.sqlite" {
-		t.Fatal("rename must preserve the existing control database")
+	if filepath.Base(cfg.ControlSQLitePath()) != "pitot.sqlite" {
+		t.Fatal("control database must use the product filename")
 	}
 }
