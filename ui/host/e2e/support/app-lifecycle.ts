@@ -23,7 +23,12 @@ export async function writeAppState(path: string, state: unknown) {
 }
 
 async function commandFor(pid: number) {
-  try { return (await execute("ps", ["-p", String(pid), "-o", "args="])).stdout.trim() || undefined; }
+  try {
+    const output = (await execute("ps", ["-p", String(pid), "-o", "stat=", "-o", "args="])).stdout.trim();
+    if (!output) return;
+    const boundary = output.search(/\s/);
+    return { zombie: output.startsWith("Z"), command: output.slice(boundary).trim() };
+  }
   catch (error) {
     if ((error as { code?: number }).code === 1) return;
     throw new Error("Could not verify seeded server process ownership");
@@ -35,16 +40,19 @@ function owns(instance: Instance, command: string) {
 async function stopInstance(instance: Instance, timeout: number) {
   const command = await commandFor(instance.pid);
   if (command) {
-    if (!owns(instance, command)) throw new Error(`Refusing to stop unowned process ${instance.pid}`);
-    try { process.kill(instance.pid, "SIGTERM"); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+    if (!command.zombie) {
+      if (!owns(instance, command.command)) throw new Error(`Refusing to stop unowned process ${instance.pid}`);
+      try { process.kill(instance.pid, "SIGTERM"); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+    }
     const stopped = async () => {
       const current = await commandFor(instance.pid);
-      return !current || !owns(instance, current) ? undefined : "Seeded server is still stopping";
+      return !current || !current.zombie && !owns(instance, current.command) ? undefined : "Seeded server is still stopping";
     };
     try { await waitUntilReady(Date.now() + timeout, stopped, 50); }
     catch {
-      if (await stopped()) {
+      const current = await commandFor(instance.pid);
+      if (current && !current.zombie && owns(instance, current.command)) {
         try { process.kill(instance.pid, "SIGKILL"); }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
       }

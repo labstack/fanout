@@ -164,9 +164,11 @@ func (c *Completer) schema(ctx context.Context, key completionKey) (*query.Schem
 	if c.source == nil {
 		return nil, false, false
 	}
-	schema, err := c.source.Schema(ctx, query.SchemaRequest{Window: key.window, Namespace: key.namespace, Cached: true})
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// Read the cache while holding the same lock that retires an in-flight
+	// fetch, so a stale miss cannot admit a duplicate after that fetch finishes.
+	schema, err := c.source.Schema(ctx, query.SchemaRequest{Window: key.window, Namespace: key.namespace, Cached: true})
 	if err == nil && schema != nil {
 		delete(c.failed, key)
 		return schema, true, false

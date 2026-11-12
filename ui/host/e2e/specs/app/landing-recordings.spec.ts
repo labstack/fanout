@@ -21,12 +21,12 @@ test.use({
 });
 
 const prompts = {
-  chat: "Why is checkout slower in the last hour?",
+  chat: "Investigate checkout latency in the last hour. Show four separate evidence views: service performance, dependency topology, slow traces and logs. Explain what the evidence supports.",
   dashboard: "Build a dashboard for checkout: headline stats and trends for request rate, error rate and p95 latency, p95 by operation, slowest dependencies, and recent slow traces",
 };
 
 for (const view of ["chat", "dashboard"] as const) {
-  test(`record ${view} on the OpenTelemetry Demo`, async ({ browser, storageState }, info) => {
+  test(`record ${view} with live Pitot`, async ({ browser, storageState }, info) => {
     test.skip(info.project.use.viewport?.width !== 1440, "use the 1440px projects to record each theme once at 1280 × 800 CSS pixels");
     const theme = info.project.use.colorScheme as "light" | "dark";
     await mkdir(directory, { recursive: true });
@@ -78,7 +78,7 @@ for (const view of ["chat", "dashboard"] as const) {
       });
       await page.reload();
       const navigation = page.getByRole("navigation", { name: "Navigation", exact: true });
-      await expect(navigation.getByText("No chats yet", { exact: true })).toBeVisible();
+      await expect(navigation.getByText("No chats yet. Start one above.", { exact: true })).toBeVisible();
       await expect(navigation.locator('a[href^="/dashboards/"]')).toHaveCount(1);
       await expect(navigation.locator('a[href^="/dashboards/"]').getByText("System overview", { exact: true })).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute("data-mantine-color-scheme", theme);
