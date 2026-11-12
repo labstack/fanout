@@ -119,12 +119,12 @@ func renderMail(t *template.Template, data mailData) (string, error) {
 }
 
 const mailShellStart = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pitot</title></head>
-<body style="margin:0;padding:0;background:#f4f8f6;color:#1f2923;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+<body style="margin:0;padding:0;background:#f4f8f6;color:#1f2923;font-family:Geist,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
 <div style="display:none;max-height:0;overflow:hidden;color:transparent">{{.Preheader}}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f4f8f6"><tr><td align="center" style="padding:48px 16px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;border-collapse:separate;background:#ffffff;border:1px solid #e1e7e3;border-radius:24px;box-shadow:0 18px 45px rgba(31,41,55,.08)">
 <tr><td style="padding:36px 40px 16px">
-<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="width:46px;vertical-align:middle">` + brand.EmailMarkHTML + `</td><td style="padding-left:14px;vertical-align:middle;font-size:18px;font-weight:800;line-height:1;letter-spacing:.17em;text-transform:uppercase;color:#1f2923">Pitot</td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="width:48px;vertical-align:middle">` + brand.EmailMarkHTML + `</td><td style="padding-left:14px;vertical-align:middle;font-size:18px;font-weight:600;line-height:1;letter-spacing:-.045em;color:#111113">pitot</td></tr></table>
 </td></tr><tr><td style="padding:12px 40px 40px">`
 
 const mailShellEnd = `<p style="margin:28px 0 0;color:#748078;font-size:13px;line-height:1.6">If you did not expect this message, you can safely ignore it.</p>

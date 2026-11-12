@@ -185,7 +185,7 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	}
 	for _, brandElement := range []string{
 		`class="brand-mark"`,
-		`class="brand-name">Pitot`,
+		`class="brand-name">pitot`,
 	} {
 		if !strings.Contains(consent.Body.String(), brandElement) {
 			t.Fatalf("consent page is missing branded element %q: %s", brandElement, consent.Body.String())

@@ -129,7 +129,7 @@ const description = `${benchmark.release}: ${formatRate(sustained.accepted_per_s
   .fo-replay-tooltip b { display: inline-block; min-width: 7ch; text-align: right; font-weight: 400; color: var(--sl-color-white); }
   .fo-replay-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .fo-replay-plot :global(.uplot), .fo-replay-plot :global(.uplot *) { box-sizing: border-box; }
-  .fo-replay-plot :global(.uplot) { width: min-content; font-family: var(--fo-font-display); }
+  .fo-replay-plot :global(.uplot) { width: min-content; font-family: var(--fo-font-mono); }
   .fo-replay-plot :global(.u-wrap) { position: relative; user-select: none; }
   .fo-replay-plot :global(.u-over), .fo-replay-plot :global(.u-under), .fo-replay-plot :global(.u-axis) { position: absolute; }
   .fo-replay-plot :global(.u-under) { overflow: hidden; }
@@ -138,7 +138,7 @@ const description = `${benchmark.release}: ${formatRate(sustained.accepted_per_s
   .fo-replay-plot :global(.u-cursor-x) { height: 100%; border-right: 1px dashed var(--sl-color-gray-3); }
   .fo-replay-plot :global(.u-cursor-y) { width: 100%; border-bottom: 1px dashed var(--sl-color-gray-3); }
   .fo-replay-plot :global(.u-off) { display: none; }
-  svg text { fill: var(--sl-color-gray-2); font-family: var(--fo-font-display); font-size: 12px; }
+  svg text { fill: var(--sl-color-gray-2); font-family: var(--fo-font-mono); font-size: 12px; }
   .fo-replay-y { text-anchor: end; }
   .fo-replay-x, .fo-replay-axis { text-anchor: middle; }
   .fo-replay-grid { stroke: var(--sl-color-gray-5); stroke-width: 0.5; }

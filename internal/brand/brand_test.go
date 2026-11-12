@@ -8,20 +8,20 @@ import (
 	"testing"
 )
 
-func TestMarkSVGUsesCanonicalFaviconPaths(t *testing.T) {
-	favicon, err := os.ReadFile(filepath.Join("testdata", "favicon.svg"))
+func TestMarkSVGUsesCanonicalWaterfallPaths(t *testing.T) {
+	mark, err := os.ReadFile(filepath.Join("testdata", "mark.svg"))
 	if err != nil {
-		t.Fatalf("read vendored canonical favicon: %v", err)
+		t.Fatalf("read vendored canonical mark: %v", err)
 	}
 
-	pathPattern := regexp.MustCompile(`(?s)<path\s+d="([^"]+)"`)
-	paths := pathPattern.FindAllStringSubmatch(string(favicon), -1)
+	pathPattern := regexp.MustCompile(`(?s)<path\s+[^>]*d="([^"]+)"`)
+	paths := pathPattern.FindAllStringSubmatch(string(mark), -1)
 	if len(paths) == 0 {
-		t.Fatal("canonical favicon does not contain any paths")
+		t.Fatal("canonical mark does not contain any paths")
 	}
 	renderedPaths := pathPattern.FindAllStringSubmatch(MarkSVG, -1)
 	if len(renderedPaths) != len(paths) {
-		t.Fatalf("MarkSVG has %d paths, canonical favicon has %d", len(renderedPaths), len(paths))
+		t.Fatalf("MarkSVG has %d paths, canonical mark has %d", len(renderedPaths), len(paths))
 	}
 	canonical := make(map[string]struct{}, len(paths))
 	for _, match := range paths {
@@ -33,7 +33,7 @@ func TestMarkSVGUsesCanonicalFaviconPaths(t *testing.T) {
 	}
 	for path := range canonical {
 		if _, ok := rendered[path]; !ok {
-			t.Errorf("MarkSVG is missing canonical favicon path %q", path)
+			t.Errorf("MarkSVG is missing canonical mark path %q", path)
 		}
 	}
 	for path := range rendered {

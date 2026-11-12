@@ -97,7 +97,7 @@ JSON inputs, SVG outputs, and the site copy still use your contributor checkout.
 
 **The social preview card is generated.** `just social-card` renders
 `docs/media/social-card.typ` into `site/public/social-card.png`. Set
-`PITOT_FONT_PATH` to a directory containing Inter; the recipe requires Typst
+`PITOT_FONT_PATH` to a directory containing Geist; the recipe requires Typst
 0.15.1 and fails if the font is missing. Commit the source and PNG together.
 The site build checks the committed image’s dimensions; CI does not rerender it.
 

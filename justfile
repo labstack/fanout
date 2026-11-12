@@ -309,7 +309,7 @@ site-build: docs-generate-check diagrams-check site-deps
 # asserts the committed PNG is present and correctly sized, which is the part a
 # gate can honestly do.
 #
-# The card needs Inter, which is not vendored here — the browser bundle carries
+# The card needs Geist, which is not vendored here — the browser bundle carries
 # its own copy for the UI, and a second copy in the tree to draw one image is a
 # poor trade. Typst warns about an unknown font family and still exits 0, so a
 # missing face does not fail the render; it quietly produces a card set in
@@ -319,8 +319,7 @@ site-build: docs-generate-check diagrams-check site-deps
 # between releases, so a different one rewrites every glyph position and
 # produces a diff that is not a real change.
 #
-# The mark comes from ui/host/public/favicon.svg, the canonical asset that
-# internal/brand tracks, so the card cannot drift from the product logo.
+# The fixed dark mark comes from ui/host/public/mark-dark.svg.
 social-card:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -336,8 +335,8 @@ social-card:
       exit 1
     fi
     if [ -z "${PITOT_FONT_PATH:-}" ]; then
-      echo "set PITOT_FONT_PATH to a directory holding Inter" >&2
-      echo "the OFL original is at https://github.com/google/fonts/tree/main/ofl/inter" >&2
+      echo "set PITOT_FONT_PATH to a directory holding Geist" >&2
+      echo "the OFL original is at https://github.com/google/fonts/tree/main/ofl/geist" >&2
       exit 1
     fi
     # Rendered aside and moved into place only once it is known good, so a run
