@@ -110,7 +110,7 @@ it("waits for a zombie manager to be reaped before removing ownership", async ()
     const count = existsSync(path) ? Number(readFileSync(path, "utf8")) : 0;
     writeFileSync(path, String(count + 1));
     if (count === 0) console.log(${JSON.stringify(`S ${instance.command} ${instance.id} ${instance.dir}`)});
-    else if (count === 1) console.log("Z [node] <defunct>");
+    else if (count === 1) console.log(${JSON.stringify(`Z ${instance.command} ${instance.id} ${instance.dir}`)});
     else {
       writeFileSync(${JSON.stringify(reaped)}, String(existsSync(${JSON.stringify(instance.dir)}) && existsSync(${JSON.stringify(join(`${state}.instances`, instance.id))})));
       process.exit(1);
@@ -173,4 +173,32 @@ it("forces an owned manager to exit after its shutdown deadline and removes its 
   expect(running(instance.pid)).toBe(false);
   expect(await exists(instance.dir)).toBe(false);
   expect(await exists(`${state}.instances`)).toBe(false);
+});
+
+it("treats an unowned zombie at a recorded PID as stopped", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pitot-lifecycle-test-"));
+  directories.push(directory);
+  const state = join(directory, "state.json");
+  states.push(state);
+  const dir = join(directory, "instance");
+  const bin = join(directory, "bin");
+  await mkdir(dir);
+  await mkdir(bin);
+  await mkdir(`${state}.instances`);
+  await writeAppState(join(`${state}.instances`, "stale"), {
+    id: "stale", pid: process.pid, dir, command: "manager.mjs",
+  });
+  await writeFile(join(bin, "ps"), `#!${process.execPath}
+    console.log("Z [unrelated] <defunct>");
+  `);
+  await chmod(join(bin, "ps"), 0o700);
+  const originalPath = process.env.PATH;
+  try {
+    process.env.PATH = `${bin}:${originalPath}`;
+    await stopAppServers(state, 100);
+    expect(await exists(dir)).toBe(false);
+    expect(await exists(`${state}.instances`)).toBe(false);
+  } finally {
+    process.env.PATH = originalPath;
+  }
 });

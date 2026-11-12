@@ -1,6 +1,6 @@
 -- +goose Up
 -- Dashboards become typed v1 specs with a version history. The widget model
--- is replaced outright: Fanout is pre-release, so existing dashboards are
+-- is replaced outright: Pitot is pre-release, so existing dashboards are
 -- dropped and each owner receives the new default dashboard on next visit.
 DROP TABLE dashboard_widgets;
 DROP TABLE dashboards;

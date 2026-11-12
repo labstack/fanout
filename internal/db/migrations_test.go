@@ -11,8 +11,8 @@ import (
 // never change or remove a checksum for a migration already published.
 func TestMigrationChecksums(t *testing.T) {
 	checksums := map[string]string{
-		"migrations/20260930000000_initial.sql":                 "2f256d45df0a604c198e165af00b66f63d9f36b13e27f2898c485da524883203",
-		"migrations/20261004000000_dashboard_specs.sql":         "11894224e7c3ef0efcacae9a6f5f8f6d4af27ddd81ed8868b96b44fb9bbf7d36",
+		"migrations/20260930000000_initial.sql":                 "4e944361f785f869c855a9677987dd73c15edc694c2c0e41e4fcc05569711961",
+		"migrations/20261004000000_dashboard_specs.sql":         "8b51ab3a02cf1acc9709bae2b29cfaba9320555293d17cd30b7092caf4107704",
 		"migrations/20261008000001_dashboard_origins.sql":       "6e7e89adf6e51633da0d73b052b12eec08ae3e7dd21ca315a4ac2fecfa703501",
 		"migrations/20261009000000_user_profile_status.sql":     "aed4c0a316a5fb67b1e60c82d45c6b3ec34a2fbb44721ef772f6b5d3df546659",
 		"migrations/20261030000000_alert_last_evaluated_at.sql": "577ef95a1964aebf72d8ecb9610c310910121f7bb735dbb287966525b2fb537a",

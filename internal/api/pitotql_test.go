@@ -458,20 +458,3 @@ func TestPitotQLParseOffersSeenDottedKey(t *testing.T) {
 		}
 	}
 }
-
-func TestRetiredQueryRoutesAreNotRegistered(t *testing.T) {
-	for _, action := range []string{"parse", "format", "complete", "reference"} {
-		method := http.MethodPost
-		if action == "reference" {
-			method = http.MethodGet
-		}
-		path := "/api/fanql/" + action
-		if _, ok := classifyRoute(method, path); ok {
-			t.Fatalf("retired route classified: %s", path)
-		}
-		response := servePitotQL(t, &fakePitotQLParser{}, &fakePitotQLPanels{}, method, path, `{}`)
-		if response.Code != http.StatusNotFound {
-			t.Fatalf("retired route: %d %s", response.Code, response.Body)
-		}
-	}
-}

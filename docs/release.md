@@ -144,7 +144,7 @@ After merging the rename pull request:
    separately according to registry policy. Do not publish from this branch.
 6. Verify the upgrade steps in `CHANGELOG.md`, including the control database
    filename, session cookies and saved chat metadata. Telemetry footer keys
-   retain their persisted format-5 spelling.
+   use the `pitot.spill.` namespace.
    The pre-rename environment variable prefix is no longer read.
 
 ## Refresh landing stills

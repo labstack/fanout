@@ -39,7 +39,7 @@ function owns(instance: Instance, command: string) {
 }
 async function stopInstance(instance: Instance, timeout: number) {
   const command = await commandFor(instance.pid);
-  if (command) {
+  if (command && (!command.zombie || owns(instance, command.command))) {
     if (!command.zombie) {
       if (!owns(instance, command.command)) throw new Error(`Refusing to stop unowned process ${instance.pid}`);
       try { process.kill(instance.pid, "SIGTERM"); }
@@ -47,7 +47,7 @@ async function stopInstance(instance: Instance, timeout: number) {
     }
     const stopped = async () => {
       const current = await commandFor(instance.pid);
-      return !current || !current.zombie && !owns(instance, current.command) ? undefined : "Seeded server is still stopping";
+      return !current || !owns(instance, current.command) ? undefined : "Seeded server is still stopping";
     };
     try { await waitUntilReady(Date.now() + timeout, stopped, 50); }
     catch {
