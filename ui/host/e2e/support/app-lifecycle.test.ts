@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { startAppServer, stopAppServers, writeAppState } from "./app-lifecycle";
@@ -32,7 +32,7 @@ async function fixture(mode = "ready") {
     process.on("SIGTERM", () => { if (mode !== "stubborn") process.exit(0); });
     setInterval(() => {}, 60000);
   `);
-  return { state, started, options: { command: [process.execPath, script], timeout: 30_000 } };
+  return { directory, state, started, options: { command: [process.execPath, script], timeout: 30_000 } };
 }
 async function exists(path: string) { return stat(path).then(() => true, () => false); }
 function running(pid: number) { try { process.kill(pid, 0); return true; } catch { return false; } }
@@ -93,6 +93,38 @@ it("tears down every registered instance even when shared readiness was replaced
   for (const instance of [first, second]) {
     expect(running(instance.pid)).toBe(false);
     expect(await exists(instance.dir)).toBe(false);
+  }
+});
+
+it("waits for a zombie manager to be reaped before removing ownership", async () => {
+  const { directory, state, options } = await fixture();
+  const instance = await startAppServer(state, options);
+  const bin = join(directory, "bin");
+  const calls = join(directory, "ps-calls");
+  const reaped = join(directory, "ownership-at-reap");
+  await mkdir(bin);
+  // Model the OS boundary: owned process, exited but unreaped, then absent.
+  await writeFile(join(bin, "ps"), `#!${process.execPath}
+    import { existsSync, readFileSync, writeFileSync } from "node:fs";
+    const path = ${JSON.stringify(calls)};
+    const count = existsSync(path) ? Number(readFileSync(path, "utf8")) : 0;
+    writeFileSync(path, String(count + 1));
+    if (count === 0) console.log(${JSON.stringify(`S ${instance.command} ${instance.id} ${instance.dir}`)});
+    else if (count === 1) console.log("Z [node] <defunct>");
+    else {
+      writeFileSync(${JSON.stringify(reaped)}, String(existsSync(${JSON.stringify(instance.dir)}) && existsSync(${JSON.stringify(join(`${state}.instances`, instance.id))})));
+      process.exit(1);
+    }
+  `);
+  await chmod(join(bin, "ps"), 0o700);
+  const originalPath = process.env.PATH;
+  try {
+    process.env.PATH = `${bin}:${originalPath}`;
+    await stopAppServers(state);
+    expect(await readFile(reaped, "utf8")).toBe("true");
+    expect(await exists(instance.dir)).toBe(false);
+  } finally {
+    process.env.PATH = originalPath;
   }
 });
 
