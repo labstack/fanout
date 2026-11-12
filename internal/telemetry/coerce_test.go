@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/labstack/pitot/internal/telemetry/semconv"
@@ -92,7 +93,14 @@ func TestVerifierAgreesWithCoerce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	footer := map[string]string{}
+	for _, kv := range openParquetFile(t, path).Metadata().KeyValueMetadata {
+		footer[kv.Key] = kv.Value
+	}
 	for _, key := range []semconv.Key{status, method} {
+		if got := footer["pitot.spill."+key.Name]; got != strconv.FormatUint(spills[key.Bit], 10) {
+			t.Errorf("%s footer spill count = %q, want %d", key.Name, got, spills[key.Bit])
+		}
 		if counts[key.Bit] != spills[key.Bit] {
 			t.Errorf("%s spills %d, want %d", key.Name, counts[key.Bit], spills[key.Bit])
 		}

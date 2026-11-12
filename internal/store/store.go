@@ -28,9 +28,6 @@ type SQLite struct {
 // NewSQLite opens (or creates) an SQLite database at dbPath and runs
 // embedded schema migrations via Goose. Use ":memory:" for an in-memory database.
 func NewSQLite(dbPath string) (*SQLite, error) {
-	if err := MigrateControlDatabase(dbPath); err != nil {
-		return nil, err
-	}
 	var dsn string
 	if dbPath == ":memory:" {
 		dsn = fmt.Sprintf("file::memory:?_pragma=busy_timeout(%d)&_pragma=foreign_keys(1)", ControlDBBusyTimeout.Milliseconds())

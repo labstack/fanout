@@ -1,5 +1,5 @@
 -- +goose Up
--- Fanout control schema. sqlc reads these migrations to generate query bindings.
+-- Pitot control schema. sqlc reads these migrations to generate query bindings.
 -- DuckDB maintains its own telemetry query schema.
 
 CREATE TABLE alert_rules (

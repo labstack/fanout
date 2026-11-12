@@ -186,8 +186,8 @@ const metricNoRecordedValue = 1
 
 // spillPrefix starts the footer key whose value counts the rows whose value
 // of a key could not be converted to its type.
-// Preserve the published footer spelling so existing batches remain readable.
-const spillPrefix = "fanout.spill."
+// Spill counts use the Pitot footer namespace.
+const spillPrefix = "pitot.spill."
 
 // Spans keep trace locality, which the trace index depends on. Logs and
 // metrics follow the OpenTelemetry Collector's ClickHouse exporter, with

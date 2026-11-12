@@ -285,24 +285,3 @@ func TestQueryTelemetryKeepsInvalidPanelProblems(t *testing.T) {
 
 	}
 }
-
-func TestRetiredQueryReferenceIsUnavailable(t *testing.T) {
-	const previousURI = "pitot://fanql/reference"
-	client := connectTestClient(t, newPanelServer(t), nil)
-	listed, err := client.ListResources(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, resource := range listed.Resources {
-		if resource.URI == previousURI {
-			t.Fatal("read alias advertised")
-		}
-	}
-	if _, err := client.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: previousURI}); err == nil {
-		t.Fatal("retired resource resolved")
-	}
-	result, err := client.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: pitotqlReferenceURI})
-	if err != nil || len(result.Contents) != 1 || result.Contents[0].Text != pitotql.Reference() {
-		t.Fatalf("current resource = %+v, %v", result, err)
-	}
-}

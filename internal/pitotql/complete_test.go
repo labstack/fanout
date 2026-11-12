@@ -755,3 +755,93 @@ func TestCompleteMarksIndexedKeys(t *testing.T) {
 	}
 	t.Fatalf("labels %v", completionLabels(r))
 }
+
+func TestCompleteCacheHitDoesNotWaitForAdmissionLock(t *testing.T) {
+	c := warmCompleter(t)
+	done := make(chan CompleteResponse, 1)
+	c.mu.Lock()
+	go func() { done <- c.Complete(context.Background(), completionRequest("spans ")) }()
+	select {
+	case response := <-done:
+		c.mu.Unlock()
+		if !response.Schema.Warm {
+			t.Fatal("cached schema was not returned")
+		}
+	case <-time.After(time.Second):
+		c.mu.Unlock()
+		<-done
+		t.Fatal("cache hit waited for the admission lock")
+	}
+}
+
+// A cache miss may race with a fetch publishing its result and retiring its
+// in-flight entry. Admission must recheck that miss before starting more work.
+type delayedCacheMiss struct {
+	*fakeSchemas
+	delay  atomic.Bool
+	missed chan struct{}
+	resume chan struct{}
+}
+
+func (s *delayedCacheMiss) Schema(ctx context.Context, req query.SchemaRequest) (*query.Schema, error) {
+	schema, err := s.fakeSchemas.Schema(ctx, req)
+	if req.Cached && schema == nil && s.delay.CompareAndSwap(true, false) {
+		close(s.missed)
+		<-s.resume
+	}
+	return schema, err
+}
+
+func TestCompleteStaleMissDoesNotDuplicateFetch(t *testing.T) {
+	var calls atomic.Int32
+	fetchGate := make(chan struct{})
+	source := &delayedCacheMiss{
+		fakeSchemas: completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
+			calls.Add(1)
+			<-fetchGate
+			return completionFixtureSchema(), nil
+		}),
+		missed: make(chan struct{}), resume: make(chan struct{}),
+	}
+	c := NewCompleter(source)
+	key := completionKey{window: "1h"}
+	var fetched chan struct{}
+	deadline := time.Now().Add(3 * time.Second)
+	for fetched == nil && time.Now().Before(deadline) {
+		c.schema(context.Background(), key)
+		c.mu.Lock()
+		fetched = c.inflight[key]
+		c.mu.Unlock()
+		if fetched == nil {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if fetched == nil {
+		close(fetchGate)
+		t.Fatal("schema fetch was not admitted")
+	}
+	source.delay.Store(true)
+	done := make(chan struct{})
+	go func() { c.schema(context.Background(), key); close(done) }()
+	<-source.missed
+	close(fetchGate)
+	select {
+	case <-fetched:
+	case <-time.After(time.Second):
+		close(source.resume)
+		<-done
+		<-fetched
+		t.Fatal("cache lookup blocked fetch retirement")
+	}
+	close(source.resume)
+	<-done
+	c.mu.Lock()
+	pending := c.inflight[key]
+	c.mu.Unlock()
+	if pending != nil {
+		<-pending
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("stale cache miss admitted %d fetches, want 1", calls.Load())
+	}
+}

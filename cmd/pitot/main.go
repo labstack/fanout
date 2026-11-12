@@ -64,11 +64,6 @@ type loginLinkCommand struct {
 }
 
 func main() {
-	if err := store.RejectPreviousEnvironment(os.Environ()); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
 	showVersion, loginLink, healthURL, derivedProbe, repair, err := parseCommandLine(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
@@ -714,9 +709,6 @@ func createLoginLink(cfg config.Config, rawEmail string, breakGlass bool, output
 	}
 	email, err := auth.NormalizeEmail(rawEmail)
 	if err != nil {
-		return err
-	}
-	if err := store.MigrateControlDatabase(cfg.ControlSQLitePath()); err != nil {
 		return err
 	}
 	if _, err := os.Stat(cfg.ControlSQLitePath()); err != nil {
