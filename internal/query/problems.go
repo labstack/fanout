@@ -36,7 +36,7 @@ func DiagnosisProblem(path, message, hint string) Problem {
 	return Problem{Path: path, Message: PresentDiagnosis(message), Hint: PresentDiagnosis(hint), productDiagnosis: true}
 }
 
-// Diagnoses presents FanQL problems, which quote the user's own text (often URL
+// Diagnoses presents PitotQL problems, which quote the user's own text (often URL
 // paths), as product-authored guidance rather than engine errors.
 func Diagnoses(problems Problems) Problems {
 	for i := range problems {

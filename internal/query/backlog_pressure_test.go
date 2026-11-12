@@ -317,7 +317,7 @@ func runPanelPressure(t *testing.T, assertUsable bool) {
 		return results
 	}
 	// Four concurrent dashboard requests retain the executor's production
-	// fanout. When internal reads occupy the fifth slot, diagnostics defer
+	// concurrency. When internal reads occupy the fifth slot, diagnostics defer
 	// their SQL samples until the workers have joined.
 	worker := func(c context.Context, phase string, id int) {
 		for c.Err() == nil {

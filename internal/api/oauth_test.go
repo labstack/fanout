@@ -407,7 +407,7 @@ func oauthCookieForUser(t *testing.T, e *echo.Echo, user auth.User) *http.Cookie
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("test login = %d %s", rec.Code, rec.Body.String())
 	}
-	return firstCookie(t, rec, "fanout_session")
+	return firstCookie(t, rec, "pitot_session")
 }
 
 func oauthSessionCookie(t *testing.T, e *echo.Echo, users *auth.UserStore, email string) *http.Cookie {

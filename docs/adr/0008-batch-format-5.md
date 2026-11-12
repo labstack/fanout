@@ -32,7 +32,7 @@ Format 5 replaces format 4 and supersedes the format half of ADR 0003.
   service and time. Metrics sort by namespace, service, name, hour, series
   and time.
 - Reads rewrite `attributes['k']` and `resource['k']` for a standard key to
-  its column on the parsed SQL, so FanQL, structured panels and SQL share one
+  its column on the parsed SQL, so PitotQL, structured panels and SQL share one
   rule and read the converted value. Users never name the columns, and
   result stars leave them out.
 - SQL rejects `GROUP BY ALL`, because the pinned engine groups its keys

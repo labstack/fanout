@@ -193,7 +193,7 @@ func TestDiagnosisNamesTextAndNegatedFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// FanQL free text lowers to contains() and negation to an OR; the diagnosis
+	// PitotQL free text lowers to contains() and negation to an OR; the diagnosis
 	// names their field instead of "one filter".
 	if r := results[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, `Without operation containing "zzqxnomatch", 120 match the remaining filters.`) {
 		t.Fatalf("text result = %+v", r)

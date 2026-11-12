@@ -64,6 +64,11 @@ type loginLinkCommand struct {
 }
 
 func main() {
+	if err := store.RejectPreviousEnvironment(os.Environ()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	showVersion, loginLink, healthURL, derivedProbe, repair, err := parseCommandLine(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
@@ -78,7 +83,7 @@ func main() {
 	var healthEnvironment map[string]string
 	if healthURL != "" || derivedProbe {
 		healthEnvironment = make(map[string]string)
-		for _, assignment := range config.ResolveEnvironment(os.Environ()) {
+		for _, assignment := range os.Environ() {
 			name, value, _ := strings.Cut(assignment, "=")
 			healthEnvironment[name] = value
 		}
@@ -316,7 +321,7 @@ func main() {
 	panels.SetRollupReader(queries)
 	panels.SetCacheTTL(cfg.QueryCacheTTL)
 	api.RegisterQueryRoutes(e, panels)
-	api.RegisterFanQLRoutes(e, q, panels)
+	api.RegisterPitotQLRoutes(e, q, panels)
 	api.RegisterAnnotationRoutes(e, annotations.New(q))
 	api.RegisterTraceRoutes(e, panels.CachedTraces(queries), cfg.RetentionDays)
 	api.RegisterIntelligenceRoutes(e, detector)
@@ -709,6 +714,9 @@ func createLoginLink(cfg config.Config, rawEmail string, breakGlass bool, output
 	}
 	email, err := auth.NormalizeEmail(rawEmail)
 	if err != nil {
+		return err
+	}
+	if err := store.MigrateControlDatabase(cfg.ControlSQLitePath()); err != nil {
 		return err
 	}
 	if _, err := os.Stat(cfg.ControlSQLitePath()); err != nil {

@@ -35,6 +35,7 @@ async function stop(child: ChildProcess) {
 
 function seed(binary: string | undefined, base: string, tokenFile: string, log: string, track: (child: ChildProcess) => void): Promise<void> {
   const args = ["-endpoint", base, "-token-file", tokenFile];
+  if (process.env.PITOT_LANDING_CAPTURES === "1") args.push("-landing");
   const fd = openSync(log, "a", 0o600);
   const child = binary
     ? spawn(resolve(binary), args, { cwd: root, stdio: ["ignore", fd, fd] })
@@ -126,8 +127,34 @@ export default async function globalSetup({ signalCleanup = true, onSignal = () 
     const tokenFile = join(dir, "ingest-token");
     // The command contract requires a temporary file; never put credentials in argv.
     await writeFile(tokenFile, ingestToken, { mode: 0o600 });
+    if (process.env.PITOT_LANDING_CAPTURES === "1") console.log("Seeding fourteen services for the one-hour offline store capture");
     try { await seed(process.env.PITOT_E2E_SEED_BINARY, base, tokenFile, seedLog, process => { seedChild = process; }); }
     finally { await rm(tokenFile, { force: true }); }
+
+    if (process.env.PITOT_LANDING_CAPTURES === "1") {
+      const bounds = (await readFile(seedLog, "utf8")).match(/seed_window=([^,\s]+),([^\s]+)/);
+      if (!bounds || Date.parse(bounds[2]) - Date.parse(bounds[1]) !== 3_600_000) throw new Error("Landing seed must cover one complete hour");
+      const spec = JSON.parse(await readFile(join(root, "ui/host/e2e/data/landing-dashboard.json"), "utf8"));
+      spec.time = { from: bounds[1], to: bounds[2], refresh: "off" };
+      const checked = await requestJSON("/api/queries/run", { dashboard: spec });
+      for (const result of checked.body.results ?? []) {
+        if (["error", "invalid"].includes(result.status)) throw new Error(`Landing panel ${result.id}: ${result.error ?? result.status}`);
+      }
+      await waitUntilReady(Date.now() + 90_000, async () => {
+        const { body } = await requestJSON("/api/queries/run", { dashboard: spec });
+        const pending = spec.panels.find((panel: { id: string }) => !body.results?.some((result: { id: string; status: string; frame?: { rows: number } }) =>
+          result.id === panel.id && result.status === "ok" && (result.frame?.rows ?? 0) > 0));
+        return pending ? `Landing panel ${pending.id} is still flushing` : undefined;
+      });
+      const { response, body } = await requestJSON("/api/dashboards", { spec });
+      if (response.status() !== 201 || typeof body.id !== "string") throw new Error("Landing dashboard was not created");
+      const state = join(dir, "storage-state.json");
+      await writeFile(state, JSON.stringify(await api.storageState()), { mode: 0o600 });
+      Object.assign(process.env, { PITOT_E2E_BASE_URL: base, PITOT_E2E_STORAGE_STATE: state,
+        PITOT_E2E_LANDING_DASHBOARD_ID: body.id, PITOT_E2E_PERFORMANCE_WINDOW: JSON.stringify(spec.time) });
+      if (signalCleanup === "startup") removeSignalHandlers();
+      return cleanup;
+    }
 
     const dashboard = { version: 1, name: "Readiness", time: { range: "3h", refresh: "off" }, panels: [
       { id: "count", title: "Count", viz: "stat", query: { from: "spans", measures: ["count()"] } },

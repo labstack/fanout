@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	path := flag.String("db", "data/control/fanout.sqlite", "SQLite control database path")
+	path := flag.String("db", "data/control/pitot.sqlite", "SQLite control database path")
 	flag.Parse()
 	if err := os.MkdirAll(filepath.Dir(*path), 0755); err != nil {
 		slog.Error("create control database directory", "err", err)

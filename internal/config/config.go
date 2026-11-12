@@ -287,8 +287,8 @@ func (c Config) ControlDir() string {
 }
 
 func (c Config) ControlSQLitePath() string {
-	// Stable on-disk name: opening a new file would hide existing control state.
-	return filepath.Join(c.ControlDir(), "fanout.sqlite")
+	// Startup migrates the previous filename before opening this control database.
+	return filepath.Join(c.ControlDir(), "pitot.sqlite")
 }
 
 // TLSEnabled reports whether a cert/key pair is configured. When true, HTTP

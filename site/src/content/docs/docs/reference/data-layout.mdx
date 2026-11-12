@@ -23,7 +23,7 @@ Everything Pitot persists lives under `PITOT_DATA_DIR` (`./data` by default,
 | `telemetry/COMPACTION.json` | Durable marker for an interrupted compaction swap. Present only while one is unresolved, and blocks startup until it is — see [troubleshoot](/docs/guides/troubleshooting) |
 | `query/catalog.duckdb` | Rebuildable DuckDB rollups and query state |
 | `query/tmp/` | Spill space for queries that exceed the memory cap |
-| `control/fanout.sqlite` | Users, sessions, dashboards, alert rules, agent history |
+| `control/pitot.sqlite` | Users, sessions, dashboards, alert rules, agent history |
 
 ## Why it is one unit
 
@@ -33,7 +33,7 @@ maps hashes to sorted span row ranges. The sidecar is verified against the
 Parquet rows by offline repair, while DuckDB rollups can be rebuilt. Keeping the
 complete data directory is the supported and fastest restore path.
 
-`control/fanout.sqlite` is independent of both in format but not in meaning: it
+`control/pitot.sqlite` is independent of both in format but not in meaning: it
 holds the dashboards and alert rules that refer to the telemetry, and the
 accounts that own them.
 

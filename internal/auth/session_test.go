@@ -62,8 +62,8 @@ func TestSessionCookieSecurityModes(t *testing.T) {
 		name, cookieName string
 		secure           bool
 	}{
-		{name: "secure", cookieName: "__Host-fanout_session", secure: true},
-		{name: "development", cookieName: "fanout_session", secure: false},
+		{name: "secure", cookieName: "__Host-pitot_session", secure: true},
+		{name: "development", cookieName: "pitot_session", secure: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sessions := NewBrowserSessions(db.DB, 12*time.Hour, 7*24*time.Hour, tc.secure)

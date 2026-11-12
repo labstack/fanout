@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # Measured on CI's 4-vCPU runner; each takes 5 to 7 minutes under -race.
-readonly isolated=(fanql query telemetry engine mcp api)
+readonly isolated=(pitotql query telemetry engine mcp api)
 
 cd "$(dirname "$0")/.."
 

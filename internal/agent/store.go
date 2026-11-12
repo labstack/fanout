@@ -363,7 +363,7 @@ func mergeThreadMessages(stored, incoming []agtypes.Message, runContext []agtype
 }
 
 // Keep this reserved key server-owned even when a client posts metadata.
-const diagnosticContextMetadata = "_fanout_diagnostic_context"
+const diagnosticContextMetadata = "_pitot_diagnostic_context"
 
 func withoutDiagnosticContext(message agtypes.Message) agtypes.Message {
 	metadata := agtypes.Metadata{}

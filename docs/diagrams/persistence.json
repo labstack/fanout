@@ -7,7 +7,7 @@
     "quality_profile": "showcase",
     "locale": "en",
     "repository": {
-      "url": "https://github.com/labstack/fanout.git",
+      "url": "https://github.com/labstack/pitot.git",
       "provider": "github",
       "link_mode": "web",
       "revision": "681d46ba8cf0a92ea85764bfa4736a8e2739a8c9"

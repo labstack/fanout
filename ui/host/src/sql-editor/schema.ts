@@ -4,7 +4,7 @@ export type TelemetrySchema = {
   sql_relations: Record<string, { description?: string; columns: SchemaColumn[] }>;
   services?: { value: string; count?: number }[];
   measures?: string[];
-  /** auto, then every bucket FanQL accepts, shortest first. */
+  /** auto, then every bucket PitotQL accepts, shortest first. */
   buckets?: string[];
 };
 

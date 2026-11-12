@@ -306,7 +306,7 @@ and 1024×768 using the toolbar.
 
 `Pages` uses the shipping route tree, shell, auth gate, query client, and screens
 with memory history. Explore, Logs, Traces, and Alerts have full-page stories
-in the same light/dark matrix. Explore includes FanQL fix-its and per-panel
+in the same light/dark matrix. Explore includes PitotQL fix-its and per-panel
 validation diagnostics in both editors. Dashboard and receipt states show invalid
 panels alongside successful siblings and a corrected save. Settings includes
 chat-disabled and token-creation states with a fictional `foi_` token.
@@ -347,10 +347,10 @@ Nested main landmarks, panel loading labels, Settings links and unnamed alert
 actions headers no longer need exceptions. Chromium validation must run on a host
 that permits the browser's Mach port registration.
 
-## FanQL performance checks
+## PitotQL performance checks
 
-The FanQL tests always enforce allocation ceilings and bounded parser/renderer
-work. Wall-clock acceptance is opt-in: run `just fanql-perf`, or set
-`PITOT_TEST_LATENCY=1` when running the FanQL tests through
+The PitotQL tests always enforce allocation ceilings and bounded parser/renderer
+work. Wall-clock acceptance is opt-in: run `just pitotql-perf`, or set
+`PITOT_TEST_LATENCY=1` when running the PitotQL tests through
 `scripts/with-duckdb.sh`. Use an uninstrumented build for timing; race builds
 still check deterministic work bounds but skip wall-clock assertions.

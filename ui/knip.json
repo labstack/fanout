@@ -10,7 +10,7 @@
     "host/e2e/specs/**/*.spec.ts!",
     "host/e2e/host/{main,record}.ts!",
     "host/e2e/host/server.mjs!",
-    "host/e2e/support/{app-server,app-teardown}.ts!"
+    "host/e2e/support/{app-server,app-teardown,landing-setup}.ts!"
   ],
   "project": [
     "host/src/**/*.{ts,tsx}!",

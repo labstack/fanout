@@ -397,7 +397,7 @@ func TestStatusRouteSuspensionBlocksSessionsAndSignIn(t *testing.T) {
 			t.Fatalf("suspended sign-in %s = %d: %s", tc.path, rec.Code, rec.Body.String())
 		}
 		for _, cookie := range rec.Result().Cookies() {
-			if cookie.Name == "fanout_session" && cookie.Value != "" {
+			if cookie.Name == "pitot_session" && cookie.Value != "" {
 				t.Fatal("suspended sign-in issued a session")
 			}
 		}

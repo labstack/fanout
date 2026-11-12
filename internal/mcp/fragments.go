@@ -14,31 +14,31 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/labstack/pitot/internal/fanql"
 	"github.com/labstack/pitot/internal/observability"
+	"github.com/labstack/pitot/internal/pitotql"
 	"github.com/labstack/pitot/internal/query"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type QueryTelemetryInput struct {
 	Panel     query.Panel            `json:"panel" jsonschema:"One v1 panel to display in the answer"`
-	Text      string                 `json:"text,omitempty" jsonschema:"FanQL text that becomes panel.query; prefer panel.query (structured) or panel.sql; see pitot://fanql/reference"`
+	Text      string                 `json:"text,omitempty" jsonschema:"PitotQL text that becomes panel.query; prefer panel.query (structured) or panel.sql; see pitot://pitotql/reference"`
 	Variables []query.Variable       `json:"variables,omitempty" jsonschema:"Optional v1 variable definitions used by this panel"`
 	Time      *query.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
 	Vars      map[string]query.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
 }
 
-type fanqlToolFailureOutput struct {
-	Error    fanql.Failure  `json:"error"`
-	Problems query.Problems `json:"problems,omitempty"`
+type pitotqlToolFailureOutput struct {
+	Error    pitotql.Failure `json:"error"`
+	Problems query.Problems  `json:"problems,omitempty"`
 }
 
-// QueryTelemetryOutput includes FanQL failures without changing preset fragments.
+// QueryTelemetryOutput includes PitotQL failures without changing preset fragments.
 type QueryTelemetryOutput struct {
 	*PanelFragment
-	Notices  []fanql.Notice `json:"notices,omitempty"`
-	Error    *fanql.Failure `json:"error,omitempty"`
-	Problems query.Problems `json:"problems,omitempty"`
+	Notices  []pitotql.Notice `json:"notices,omitempty"`
+	Error    *pitotql.Failure `json:"error,omitempty"`
+	Problems query.Problems   `json:"problems,omitempty"`
 }
 type FragmentView struct {
 	Kind string `json:"kind" jsonschema:"View kind: preset or query"`
@@ -85,7 +85,7 @@ func fragmentTool[In, Out any](server *Server, tool *mcp.Tool, handler mcp.ToolH
 			panic(err)
 		}
 		success.Properties["notices"] = output.Properties["notices"]
-		failure, err := jsonschema.For[fanqlToolFailureOutput](options)
+		failure, err := jsonschema.For[pitotqlToolFailureOutput](options)
 		if err != nil {
 			panic(err)
 		}
@@ -190,11 +190,11 @@ func (s *Server) queryTelemetry(ctx context.Context, _ *mcp.CallToolRequest, inp
 	if input.Text != "" && (input.Panel.Query != nil || input.Panel.SQL != "") {
 		return nil, QueryTelemetryOutput{}, guidanceError("invalid_input", "text cannot be combined with panel.query or panel.sql")
 	}
-	var notices []fanql.Notice
+	var notices []pitotql.Notice
 	if input.Text != "" {
-		compiled, problems := fanql.Compile(input.Text, fanql.Options{Viz: input.Panel.Viz, Variables: input.Variables})
+		compiled, problems := pitotql.Compile(input.Text, pitotql.Options{Viz: input.Panel.Viz, Variables: input.Variables})
 		if len(problems) != 0 {
-			return fanqlToolFailure(fanql.Failure{Code: "invalid_fanql", Message: "The query has problems."}, query.Diagnoses(problems))
+			return pitotqlToolFailure(pitotql.Failure{Code: "invalid_pitotql", Message: "The query has problems."}, query.Diagnoses(problems))
 		}
 		input.Panel.Query = &compiled.Query
 		notices = append(notices, compiled.Notices...)
@@ -792,7 +792,7 @@ func boundFragment(ctx context.Context, fragment PanelFragment) (PanelFragment, 
 	return out, nil
 }
 
-func fanqlToolFailure(problem fanql.Failure, problems query.Problems) (*mcp.CallToolResult, QueryTelemetryOutput, error) {
+func pitotqlToolFailure(problem pitotql.Failure, problems query.Problems) (*mcp.CallToolResult, QueryTelemetryOutput, error) {
 	result := summary(problem.Message)
 	result.IsError = true
 	return result, QueryTelemetryOutput{Error: &problem, Problems: problems}, nil

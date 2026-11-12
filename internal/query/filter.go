@@ -35,7 +35,7 @@ type Filter struct {
 	DisplayLiteral string `json:"-"`
 	DisplayParam   string `json:"-"`
 	NameInAnd      bool   `json:"-"`
-	// Negated is a whole entry that is one negated term as FanQL lowers it
+	// Negated is a whole entry that is one negated term as PitotQL lowers it
 	// (proposal 0004, section 0.7); on the traces viz it excludes traces.
 	Negated bool `json:"-"`
 }
@@ -328,10 +328,10 @@ func checkAttributeExpr(v *SQLExpr) error {
 }
 
 // negatedTerm reports whether an expression is one prefix-negated term in a
-// shape FanQL lowers it to and lifts back as one: k IS NULL (-k:*), NOT
+// shape PitotQL lowers it to and lifts back as one: k IS NULL (-k:*), NOT
 // coalesce((p), FALSE) over one leaf, or (k IS NULL OR q) where q is one
 // comparison, IN, BETWEEN, LIKE or negated contains that reads only k. SQL's
-// own k != v is not one, nor is a hand-written q that FanQL keeps raw.
+// own k != v is not one, nor is a hand-written q that PitotQL keeps raw.
 func negatedTerm(v *SQLExpr) bool {
 	if v == nil {
 		return false
@@ -358,7 +358,7 @@ func negatedTerm(v *SQLExpr) bool {
 	return field != "" && negatedLeaf(v.Children[1]) && readsOnly(v.Children[1], field)
 }
 
-// negatedLeaf reports whether q is one of the leaves FanQL writes after
+// negatedLeaf reports whether q is one of the leaves PitotQL writes after
 // k IS NULL OR in a negated term: a predicate on the field itself, or a
 // negated contains.
 func negatedLeaf(q *SQLExpr) bool {
@@ -715,7 +715,7 @@ func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
 		return "", "", ""
 	}
 	if node.Class == "FUNCTION" && node.Function == "contains" && len(node.Arguments) == 2 {
-		// FanQL free text and `~` lower to contains(lower(field), lower('text')).
+		// PitotQL free text and `~` lower to contains(lower(field), lower('text')).
 		if field := displayField(fieldText(unwrapLower(node.Arguments[0]))); field != "" {
 			if text := constantText(unwrapLower(node.Arguments[1])); text != "" {
 				return field, `containing "` + text + `"`, ""

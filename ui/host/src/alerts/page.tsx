@@ -15,10 +15,10 @@ import { formatValue, variables } from "./values";
 const stateTone: Record<string, "danger" | "warning" | "neutral"> = { firing: "danger", pending: "warning", resolved: "neutral" } as const;
 const when = (value?: string) => value ? exactTimestamp(value) : "—";
 
-/** The rollup variables a rule reads, as the FanQL source and measure that chart them. */
+/** The rollup variables a rule reads, as the PitotQL source and measure that chart them. */
 const charts: Record<string, string> = { error_rate: "spans | error_rate()", p95: "spans | p95(duration)", throughput: "spans | count()", log_count: "logs | count()" };
 
-/** A FanQL time series of what the rule watches, named by the first variable it reads. */
+/** A PitotQL time series of what the rule watches, named by the first variable it reads. */
 function ruleQuery(rule: Pick<Rule, "service" | "expression">): string {
   const watched = variables(rule.expression).map(name => name.replace(/_delta$/, "")).find(name => name in charts) ?? "throughput";
   const [source, measure] = charts[watched].split(" | ");

@@ -398,7 +398,7 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 		return caller.Err()
 	}
 	// Decide once before scheduling this batch's panels. A sibling waiting for
-	// the same limited panel slots is normal dashboard fanout, not evidence
+	// the same limited panel slots is normal dashboard concurrency, not evidence
 	// of pre-existing pressure. Keep this policy even if the queue drains
 	// before an admitted panel finishes; diagnosis uses its existing slot.
 	deferDiagnosis := e.admission.waiting() > 0
@@ -894,8 +894,8 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 		executionSQL := compiled.SQL
 		scanColumns := compiled.Columns
 		if compiled.ranking != nil {
-			executionSQL = executionSQL[:compiled.rankOffset] + `, (SELECT count(*) FROM candidates WHERE n < 20)::DOUBLE AS "_fanql_below_floor"` + executionSQL[compiled.rankOffset:]
-			scanColumns = append(append([]Column(nil), scanColumns...), Column{Name: "_fanql_below_floor", Type: "number"})
+			executionSQL = executionSQL[:compiled.rankOffset] + `, (SELECT count(*) FROM candidates WHERE n < 20)::DOUBLE AS "_pitotql_below_floor"` + executionSQL[compiled.rankOffset:]
+			scanColumns = append(append([]Column(nil), scanColumns...), Column{Name: "_pitotql_below_floor", Type: "number"})
 		}
 		rows, err := e.engine.QueryContext(ctx, executionSQL, compiled.Args...)
 		if err != nil {

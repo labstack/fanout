@@ -115,7 +115,7 @@ describe("acceptance evidence", () => {
     expect(report).toContain("S8");
     expect(report).toContain("holdout");
   });
-  it("rejects annotation fanout, missing themes, oversized frames and regressed intent", () => {
+  it("rejects annotation concurrency, missing themes, oversized frames and regressed intent", () => {
     const e = fixture();
     e.refreshes[0].annotation_calls = 20;
     e.refreshes[0].cells = 200001;

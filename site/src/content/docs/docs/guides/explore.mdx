@@ -1,7 +1,7 @@
 ---
 title: Query with Explore
-description: Run FanQL queries, search logs and traces, and save results to a dashboard.
-summary: FanQL queries, diagnostics, visualization choices and dashboard saving without an AI provider.
+description: Run PitotQL queries, search logs and traces, and save results to a dashboard.
+summary: PitotQL queries, diagnostics, visualization choices and dashboard saving without an AI provider.
 read_when:
   - You want to query telemetry without chat.
   - You want to save an Explore result or a log or trace search to a dashboard.
@@ -33,20 +33,20 @@ logs where service:checkout severity>=warn
 ```
 
 Use service names present in your telemetry. See the
-[FanQL reference](/docs/reference/fanql) for syntax, fields and functions.
+[PitotQL reference](/docs/reference/pitotql) for syntax, fields and functions.
 
 ## Use the Builder tab
 
 Select **Builder** to choose a source, measures, filters, grouping fields,
-time buckets and a row limit. **Query** and **Builder** edit the same FanQL
-query. Builder changes appear under **As FanQL**. Select **Run** to execute.
+time buckets and a row limit. **Query** and **Builder** edit the same PitotQL
+query. Builder changes appear under **As PitotQL**. Select **Run** to execute.
 Complex filters and measures remain as chips; edit them in **Query**.
 If the Query tab says the text is read-only, keep editing in Builder.
 
 ## Use the SQL tab
 
 Select **SQL** to write a separate statement. Switching tabs does not convert
-FanQL to SQL. Run one read-only `SELECT` with a time filter, for example:
+PitotQL to SQL. Run one read-only `SELECT` with a time filter, for example:
 
 ```sql
 SELECT service, count(*) AS spans
@@ -84,7 +84,7 @@ text before selecting one. The rewritten query appears in the editor and runs.
 
 ## Search Logs and Traces
 
-Open **Logs** or **Traces** in the sidebar. Their search bars accept FanQL filters
+Open **Logs** or **Traces** in the sidebar. Their search bars accept PitotQL filters
 only. Leave out the source, `where` and aggregation clauses.
 
 On Logs, enter:
@@ -105,7 +105,7 @@ to change the window and ordering.
 
 Trace results list traces with matching spans. The displayed root span can have
 different values from the span that matched; see
-[trace semantics](/docs/reference/fanql#visualization-and-trace-semantics).
+[trace semantics](/docs/reference/pitotql#visualization-and-trace-semantics).
 
 ## Save to a dashboard
 
@@ -119,8 +119,8 @@ See [dashboard controls](/docs/guides/dashboards) for further changes.
 
 ## Use HTTP or MCP
 
-The [HTTP API reference](/docs/reference/api) lists FanQL parse, format,
+The [HTTP API reference](/docs/reference/api) lists PitotQL parse, format,
 completion and reference routes, plus panel query and dashboard routes.
-Over MCP, [query_telemetry](/docs/reference/mcp#query_telemetry) accepts FanQL
+Over MCP, [query_telemetry](/docs/reference/mcp#query_telemetry) accepts PitotQL
 text with a panel. Use [create_dashboard](/docs/reference/mcp#create_dashboard)
 or [edit_dashboard](/docs/reference/mcp#edit_dashboard) to save panels.

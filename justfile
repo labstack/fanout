@@ -107,9 +107,10 @@ e2e-image-check:
 e2e-linux-baselines:
     docker run --rm --ipc=host -v "{{justfile_directory()}}:/work" -v /work/ui/host/node_modules -w /work mcr.microsoft.com/playwright:v1.64.1-noble@sha256:7852dc5a7d72f5fe458a597d690f6c42fbc8e9e26ddfa95f8e6ef552558d9bbf bash -euc 'npm install --global bun@1.4.2; cd ui/host; bun install --frozen-lockfile; cd ../..; node scripts/playwright-image-check.mjs; cd ui/host; bun run e2e --project visual --update-snapshots'
 
-# Refresh the README's light and dark System overview captures.
+# Refresh all six landing captures and export the app lockup as logo.svg.
 landing-captures:
-    PITOT_LANDING_BASE_URL="${PITOT_LANDING_BASE_URL:-}" PITOT_LANDING_SESSION_COOKIE="${PITOT_LANDING_SESSION_COOKIE:-}" PITOT_LANDING_CAPTURES=1 just e2e e2e/specs/app/landing-captures.spec.ts
+    bash scripts/with-duckdb.sh go build -o bin/pitot-e2eseed ./internal/cmd/e2eseed
+    PITOT_E2E_SEED_BINARY="{{justfile_directory()}}/bin/pitot-e2eseed" PITOT_LANDING_BASE_URL= PITOT_LANDING_SESSION_COOKIE= PITOT_LANDING_CAPTURES=1 just e2e e2e/specs/app/landing-captures.spec.ts --project app-1440-light --project app-1440-dark
 
 # CI publishes ghcr.io/labstack/pitot; this is for trying the image locally
 # without pushing anything.
@@ -163,7 +164,7 @@ db-migrate-create NAME:
     {{goose}} -dir internal/db/migrations create {{NAME}} sql
 
 # Apply migrations (development; production auto-applies on boot).
-db-migrate-apply DB="data/control/fanout.sqlite":
+db-migrate-apply DB="data/control/pitot.sqlite":
     go run ./internal/cmd/dbmigrate -db "{{DB}}"
 
 # ── Go quality ───────────────────────────────────────────────────────────────
@@ -195,8 +196,8 @@ test-race *ARGS='./...':
     bash scripts/with-duckdb.sh go test -race -gcflags=all=-d=checkptr=0 {{ARGS}}
 
 # Opt-in wall-clock acceptance; deterministic work bounds remain in test.
-fanql-perf:
-    PITOT_TEST_LATENCY=1 bash scripts/with-duckdb.sh go test ./internal/fanql -run TestLatencyBudgets -count=1
+pitotql-perf:
+    PITOT_TEST_LATENCY=1 bash scripts/with-duckdb.sh go test ./internal/pitotql -run TestLatencyBudgets -count=1
 
 # ── Browser quality ──────────────────────────────────────────────────────────
 

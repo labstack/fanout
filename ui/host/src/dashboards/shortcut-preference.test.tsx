@@ -22,7 +22,7 @@ it("persists disabled single-key shortcuts per viewer while visible controls rem
     await draw("alice", 2); await press(); expect(refresh).toHaveBeenCalledOnce();
     await act(async () => el.querySelectorAll("button")[1].click()); expect(refresh).toHaveBeenCalledTimes(2);
     await draw("bob", 3); await press(); expect(refresh).toHaveBeenCalledTimes(3);
-    expect(localStorage.getItem("fanout:single-key-shortcuts:alice")).toBe("off");
-    expect(localStorage.getItem("fanout:single-key-shortcuts:bob")).toBeNull();
+    expect(localStorage.getItem("pitot:single-key-shortcuts:alice")).toBe("off");
+    expect(localStorage.getItem("pitot:single-key-shortcuts:bob")).toBeNull();
   } finally { await act(async () => root.unmount()); el.remove(); localStorage.clear(); }
 });

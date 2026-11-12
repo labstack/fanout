@@ -11,8 +11,8 @@ describe("setup safety and readiness", () => {
   it("redacts credentials before printing the last fifty diagnostic lines", () => {
     const lines = Array.from({ length: 60 }, (_, i) => `line ${i}`);
     const tokens = ["foi_", "foa_", "for_", "foc_"].map((prefix) => prefix + "A".repeat(43));
-    lines.push(`${tokens.join(" ")} setup_token=secret%20token&next=/ cookie: fanout_session=session-secret; other=second-secret`);
-    lines.push('Set-Cookie: fanout_session=response-secret; Path=/; HttpOnly');
+    lines.push(`${tokens.join(" ")} setup_token=secret%20token&next=/ cookie: pitot_session=session-secret; other=second-secret`);
+    lines.push('Set-Cookie: pitot_session=response-secret; Path=/; HttpOnly');
     const tail = diagnosticTail(lines.join("\n"));
     expect(tail.split("\n")).toHaveLength(50);
     expect(tail).toContain("line 59");

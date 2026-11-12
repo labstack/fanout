@@ -346,9 +346,9 @@ func classifyNonSCIMRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyCapability, capability: ManageAlerts}, unsafe
 	case path == "/api/queries/run" || path == "/api/queries/exemplars" || path == "/api/queries/variables/resolve" || path == "/api/annotations/query":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, method == http.MethodPost
-	case path == "/api/fanql/parse" || path == "/api/fanql/format" || path == "/api/fanql/complete":
+	case path == "/api/pitotql/parse" || path == "/api/pitotql/format" || path == "/api/pitotql/complete" || path == previousQueryPath("parse") || path == previousQueryPath("format") || path == previousQueryPath("complete"):
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, method == http.MethodPost
-	case path == "/api/fanql/reference" || path == "/api/telemetry/schema":
+	case path == "/api/pitotql/reference" || path == previousQueryPath("reference") || path == "/api/telemetry/schema":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
 	case path == "/api/dashboards" || strings.HasPrefix(path, "/api/dashboards/"):
 		return routePolicy{kind: routePolicyCapability, capability: ManageOwnDashboards}, read || unsafe

@@ -65,7 +65,7 @@ func Shape(q *Spec, viz string, vars map[string]Variable, prepared ...[]Measure)
 func CompatibleVizzes(q *Spec, vars map[string]Variable, prepared ...[]Measure) []VizCompat {
 	out := []VizCompat{}
 	for _, viz := range vizOrder {
-		// Text and fixed rollup scopes are not FanQL query visualization targets.
+		// Text and fixed rollup scopes are not PitotQL query visualization targets.
 		if viz == "text" || viz == "health" || viz == "service_map" {
 			continue
 		}

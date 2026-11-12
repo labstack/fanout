@@ -176,7 +176,7 @@ describe("Builder", () => {
     expect(onInvalid).toHaveBeenLastCalledWith(false);
   });
 
-  it("shows entries it cannot edit as FanQL, also when a source switch removes them", async () => {
+  it("shows entries it cannot edit as PitotQL, also when a source switch removes them", async () => {
     const labels = { "contains(lower(operation), lower('se'))": "se", "status = 'STATUS_CODE_ERROR'": "status:error" };
     const { ui, choose } = await render({ from: "spans", measures: ["count()"], where: ["contains(lower(operation), lower('se'))", "status = 'STATUS_CODE_ERROR'"] }, labels);
     expect(ui.getByText("se")).toBeTruthy();

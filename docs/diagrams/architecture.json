@@ -7,10 +7,10 @@
     "quality_profile": "showcase",
     "locale": "en",
     "repository": {
-      "url": "https://github.com/labstack/fanout.git",
+      "url": "https://github.com/labstack/pitot.git",
       "provider": "github",
       "link_mode": "web",
-      "revision": "681d46ba8cf0a92ea85764bfa4736a8e2739a8c9"
+      "revision": "f897cc132aa38926716de4c61e9bf2d0dff79aa9"
     }
   },
   "components": [
@@ -55,9 +55,7 @@
           "end_line": 30
         },
         {
-          "path": "cmd/fanout/main.go",
-          "line": 390,
-          "end_line": 393
+          "path": "cmd/pitot/main.go"
         }
       ]
     },
@@ -97,9 +95,7 @@
       ],
       "sources": [
         {
-          "path": "cmd/fanout/main.go",
-          "line": 357,
-          "end_line": 369
+          "path": "cmd/pitot/main.go"
         }
       ]
     },
@@ -128,9 +124,7 @@
           "end_line": 89
         },
         {
-          "path": "cmd/fanout/main.go",
-          "line": 207,
-          "end_line": 209
+          "path": "cmd/pitot/main.go"
         }
       ]
     },
@@ -149,14 +143,10 @@
       ],
       "sources": [
         {
-          "path": "cmd/fanout/main.go",
-          "line": 186,
-          "end_line": 190
+          "path": "cmd/pitot/main.go"
         },
         {
-          "path": "cmd/fanout/main.go",
-          "line": 299,
-          "end_line": 299
+          "path": "cmd/pitot/main.go"
         },
         {
           "path": "internal/api/oidc.go",
@@ -180,9 +170,7 @@
       ],
       "sources": [
         {
-          "path": "cmd/fanout/main.go",
-          "line": 372,
-          "end_line": 385
+          "path": "cmd/pitot/main.go"
         },
         {
           "path": "internal/agent/runtime.go",
@@ -206,9 +194,7 @@
       ],
       "sources": [
         {
-          "path": "cmd/fanout/main.go",
-          "line": 356,
-          "end_line": 371
+          "path": "cmd/pitot/main.go"
         },
         {
           "path": "internal/mcp/server.go",
@@ -258,9 +244,7 @@
       ],
       "sources": [
         {
-          "path": "cmd/fanout/main.go",
-          "line": 277,
-          "end_line": 284
+          "path": "cmd/pitot/main.go"
         }
       ]
     },
@@ -279,19 +263,13 @@
       ],
       "sources": [
         {
-          "path": "internal/query/duck.go",
-          "line": 240,
-          "end_line": 244
+          "path": "internal/query/exec.go"
         },
         {
-          "path": "internal/query/duck.go",
-          "line": 505,
-          "end_line": 522
+          "path": "internal/query/exec.go"
         },
         {
-          "path": "internal/query/duck.go",
-          "line": 627,
-          "end_line": 653
+          "path": "internal/query/exec.go"
         }
       ]
     },
@@ -320,9 +298,7 @@
           "end_line": 291
         },
         {
-          "path": "cmd/fanout/main.go",
-          "line": 161,
-          "end_line": 162
+          "path": "cmd/pitot/main.go"
         }
       ]
     },
@@ -341,9 +317,7 @@
       ],
       "sources": [
         {
-          "path": "cmd/fanout/main.go",
-          "line": 173,
-          "end_line": 183
+          "path": "cmd/pitot/main.go"
         },
         {
           "path": "internal/alert/engine.go",
@@ -445,9 +419,7 @@
           "end_line": 30
         },
         {
-          "path": "cmd/fanout/main.go",
-          "line": 165,
-          "end_line": 170
+          "path": "cmd/pitot/main.go"
         }
       ]
     }

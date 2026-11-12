@@ -40,7 +40,7 @@ import (
 
 	"github.com/labstack/pitot/internal/alert"
 	"github.com/labstack/pitot/internal/config"
-	"github.com/labstack/pitot/internal/fanql"
+	"github.com/labstack/pitot/internal/pitotql"
 )
 
 func main() {
@@ -117,7 +117,7 @@ func run(source, alertSource, routeDirs, outDir, envExample string, check bool) 
 		return err
 	}
 	pages["mcp.mdx"] = toolsPage
-	pages["fanql.md"] = []byte("---\ntitle: \"FanQL\"\ndescription: \"The preview text syntax for structured telemetry queries.\"\nsummary: \"FanQL syntax, fields, functions, variables, null semantics and examples, generated from query registries.\"\nread_when:\n  - \"You are writing a FanQL query and need syntax or field names.\"\nstatus: preview\ngenerated: true\n---\n\n" + fanql.Reference())
+	pages["pitotql.md"] = []byte("---\ntitle: \"PitotQL\"\ndescription: \"The preview text syntax for structured telemetry queries.\"\nsummary: \"PitotQL syntax, fields, functions, variables, null semantics and examples, generated from query registries.\"\nread_when:\n  - \"You are writing a PitotQL query and need syntax or field names.\"\nstatus: preview\ngenerated: true\n---\n\n" + pitotql.Reference())
 
 	outputs := map[string][]byte{envExample: renderEnvironment(fields)}
 	for name, body := range pages {
@@ -555,7 +555,7 @@ func renderPage(name string, page groupPage, fields []field) []byte {
 
 	b.WriteString("Every setting below is read once at startup and requires a restart to change.\n")
 	b.WriteString("Built-in defaults are overridden by nonempty environment values.\n")
-	b.WriteString("For the first Pitot alpha, unset `PITOT_` variables accept `FANOUT_` equivalents with a names-only deprecation warning. Explicitly empty primary variables block fallback.\n")
+	b.WriteString("The pre-rename environment variable prefix is no longer read. Use `PITOT_` settings.\n")
 	b.WriteString("Unknown `PITOT_` names fail startup; platform-injected service names are tolerated.\n")
 	b.WriteString("Vendor credentials and endpoints keep the vendor's documented names.\n\n")
 	if name == "ai" {

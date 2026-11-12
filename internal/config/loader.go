@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"reflect"
 	"sort"
@@ -49,7 +48,7 @@ func Load(options LoadOptions) (Config, error) {
 	if environ == nil {
 		environ = os.Environ()
 	}
-	values, err := environmentValues(ResolveEnvironment(environ), known)
+	values, err := environmentValues(environ, known)
 	if err != nil {
 		return Config{}, err
 	}
@@ -96,42 +95,6 @@ func Load(options LoadOptions) (Config, error) {
 		return Config{}, fmt.Errorf("validate configuration: %w", err)
 	}
 	return cfg, nil
-}
-
-// ResolveEnvironment provides the one-alpha-release legacy environment bridge.
-// Presence, including an empty value, takes precedence over the old spelling.
-// It reports only names, never values or secret file paths.
-func ResolveEnvironment(environ []string) []string {
-	present := make(map[string]bool, len(environ))
-	for _, assignment := range environ {
-		name, _, _ := strings.Cut(assignment, "=")
-		present[name] = true
-	}
-	resolved := make([]string, 0, len(environ))
-	var used []string
-	for _, assignment := range environ {
-		name, value, found := strings.Cut(assignment, "=")
-		if strings.HasPrefix(name, "FANOUT_") {
-			primary := "PITOT_" + strings.TrimPrefix(name, "FANOUT_")
-			if present[primary] {
-				continue
-			}
-			if value != "" && !isPlatformInjectedEnvironment(primary) {
-				used = append(used, name)
-			}
-			name = primary
-		}
-		if found {
-			resolved = append(resolved, name+"="+value)
-		} else {
-			resolved = append(resolved, name)
-		}
-	}
-	if len(used) > 0 {
-		sort.Strings(used)
-		slog.Warn("deprecated environment variables; use PITOT_ equivalents before the next alpha release", "names", strings.Join(used, ", "))
-	}
-	return resolved
 }
 
 func configFieldSpecs() ([]fieldSpec, error) {

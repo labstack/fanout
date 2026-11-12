@@ -12,7 +12,7 @@ generated: true
 
 Every setting below is read once at startup and requires a restart to change.
 Built-in defaults are overridden by nonempty environment values.
-For the first Pitot alpha, unset `PITOT_` variables accept `FANOUT_` equivalents with a names-only deprecation warning. Explicitly empty primary variables block fallback.
+The pre-rename environment variable prefix is no longer read. Use `PITOT_` settings.
 Unknown `PITOT_` names fail startup; platform-injected service names are tolerated.
 Vendor credentials and endpoints keep the vendor's documented names.
 

@@ -7,18 +7,18 @@ import (
 	"testing"
 
 	"github.com/labstack/pitot/internal/config"
-	"github.com/labstack/pitot/internal/fanql"
+	"github.com/labstack/pitot/internal/pitotql"
 )
 
 const configSource = "../../internal/config/config.go"
 
-func TestDocgenWritesFanQLReference(t *testing.T) {
+func TestDocgenWritesPitotQLReference(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "reference")
 	if err := run(configSource, "../../internal/alert/types.go", strings.Join(routeDirs, ","), out, filepath.Join(dir, ".env.example"), false); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(out, "fanql.md"))
+	raw, err := os.ReadFile(filepath.Join(out, "pitotql.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestDocgenWritesFanQLReference(t *testing.T) {
 		t.Fatal("missing site front matter")
 	}
 	_, content, ok := strings.Cut(page, "\n---\n\n")
-	if !ok || content != fanql.Reference() {
+	if !ok || content != pitotql.Reference() {
 		t.Fatalf("page content differs from the API/MCP reference: %q", page)
 	}
 }

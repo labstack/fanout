@@ -27,7 +27,7 @@ export function printWhere(condition: Condition, variables: readonly string[] = 
   return `${condition.field} ${condition.op} ${value}`;
 }
 
-// FanQL's duration units, in milliseconds.
+// PitotQL's duration units, in milliseconds.
 const units: Record<string, number> = { h: 3_600_000, m: 60_000, s: 1000, ms: 1, us: 0.001 };
 const durationPattern = /^(\d+(?:\.\d+)?)\s*(h|m|s|ms|us)$/i;
 // Products such as 1.1 * 1000 carry binary noise; twelve digits is far finer than any threshold.
@@ -41,7 +41,7 @@ export function durationMs(text: string): number | undefined {
   return match ? exact(Number(match[1]) * units[match[2].toLowerCase()]) : undefined;
 }
 
-/** Milliseconds in the largest unit that keeps them exact, as FanQL prints a duration. */
+/** Milliseconds in the largest unit that keeps them exact, as PitotQL prints a duration. */
 export function durationText(ms: number): string {
   for (const [unit, size] of Object.entries(units)) {
     if (ms >= size && exact(exact(ms / size) * size) === ms) return `${exact(ms / size)}${unit}`;
